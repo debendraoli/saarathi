@@ -1,0 +1,17 @@
+# Rust
+/backend/target/
+**/*.rs.bk
+Cargo.lock.orig
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+.idea/
+*.swp
+
+# Local data volumes
+/backend/.data/
