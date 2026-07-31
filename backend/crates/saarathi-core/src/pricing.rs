@@ -57,6 +57,14 @@ fn clamp(value: Decimal, min: Decimal, max: Decimal) -> Decimal {
     value.max(min).min(max)
 }
 
+/// The absolute legal maximum fare for a trip: the per-km cap × billable
+/// distance × the +20% surge ceiling. Used as the upper bound for fare
+/// bargaining — a negotiated fare may never exceed this.
+pub fn legal_ceiling(vehicle: VehicleClass, distance_km: Decimal) -> Decimal {
+    let billable = distance_km.max(MIN_DISTANCE_KM);
+    (billable * vehicle.per_km_cap() * MAX_SURGE_MULTIPLIER).round_dp(2)
+}
+
 /// Compute a legally-safe fare quote.
 ///
 /// `distance_km` is the routed trip distance. `dynamic_multiplier` is the raw

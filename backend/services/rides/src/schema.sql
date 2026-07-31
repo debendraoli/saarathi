@@ -239,3 +239,35 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at DESC);
+
+-- Driver subscription passes ("unlimited for a period" — keep 100% of fares).
+-- The fair-cap reconciliation refunds any driver who paid more than the 10% cap.
+CREATE TABLE IF NOT EXISTS subscription_passes (
+    id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    driver_id      uuid        NOT NULL,
+    plan           text        NOT NULL,
+    price          numeric     NOT NULL,
+    starts_at      timestamptz NOT NULL DEFAULT now(),
+    ends_at        timestamptz NOT NULL,
+    status         text        NOT NULL DEFAULT 'active',   -- active | expired | reconciled
+    fair_cap_refund numeric    NOT NULL DEFAULT 0,
+    created_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS subscription_passes_driver_idx ON subscription_passes (driver_id, ends_at DESC);
+
+-- Fare bargaining record (algorithmic anchor + the bounded, legal agreed fare).
+CREATE TABLE IF NOT EXISTS fare_negotiations (
+    id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id      uuid        NOT NULL,
+    algo_fare    numeric     NOT NULL,
+    floor        numeric     NOT NULL,
+    ceiling      numeric     NOT NULL,
+    offered_fare numeric     NOT NULL,
+    agreed_fare  numeric     NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS fare_negotiations_trip_idx ON fare_negotiations (trip_id);
+
+-- Top-ups can fund a rider prepaid balance or a driver credit balance.
+ALTER TABLE topup_intents ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'rider';
+

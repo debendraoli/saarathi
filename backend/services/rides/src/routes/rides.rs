@@ -51,6 +51,9 @@ struct RideRequest {
     /// 'cash' (default) or 'wallet' (pay from prepaid credits).
     #[serde(default)]
     payment_method: Option<String>,
+    /// Bounded fare bargaining: a rider's proposed fare (clamped to the legal band).
+    #[serde(default)]
+    offered_fare: Option<Decimal>,
 }
 
 async fn estimate(
@@ -92,12 +95,33 @@ async fn create(
         ));
     }
 
+    // Bargaining: clamp the rider's proposed fare to [floor, legal ceiling] and
+    // recompute the split on the agreed amount (commission still capped at 10%).
+    let (gross_fare, commission, accident_fund, driver_payout, final_fare, agreed) =
+        if let Some(offered) = body.offered_fare {
+            let agreed = offered.max(est.fare_floor).min(est.fare_ceiling);
+            let commission = (agreed * st.config.commission_rate).round_dp(2);
+            let fund = (agreed * Decimal::new(1, 2)).round_dp(2);
+            let payout = agreed - commission - fund;
+            let final_fare = (agreed - est.discount_amount).max(Decimal::ZERO);
+            (agreed, commission, fund, payout, final_fare, Some(agreed))
+        } else {
+            (
+                est.gross_fare,
+                est.commission,
+                est.accident_fund,
+                est.driver_payout,
+                est.final_fare,
+                None,
+            )
+        };
+
     let mut tx = st.db.begin().await?;
 
     // Prepaid: a wallet-paid trip requires enough rider credits up front.
     if method == "wallet" {
         let balance = crate::payments::rider_balance(&st.db, claims.sub).await?;
-        if balance < est.final_fare {
+        if balance < final_fare {
             return Err(AppError::BadRequest(
                 "insufficient credits for this trip".into(),
             ));
@@ -141,19 +165,35 @@ async fn create(
     .bind(body.dest.lng)
     .bind(est.distance_km)
     .bind(est.duration_secs)
-    .bind(est.gross_fare)
+    .bind(gross_fare)
     .bind(&est.discount_code)
     .bind(est.discount_amount)
-    .bind(est.final_fare)
-    .bind(est.commission)
-    .bind(est.accident_fund)
-    .bind(est.driver_payout)
+    .bind(final_fare)
+    .bind(commission)
+    .bind(accident_fund)
+    .bind(driver_payout)
     .bind(method)
     .bind(serde_json::to_value(&body.stops).unwrap_or_else(|_| serde_json::json!([])))
     .fetch_one(&mut *tx)
     .await?;
 
     tx.commit().await?;
+
+    // Record the bargaining outcome (anchor + bounded agreed fare).
+    if let Some(agreed) = agreed {
+        let _ = sqlx::query(
+            "INSERT INTO fare_negotiations (trip_id, algo_fare, floor, ceiling, offered_fare, agreed_fare) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(trip.id)
+        .bind(est.gross_fare)
+        .bind(est.fare_floor)
+        .bind(est.fare_ceiling)
+        .bind(body.offered_fare.unwrap_or(agreed))
+        .bind(agreed)
+        .execute(&st.db)
+        .await;
+    }
 
     // Kick dispatch immediately (the background loop is the safety net).
     tokio::spawn({
@@ -239,15 +279,29 @@ async fn update_status(
     // On first completion, append the immutable ledger entry + settle the wallet.
     if body.status == "completed" && m.status != "completed" {
         let is_wallet = m.payment_method != "cash";
+        // A driver on an active subscription pass pays 0% commission (keeps 100%,
+        // minus the legally-mandatory 1% accident fund).
+        let (commission, driver_payout) = match m.driver_id {
+            Some(did) if crate::payments::has_active_pass(&mut tx, did).await? => {
+                (Decimal::ZERO, m.gross_fare - m.accident_fund)
+            }
+            _ => (m.commission, m.driver_payout),
+        };
+        sqlx::query("UPDATE trips SET commission = $2, driver_payout = $3 WHERE id = $1")
+            .bind(id)
+            .bind(commission)
+            .bind(driver_payout)
+            .execute(&mut *tx)
+            .await?;
         crate::ledger::append(
             &mut tx,
             crate::ledger::NewEntry {
                 trip_id: id,
                 driver_id: m.driver_id,
                 gross: m.gross_fare,
-                commission: m.commission,
+                commission,
                 accident_fund: m.accident_fund,
-                driver_payout: m.driver_payout,
+                driver_payout,
                 payment_method: m.payment_method.clone(),
             },
         )

@@ -38,6 +38,9 @@ pub struct Estimate {
     pub commission: Decimal,
     pub accident_fund: Decimal,
     pub driver_payout: Decimal,
+    /// Bounded bargaining band: a rider may propose any fare in [floor, ceiling].
+    pub fare_floor: Decimal,
+    pub fare_ceiling: Decimal,
     /// Feedback when a promo code was supplied but could not be applied.
     pub note: Option<String>,
     pub currency: &'static str,
@@ -103,6 +106,11 @@ pub async fn estimate(
 
     let final_fare = (gross - discount_amount).max(Decimal::ZERO);
 
+    // Bargaining band: down to a configured fraction of the algorithmic fare,
+    // up to the absolute legal ceiling (per-km cap × +20% surge).
+    let fare_ceiling = saarathi_core::pricing::legal_ceiling(vclass, route.distance_km);
+    let fare_floor = (gross * st.config.bargain_floor_ratio).round_dp(2);
+
     Ok((
         Estimate {
             vehicle_class: vehicle_class.to_string(),
@@ -116,6 +124,8 @@ pub async fn estimate(
             commission: quote.commission.amount(),
             accident_fund: quote.accident_fund.amount(),
             driver_payout: quote.driver_payout.amount(),
+            fare_floor,
+            fare_ceiling,
             note,
             currency: "NPR",
         },

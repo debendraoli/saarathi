@@ -93,30 +93,32 @@ async fn confirm_topup(
     Json(body): Json<ConfirmRequest>,
 ) -> AppResult<Json<Value>> {
     let mut tx = st.db.begin().await?;
-    let intent: Option<(Uuid, Decimal, String)> = sqlx::query_as(
-        "SELECT user_id, amount, status FROM topup_intents WHERE reference = $1 FOR UPDATE",
+    let intent: Option<(Uuid, Decimal, String, String)> = sqlx::query_as(
+        "SELECT user_id, amount, status, kind FROM topup_intents WHERE reference = $1 FOR UPDATE",
     )
     .bind(&body.reference)
     .fetch_optional(&mut *tx)
     .await?;
-    let (user_id, amount, status) = intent.ok_or(AppError::NotFound)?;
+    let (user_id, amount, status, kind) = intent.ok_or(AppError::NotFound)?;
 
     if status == "confirmed" {
-        let bal = payments::rider_balance(&st.db, user_id).await?;
-        return Ok(Json(
-            json!({ "confirmed": true, "balance": bal, "idempotent": true }),
-        ));
+        return Ok(Json(json!({ "confirmed": true, "idempotent": true })));
     }
 
-    let balance = payments::credit_rider(
-        &mut tx,
-        user_id,
-        amount,
-        "topup",
-        Some(&body.reference),
-        None,
-    )
-    .await?;
+    // Credit the right account (rider prepaid balance or driver credit balance).
+    let balance = if kind == "driver" {
+        payments::credit_driver(&mut tx, user_id, amount, "topup", Some(&body.reference)).await?
+    } else {
+        payments::credit_rider(
+            &mut tx,
+            user_id,
+            amount,
+            "topup",
+            Some(&body.reference),
+            None,
+        )
+        .await?
+    };
     sqlx::query(
         "UPDATE topup_intents SET status = 'confirmed', confirmed_at = now() WHERE reference = $1",
     )

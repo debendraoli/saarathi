@@ -65,6 +65,20 @@ j -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $RTOKEN" \
   | jq -e '.gross_fare and .final_fare and .distance_km' >/dev/null
 echo "  estimate ok"
 
+step "bounded fare bargaining"
+EBODY='{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler"}'
+EST=$(j -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d "$EBODY")
+ALGO=$(echo "$EST" | jq -r '.gross_fare')
+FLOOR=$(echo "$EST" | jq -r '.fare_floor')
+CEIL=$(echo "$EST" | jq -r '.fare_ceiling')
+BTRIP=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" -H 'content-type: application/json' \
+  -d "{\"origin\":{\"lat\":28.0336,\"lng\":82.4836},\"dest\":{\"lat\":28.0450,\"lng\":82.4970},\"vehicle_class\":\"two_wheeler\",\"payment_method\":\"cash\",\"offered_fare\":$FLOOR}")
+AGREED=$(echo "$BTRIP" | jq -r '.gross_fare')
+awk -v a="$AGREED" -v f="$FLOOR" 'BEGIN{exit !(a+0==f+0)}' \
+  || { echo "  bargain not applied ($AGREED != $FLOOR)"; exit 1; }
+echo "  algo=$ALGO  band=[$FLOOR, $CEIL]  agreed=$AGREED"
+
 step "rider settings + saved places + recent searches"
 j -X PUT "$API/v1/me/preferences" -H "authorization: Bearer $RTOKEN" \
   -H 'content-type: application/json' -d '{"default_payment_method":"wallet","theme":"dark"}' >/dev/null
@@ -173,5 +187,40 @@ step "rider ride history"
 HIST=$(j "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" | jq 'length')
 [ "$HIST" -ge 1 ] || { echo "  no history"; exit 1; }
 echo "  rider history: $HIST trip(s) — can re-request from any"
+
+step "driver credits + subscription pass (0% commission)"
+DREF=$(j -X POST "$RIDES/v1/driver/credits/topup" -H "authorization: Bearer $DTOKEN" \
+  -H 'content-type: application/json' -d '{"amount":1000}' | jq -r '.reference')
+j -X POST "$RIDES/v1/credits/topup/confirm" -H 'content-type: application/json' \
+  -d "{\"reference\":\"$DREF\"}" >/dev/null
+DC0=$(j "$RIDES/v1/driver/credits" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
+j -X POST "$RIDES/v1/driver/subscription" -H "authorization: Bearer $DTOKEN" >/dev/null
+ACTIVE=$(j "$RIDES/v1/driver/subscription" -H "authorization: Bearer $DTOKEN" | jq -r '.active')
+DC1=$(j "$RIDES/v1/driver/credits" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
+[ "$ACTIVE" = "true" ] || { echo "  pass not active"; exit 1; }
+echo "  driver credits $DC0 → $DC1; pass active=$ACTIVE"
+
+# A trip completed while the pass is active takes 0% commission.
+j -X POST "$RIDES/v1/driver/heartbeat" -H "authorization: Bearer $DTOKEN" \
+  -H 'content-type: application/json' -d '{"lat":28.0336,"lng":82.4836,"job_types":["ride"]}' >/dev/null
+T2=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d "$BODY" | jq -r '.id')
+OF=""
+for _ in $(seq 1 15); do
+  OF=$(j "$RIDES/v1/driver/offers" -H "authorization: Bearer $DTOKEN" \
+    | jq -r --arg t "$T2" '.[] | select(.trip_id==$t) | .trip_id' | head -n1)
+  [ -n "$OF" ] && break; sleep 1
+done
+[ -n "$OF" ] || { echo "  no offer for pass trip"; exit 1; }
+j -X POST "$RIDES/v1/rides/$T2/offer/accept" -H "authorization: Bearer $DTOKEN" >/dev/null
+for s in arriving in_progress completed; do
+  j -X POST "$RIDES/v1/rides/$T2/status" -H "authorization: Bearer $DTOKEN" \
+    -H 'content-type: application/json' -d "{\"status\":\"$s\"}" >/dev/null
+done
+COMM=$(j "$RIDES/v1/admin/ledger" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq -r --arg t "$T2" '.[] | select(.trip_id==$t) | .commission')
+awk -v c="$COMM" 'BEGIN{exit !(c+0==0)}' \
+  || { echo "  subscription commission not 0 ($COMM)"; exit 1; }
+echo "  pass trip commission = NPR $COMM (driver kept 100% minus fund)"
 
 printf '\n✅ SMOKE OK\n'

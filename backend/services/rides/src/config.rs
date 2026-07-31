@@ -29,6 +29,11 @@ pub struct Config {
     pub dispatch_max_radius_km: f64,
     /// How stale a driver heartbeat may be before we treat them as offline (secs).
     pub presence_ttl_secs: i64,
+    /// Lowest fraction of the algorithmic fare a rider may bargain down to.
+    pub bargain_floor_ratio: Decimal,
+    /// Weekly driver subscription pass (unlimited rides, keep 100% of fares).
+    pub subscription_weekly_price: Decimal,
+    pub subscription_weekly_days: i64,
 }
 
 impl Config {
@@ -59,6 +64,9 @@ impl Config {
             dispatch_radius_km: float_env("DISPATCH_RADIUS_KM", 2.0),
             dispatch_max_radius_km: float_env("DISPATCH_MAX_RADIUS_KM", 8.0),
             presence_ttl_secs: int_env("DISPATCH_PRESENCE_TTL_SECS", 60),
+            bargain_floor_ratio: dec_env("BARGAIN_FLOOR_RATIO", "0.5"),
+            subscription_weekly_price: dec_env("SUBSCRIPTION_WEEKLY_PRICE", "500"),
+            subscription_weekly_days: int_env("SUBSCRIPTION_WEEKLY_DAYS", 7),
         })
     }
 }
