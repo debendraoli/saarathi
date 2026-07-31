@@ -53,8 +53,9 @@ backend/           # Rust Cargo workspace (monorepo)
   services/        # Coarse-grained services
     auth/          # Identity + KYC + location: OTP/JWT, driver verification, PostGIS
       migrations/  # sqlx SQL migrations
+    rides/         # Trips, fare estimate (routing), campaigns, realtime WS + WebRTC signaling
   docker-compose.yml  # Local dev infra: Postgres+PostGIS, Redis, NATS
-dashboard/         # Next.js staff dashboard (driver verification, RBAC-gated)
+dashboard/         # Next.js staff dashboard (driver verification, campaigns, RBAC-gated)
 ```
 
 ## Running locally
@@ -64,6 +65,7 @@ dashboard/         # Next.js staff dashboard (driver verification, RBAC-gated)
 cd backend && cp .env.example .env   # then set JWT_SECRET (openssl rand -hex 32)
 docker compose up -d
 cargo run -p saarathi-auth           # :8081, runs migrations + seeds a dev super-admin
+cargo run -p saarathi-rides          # :8082, applies its schema; fare/trip/campaign/WS APIs
 
 # Dashboard
 cd dashboard && cp .env.local.example .env.local && npm install

@@ -190,3 +190,66 @@ export const api = {
     return URL.createObjectURL(blob);
   },
 };
+
+// ── Rides service (campaigns) ────────────────────────────────────────────────
+
+const RIDES_BASE = process.env.NEXT_PUBLIC_RIDES_API_BASE ?? "http://localhost:8082";
+
+export interface Campaign {
+  id: string;
+  code: string;
+  title: string;
+  audience: "rider" | "driver";
+  kind: "percent" | "flat";
+  value: string;
+  min_fare: string;
+  max_discount: string | null;
+  city: string | null;
+  vehicle_class: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  active: boolean;
+  usage_limit: number | null;
+  used_count: number;
+  created_at: string;
+}
+
+export interface NewCampaign {
+  code: string;
+  title: string;
+  audience: "rider" | "driver";
+  kind: "percent" | "flat";
+  value: number;
+  min_fare?: number;
+  max_discount?: number | null;
+  vehicle_class?: string | null;
+  usage_limit?: number | null;
+}
+
+async function ridesRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (auth.access) headers.set("Authorization", `Bearer ${auth.access}`);
+  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const res = await fetch(`${RIDES_BASE}${path}`, { ...init, headers });
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.error) message = body.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  return (await res.json()) as T;
+}
+
+export const rides = {
+  listCampaigns: () => ridesRequest<Campaign[]>("/v1/admin/campaigns"),
+
+  createCampaign: (c: NewCampaign) =>
+    ridesRequest<Campaign>("/v1/admin/campaigns", { method: "POST", body: JSON.stringify(c) }),
+
+  deactivateCampaign: (id: string) =>
+    ridesRequest<{ ok: boolean }>(`/v1/admin/campaigns/${id}/deactivate`, { method: "POST" }),
+};

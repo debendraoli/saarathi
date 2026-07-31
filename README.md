@@ -15,6 +15,7 @@ docker compose up -d        # Postgres+PostGIS, Redis, NATS
 cargo build
 cargo test
 cargo run -p saarathi-auth  # auth service on :8081 (runs migrations, seeds a dev super-admin)
+cargo run -p saarathi-rides # rides service on :8082 (fares, trips, campaigns, realtime WS)
 ```
 
 ## Quick start (staff dashboard)
@@ -36,6 +37,7 @@ backend echoes the OTP in the response so you can log in without an SMS gateway.
 | `docs/research/` | Source-of-truth research & design dossier |
 | `backend/crates/` | Shared Rust libraries (`saarathi-core`) |
 | `backend/services/auth/` | Identity, KYC verification & location service |
-| `dashboard/` | Next.js staff dashboard (driver verification) |
+| `backend/services/rides/` | Fares, trips, campaigns & realtime (WS/WebRTC signaling) |
+| `dashboard/` | Next.js staff dashboard (driver verification, campaigns) |
 
 See [`AGENTS.md`](AGENTS.md) for the golden legal rules that the code must enforce.

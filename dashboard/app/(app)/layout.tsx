@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
-import Link from "next/link";
 import { auth, type User } from "@/lib/api";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const NAV = [
   { href: "/drivers", label: "Driver Verification" },
@@ -47,6 +47,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {item.label}
           </Link>
         ))}
+        <div className="nav-section">Growth</div>
+        <Link
+          href="/campaigns"
+          className={`nav-item ${pathname.startsWith("/campaigns") ? "active" : ""}`}
+        >
+          Campaigns &amp; Offers
+        </Link>
         <div className="nav-section">Coming soon</div>
         <span className="nav-item" style={{ opacity: 0.5 }}>Live Tracking</span>
         <span className="nav-item" style={{ opacity: 0.5 }}>Pricing Config</span>
@@ -73,5 +80,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
 function titleFor(pathname: string): string {
   if (pathname.startsWith("/drivers")) return "Driver Verification";
+  if (pathname.startsWith("/campaigns")) return "Campaigns & Offers";
   return "";
 }

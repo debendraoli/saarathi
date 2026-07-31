@@ -1,0 +1,92 @@
+-- Rides schema. Applied idempotently at startup via sqlx::raw_sql so this
+-- service can share the `saarathi` database with saarathi-auth without both
+-- fighting over the single sqlx migrations table. Trips store plain lat/lng
+-- (no PostGIS needed here); distance for fares comes from the routing client.
+
+DO $$ BEGIN
+    CREATE TYPE trip_type AS ENUM ('ride', 'delivery');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE trip_status AS ENUM ('requested', 'accepted', 'arriving', 'in_progress', 'completed', 'cancelled');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE campaign_audience AS ENUM ('rider', 'driver');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE discount_kind AS ENUM ('percent', 'flat');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS trips (
+    id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    rider_id        uuid        NOT NULL,
+    driver_id       uuid,
+    trip_type       trip_type   NOT NULL DEFAULT 'ride',
+    status          trip_status NOT NULL DEFAULT 'requested',
+    vehicle_class   text        NOT NULL,             -- 'two_wheeler' | 'four_wheeler'
+    origin_lat      double precision NOT NULL,
+    origin_lng      double precision NOT NULL,
+    dest_lat        double precision NOT NULL,
+    dest_lng        double precision NOT NULL,
+    distance_km     numeric     NOT NULL,
+    duration_secs   int         NOT NULL,
+    gross_fare      numeric     NOT NULL,             -- fare before promo (drives the ledger split)
+    discount_code   text,
+    discount_amount numeric     NOT NULL DEFAULT 0,
+    final_fare      numeric     NOT NULL,             -- what the rider is charged
+    commission      numeric     NOT NULL,
+    accident_fund   numeric     NOT NULL,
+    driver_payout   numeric     NOT NULL,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    accepted_at     timestamptz,
+    completed_at    timestamptz,
+    cancelled_at    timestamptz,
+    updated_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS trips_rider_idx  ON trips (rider_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS trips_driver_idx ON trips (driver_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS trips_status_idx ON trips (status);
+
+CREATE TABLE IF NOT EXISTS campaigns (
+    id            uuid              PRIMARY KEY DEFAULT gen_random_uuid(),
+    code          text              NOT NULL UNIQUE,
+    title         text              NOT NULL,
+    audience      campaign_audience NOT NULL DEFAULT 'rider',
+    kind          discount_kind     NOT NULL,
+    value         numeric           NOT NULL,         -- percent (0-100) or flat NPR
+    min_fare      numeric           NOT NULL DEFAULT 0,
+    max_discount  numeric,                            -- cap for percent promos
+    city          text,
+    vehicle_class text,                               -- null = any
+    starts_at     timestamptz,
+    ends_at       timestamptz,
+    active        boolean           NOT NULL DEFAULT true,
+    usage_limit   int,                                -- null = unlimited
+    used_count    int               NOT NULL DEFAULT 0,
+    created_by    uuid,
+    created_at    timestamptz       NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS campaigns_active_idx ON campaigns (active);
+
+CREATE TABLE IF NOT EXISTS campaign_redemptions (
+    id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id uuid        NOT NULL REFERENCES campaigns (id) ON DELETE CASCADE,
+    user_id     uuid        NOT NULL,
+    trip_id     uuid,
+    amount      numeric     NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS campaign_redemptions_campaign_idx ON campaign_redemptions (campaign_id);
+
+-- Near-realtime event log (location pings, status changes, chat, WebRTC signals).
+CREATE TABLE IF NOT EXISTS trip_events (
+    id         bigserial   PRIMARY KEY,
+    trip_id    uuid        NOT NULL,
+    sender_id  uuid,
+    kind       text        NOT NULL,                  -- location | status | chat | signal
+    payload    jsonb       NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS trip_events_trip_idx ON trip_events (trip_id, created_at DESC);
