@@ -2,6 +2,8 @@
 
 > Scope: A concrete, sequenced plan to go from zero to a running super app in Dang — tuned for **one systems engineer building with Claude**, not a funded team. Phases are scoped by *milestone*, not calendar dates.
 
+> 🔧 **For the granular, engineering-level breakdown** — what's already built, the epic backlog (E1–E15), acceptance criteria, dependencies, and out-of-the-box product bets — see [12 — Detailed Execution Build Plan](12-execution-roadmap.md). This doc stays strategic; 12 is the working backlog.
+
 ---
 
 ## 0. The launch-scope decision: rides-first vs both verticals
