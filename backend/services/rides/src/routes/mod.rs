@@ -3,6 +3,7 @@
 pub mod campaigns;
 pub mod dispatch;
 pub mod ledger;
+pub mod payments;
 pub mod rides;
 
 use crate::state::AppState;
@@ -47,6 +48,7 @@ pub fn router(state: AppState) -> Router {
         .merge(campaigns::routes())
         .merge(ledger::routes())
         .merge(dispatch::routes())
+        .merge(payments::routes())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

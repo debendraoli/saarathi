@@ -13,4 +13,5 @@ pub struct AppState {
     pub router: Arc<Router>,
     pub hub: Hub,
     pub redis: redis::aio::ConnectionManager,
+    pub payments: Arc<dyn crate::payments::PaymentProvider>,
 }

@@ -25,6 +25,7 @@ struct TripMoney {
     commission: Decimal,
     accident_fund: Decimal,
     driver_payout: Decimal,
+    final_fare: Decimal,
     payment_method: String,
 }
 
@@ -44,6 +45,9 @@ struct RideRequest {
     vehicle_class: String,
     #[serde(default)]
     code: Option<String>,
+    /// 'cash' (default) or 'wallet' (pay from prepaid credits).
+    #[serde(default)]
+    payment_method: Option<String>,
 }
 
 async fn estimate(
@@ -76,7 +80,24 @@ async fn create(
     )
     .await?;
 
+    let method = body.payment_method.as_deref().unwrap_or("cash");
+    if method != "cash" && method != "wallet" {
+        return Err(AppError::BadRequest(
+            "payment_method must be 'cash' or 'wallet'".into(),
+        ));
+    }
+
     let mut tx = st.db.begin().await?;
+
+    // Prepaid: a wallet-paid trip requires enough rider credits up front.
+    if method == "wallet" {
+        let balance = crate::payments::rider_balance(&st.db, claims.sub).await?;
+        if balance < est.final_fare {
+            return Err(AppError::BadRequest(
+                "insufficient credits for this trip".into(),
+            ));
+        }
+    }
 
     if let Some(code) = &est.discount_code {
         if let Some((cid,)) = sqlx::query_as::<_, (Uuid,)>(
@@ -104,8 +125,8 @@ async fn create(
     let trip: Trip = sqlx::query_as(&format!(
         "INSERT INTO trips (rider_id, vehicle_class, origin_lat, origin_lng, dest_lat, dest_lng, \
             distance_km, duration_secs, gross_fare, discount_code, discount_amount, final_fare, \
-            commission, accident_fund, driver_payout) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING {TRIP_COLS}"
+            commission, accident_fund, driver_payout, payment_method) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING {TRIP_COLS}"
     ))
     .bind(claims.sub)
     .bind(&body.vehicle_class)
@@ -122,6 +143,7 @@ async fn create(
     .bind(est.commission)
     .bind(est.accident_fund)
     .bind(est.driver_payout)
+    .bind(method)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -183,7 +205,7 @@ async fn update_status(
     let mut tx = st.db.begin().await?;
     let row: Option<TripMoney> = sqlx::query_as(
         "SELECT rider_id, driver_id, status::text AS status, gross_fare, commission, \
-                accident_fund, driver_payout, payment_method \
+                accident_fund, driver_payout, final_fare, payment_method \
          FROM trips WHERE id = $1 FOR UPDATE",
     )
     .bind(id)
@@ -210,6 +232,7 @@ async fn update_status(
 
     // On first completion, append the immutable ledger entry + settle the wallet.
     if body.status == "completed" && m.status != "completed" {
+        let is_wallet = m.payment_method != "cash";
         crate::ledger::append(
             &mut tx,
             crate::ledger::NewEntry {
@@ -219,10 +242,15 @@ async fn update_status(
                 commission: m.commission,
                 accident_fund: m.accident_fund,
                 driver_payout: m.driver_payout,
-                payment_method: m.payment_method,
+                payment_method: m.payment_method.clone(),
             },
         )
         .await?;
+        // Wallet-paid trips: the platform collects the fare from rider credits.
+        if is_wallet {
+            crate::payments::debit_rider(&mut tx, m.rider_id, m.final_fare, "payment", Some(id))
+                .await?;
+        }
     }
 
     tx.commit().await?;

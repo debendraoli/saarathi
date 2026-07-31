@@ -57,11 +57,19 @@ echo "  approved $DID"
 
 step "rider fare estimate (haversine offline fallback)"
 RTOKEN=$(login "+97797$(( RANDOM % 900000 + 100000 ))" | jq -r '.access_token')
-BODY='{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler"}'
+BODY='{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler","payment_method":"wallet"}'
 j -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $RTOKEN" \
   -H 'content-type: application/json' -d "$BODY" \
   | jq -e '.gross_fare and .final_fare and .distance_km' >/dev/null
 echo "  estimate ok"
+
+step "rider tops up prepaid credits"
+REF=$(j -X POST "$RIDES/v1/credits/topup" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d '{"amount":500}' | jq -r '.reference')
+j -X POST "$RIDES/v1/credits/topup/confirm" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d "{\"reference\":\"$REF\"}" >/dev/null
+CREDITS0=$(j "$RIDES/v1/credits" -H "authorization: Bearer $RTOKEN" | jq -r '.balance')
+echo "  credits after top-up: NPR $CREDITS0"
 
 step "create trip → accept → complete"
 TID=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
@@ -99,5 +107,17 @@ CHAIN=$(j "$RIDES/v1/admin/ledger/verify" -H "authorization: Bearer $ADMIN_TOKEN
 [ "$CHAIN" = "true" ] || { echo "  ledger chain broken"; exit 1; }
 WALLET=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
 echo "  entries=$LEDGER_COUNT  chain_intact=$CHAIN  driver_wallet=NPR $WALLET"
+
+step "payment settlement + driver payout"
+CREDITS1=$(j "$RIDES/v1/credits" -H "authorization: Bearer $RTOKEN" | jq -r '.balance')
+echo "  rider credits after ride: NPR $CREDITS1 (was $CREDITS0)"
+awk -v a="$CREDITS1" -v b="$CREDITS0" 'BEGIN{exit !(a<b)}' \
+  || { echo "  rider credits were not charged"; exit 1; }
+awk -v w="$WALLET" 'BEGIN{exit !(w>0)}' \
+  || { echo "  driver earnings not credited"; exit 1; }
+PAID=$(j -X POST "$RIDES/v1/payouts" -H "authorization: Bearer $DTOKEN" \
+  -H 'content-type: application/json' -d '{}' | jq -r '.amount')
+WALLET2=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
+echo "  driver withdrew NPR $PAID; balance now NPR $WALLET2"
 
 printf '\n✅ SMOKE OK\n'

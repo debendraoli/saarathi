@@ -131,3 +131,50 @@ CREATE INDEX IF NOT EXISTS trip_offers_trip_idx   ON trip_offers (trip_id);
 CREATE INDEX IF NOT EXISTS trip_offers_driver_idx ON trip_offers (driver_id, status);
 CREATE INDEX IF NOT EXISTS trip_offers_active_idx ON trip_offers (status, expires_at);
 
+-- Rider/customer prepaid credit balance (customer pays the platform directly).
+CREATE TABLE IF NOT EXISTS credit_accounts (
+    user_id    uuid        NOT NULL,
+    kind       text        NOT NULL DEFAULT 'rider',
+    balance    numeric     NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, kind)
+);
+
+-- Append-only money movements: top-ups, ride payments, payouts, bonuses, refunds.
+CREATE TABLE IF NOT EXISTS credit_transactions (
+    id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       uuid        NOT NULL,
+    kind          text        NOT NULL,               -- rider | driver
+    txn_type      text        NOT NULL,               -- topup | payment | payout | bonus | refund
+    amount        numeric     NOT NULL,               -- signed: +credit, -debit
+    balance_after numeric,
+    reference     text,
+    trip_id       uuid,
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS credit_transactions_user_idx ON credit_transactions (user_id, created_at DESC);
+
+-- Top-up intents (the PSP hand-off; confirmed by a webhook/callback).
+CREATE TABLE IF NOT EXISTS topup_intents (
+    reference    text        PRIMARY KEY,
+    user_id      uuid        NOT NULL,
+    amount       numeric     NOT NULL,
+    provider     text        NOT NULL,
+    status       text        NOT NULL DEFAULT 'pending',  -- pending | confirmed | failed
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    confirmed_at timestamptz
+);
+
+-- Driver withdrawals of their earnings balance.
+CREATE TABLE IF NOT EXISTS payout_requests (
+    id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    driver_id    uuid        NOT NULL,
+    amount       numeric     NOT NULL,
+    status       text        NOT NULL DEFAULT 'processing',  -- processing | paid | failed
+    reference    text,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    processed_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS payout_requests_driver_idx ON payout_requests (driver_id, created_at DESC);
+
+

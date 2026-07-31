@@ -12,6 +12,7 @@ mod error;
 mod hub;
 mod ledger;
 mod models;
+mod payments;
 mod pricing;
 mod routes;
 mod routing;
@@ -48,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
         router,
         hub: Hub::new(),
         redis,
+        payments: Arc::new(payments::MockProvider),
     };
 
     tokio::spawn(dispatch::run_dispatcher(state.clone()));
