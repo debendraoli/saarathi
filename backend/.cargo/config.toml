@@ -1,0 +1,5 @@
+# macOS: ring/cc-rs need the SDK path explicitly. The CommandLineTools SDK path
+# is stable; adjust if you use full Xcode. This lets `cargo build` find
+# TargetConditionals.h without exporting SDKROOT manually each shell.
+[env]
+SDKROOT = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"

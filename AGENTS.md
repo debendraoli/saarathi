@@ -50,9 +50,27 @@ If a change would weaken any of the above, stop and flag it.
 docs/research/     # Source-of-truth dossier (00-index.md is the map)
 backend/           # Rust Cargo workspace (monorepo)
   crates/          # Shared libraries (saarathi-core: money, legal caps, pricing clamp)
-  services/        # Coarse-grained services (auth, gateway, ... added per phase)
+  services/        # Coarse-grained services
+    auth/          # Identity + KYC + location: OTP/JWT, driver verification, PostGIS
+      migrations/  # sqlx SQL migrations
   docker-compose.yml  # Local dev infra: Postgres+PostGIS, Redis, NATS
+dashboard/         # Next.js staff dashboard (driver verification, RBAC-gated)
 ```
+
+## Running locally
+
+```bash
+# Backend (needs Docker for Postgres+PostGIS/Redis/NATS)
+cd backend && cp .env.example .env   # then set JWT_SECRET (openssl rand -hex 32)
+docker compose up -d
+cargo run -p saarathi-auth           # :8081, runs migrations + seeds a dev super-admin
+
+# Dashboard
+cd dashboard && cp .env.local.example .env.local && npm install
+npm run dev                          # :3000 — sign in with +9779800000000 (OTP_DEV_MODE echoes the code)
+```
+
+> macOS note: `ring`/`cc` need the SDK path; `backend/.cargo/config.toml` sets `SDKROOT` so `cargo build` works.
 
 ## Conventions
 
