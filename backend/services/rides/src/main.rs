@@ -12,6 +12,7 @@ mod error;
 mod hub;
 mod ledger;
 mod models;
+mod notify;
 mod payments;
 mod pricing;
 mod routes;

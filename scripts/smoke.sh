@@ -39,7 +39,9 @@ echo "  got staff token"
 
 step "driver signup + register + KYC upload"
 DPHONE="+97798$(( RANDOM % 900000 + 100000 ))"
-DTOKEN=$(login "$DPHONE" true | jq -r '.access_token')
+DLOGIN=$(login "$DPHONE" true)
+DTOKEN=$(echo "$DLOGIN" | jq -r '.access_token')
+DUID=$(echo "$DLOGIN" | jq -r '.user.id')
 j -X POST "$API/v1/driver/register" -H "authorization: Bearer $DTOKEN" \
   -H 'content-type: application/json' \
   -d '{"license_number":"DL-0001","vehicle":{"class":"two_wheeler","plate_number":"BA-1-PA-1234","make":"Honda","model":"Shine"}}' >/dev/null
@@ -119,5 +121,37 @@ PAID=$(j -X POST "$RIDES/v1/payouts" -H "authorization: Bearer $DTOKEN" \
   -H 'content-type: application/json' -d '{}' | jq -r '.amount')
 WALLET2=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
 echo "  driver withdrew NPR $PAID; balance now NPR $WALLET2"
+
+step "live tracking + safety + ratings + notifications + analytics"
+j -X POST "$RIDES/v1/rides/$TID/location" -H "authorization: Bearer $DTOKEN" \
+  -H 'content-type: application/json' -d '{"lat":28.040,"lng":82.490,"heading":90,"speed":8}' >/dev/null
+LOC=$(j "$RIDES/v1/rides/$TID/location" -H "authorization: Bearer $RTOKEN" | jq -r '.lat')
+[ -n "$LOC" ] && [ "$LOC" != "null" ] || { echo "  no live location"; exit 1; }
+echo "  live driver location shared (lat=$LOC)"
+
+j -X POST "$RIDES/v1/rides/$TID/rate" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d '{"stars":5,"tags":["safe_driving","clean"],"comment":"great ride"}' >/dev/null
+RATING=$(j "$RIDES/v1/drivers/$DUID/rating" -H "authorization: Bearer $RTOKEN" | jq -r '.avg_stars')
+echo "  driver rating: $RATING"
+
+REPID=$(j -X POST "$RIDES/v1/reports" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d "{\"trip_id\":\"$TID\",\"category\":\"payment\",\"detail\":\"test dispute\"}" | jq -r '.id')
+j -X POST "$RIDES/v1/admin/reports/$REPID/resolve" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' -d '{"status":"resolved","resolution":"handled"}' >/dev/null
+echo "  report filed + resolved"
+
+SOSID=$(j -X POST "$RIDES/v1/rides/$TID/sos" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d '{"lat":28.041,"lng":82.491,"note":"test"}' | jq -r '.id')
+ACTIVE=$(j "$RIDES/v1/admin/sos" -H "authorization: Bearer $ADMIN_TOKEN" | jq 'length')
+j -X POST "$RIDES/v1/admin/sos/$SOSID/resolve" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' -d '{"note":"resolved in test"}' >/dev/null
+echo "  SOS raised (active=$ACTIVE) + resolved"
+
+UNREAD=$(j "$RIDES/v1/notifications" -H "authorization: Bearer $RTOKEN" | jq -r '.unread')
+[ "$UNREAD" -ge 1 ] || { echo "  expected notifications"; exit 1; }
+echo "  rider unread notifications: $UNREAD"
+
+EARN=$(j "$RIDES/v1/driver/analytics" -H "authorization: Bearer $DTOKEN" | jq -r '.all_time.earnings')
+echo "  driver all-time earnings: NPR $EARN"
 
 printf '\n✅ SMOKE OK\n'

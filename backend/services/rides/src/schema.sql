@@ -177,4 +177,66 @@ CREATE TABLE IF NOT EXISTS payout_requests (
 );
 CREATE INDEX IF NOT EXISTS payout_requests_driver_idx ON payout_requests (driver_id, created_at DESC);
 
+-- Two-sided ratings (rider↔driver), tag-based (one per rater per trip).
+CREATE TABLE IF NOT EXISTS ratings (
+    id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id    uuid        NOT NULL,
+    rater_id   uuid        NOT NULL,
+    ratee_id   uuid        NOT NULL,
+    role       text        NOT NULL,   -- rider_rates_driver | driver_rates_rider
+    stars      int         NOT NULL,
+    tags       text[]      NOT NULL DEFAULT '{}',
+    comment    text,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ratings_trip_rater_idx ON ratings (trip_id, rater_id);
+CREATE INDEX IF NOT EXISTS ratings_ratee_idx ON ratings (ratee_id);
+
+-- Reports / grievances (safety, payment, behaviour, delivery, lost item…).
+CREATE TABLE IF NOT EXISTS reports (
+    id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    reporter_id uuid        NOT NULL,
+    subject_id  uuid,
+    trip_id     uuid,
+    category    text        NOT NULL,
+    severity    text        NOT NULL DEFAULT 'normal',
+    detail      text,
+    status      text        NOT NULL DEFAULT 'open',  -- open | investigating | resolved | dismissed
+    resolution  text,
+    handled_by  uuid,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    resolved_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS reports_status_idx ON reports (status, created_at DESC);
+
+-- SOS / emergency incidents (rider or driver), audit-grade.
+CREATE TABLE IF NOT EXISTS sos_incidents (
+    id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     uuid        NOT NULL,
+    trip_id     uuid,
+    lat         double precision,
+    lng         double precision,
+    channel     text        NOT NULL DEFAULT 'app',   -- app | sms
+    status      text        NOT NULL DEFAULT 'active',  -- active | resolved
+    note        text,
+    resolved_by uuid,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    resolved_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS sos_status_idx ON sos_incidents (status, created_at DESC);
+
+-- In-app notification inbox (the durable record; push/SMS are best-effort on top).
+CREATE TABLE IF NOT EXISTS notifications (
+    id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    uuid        NOT NULL,
+    class      text        NOT NULL,   -- safety | transactional | compliance | marketing
+    title      text        NOT NULL,
+    body       text,
+    channel    text        NOT NULL DEFAULT 'inapp',
+    read_at    timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at DESC);
+
+
 

@@ -252,4 +252,97 @@ export const rides = {
 
   deactivateCampaign: (id: string) =>
     ridesRequest<{ ok: boolean }>(`/v1/admin/campaigns/${id}/deactivate`, { method: "POST" }),
+
+  // Live tracking
+  activeTrips: () => ridesRequest<ActiveTrip[]>("/v1/admin/trips/active"),
+  tripLocation: (id: string) => ridesRequest<TripLocation>(`/v1/rides/${id}/location`),
+
+  // SOS
+  listSos: () => ridesRequest<SosIncident[]>("/v1/admin/sos"),
+  resolveSos: (id: string, note?: string) =>
+    ridesRequest<{ resolved: boolean }>(`/v1/admin/sos/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+
+  // Reports
+  listReports: () => ridesRequest<Report[]>("/v1/admin/reports"),
+  resolveReport: (id: string, status: string, resolution?: string) =>
+    ridesRequest<{ ok: boolean }>(`/v1/admin/reports/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ status, resolution }),
+    }),
+
+  // Finance
+  listLedger: () => ridesRequest<LedgerEntry[]>("/v1/admin/ledger"),
+  verifyLedger: () => ridesRequest<{ chain_intact: boolean }>("/v1/admin/ledger/verify"),
+  listPayouts: () => ridesRequest<Payout[]>("/v1/admin/payouts"),
 };
+
+export interface ActiveTrip {
+  id: string;
+  rider_id: string;
+  driver_id: string | null;
+  status: string;
+  origin_lat: number;
+  origin_lng: number;
+  dest_lat: number;
+  dest_lng: number;
+  final_fare: string;
+}
+
+export interface TripLocation {
+  lat: number | null;
+  lng: number | null;
+  heading: number | null;
+  speed: number | null;
+  at: number | null;
+  by: string | null;
+}
+
+export interface SosIncident {
+  id: string;
+  user_id: string;
+  trip_id: string | null;
+  lat: number | null;
+  lng: number | null;
+  status: string;
+  note: string | null;
+  created_at: string;
+}
+
+export interface Report {
+  id: string;
+  reporter_id: string;
+  subject_id: string | null;
+  trip_id: string | null;
+  category: string;
+  severity: string;
+  detail: string | null;
+  status: string;
+  resolution: string | null;
+  created_at: string;
+}
+
+export interface LedgerEntry {
+  seq: number;
+  trip_id: string;
+  driver_id: string | null;
+  gross: string;
+  commission: string;
+  accident_fund: string;
+  driver_payout: string;
+  payment_method: string;
+  entry_hash: string;
+  report_status: string;
+  created_at: string;
+}
+
+export interface Payout {
+  id: string;
+  driver_id: string;
+  amount: string;
+  status: string;
+  reference: string | null;
+  created_at: string;
+}

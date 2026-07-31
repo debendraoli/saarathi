@@ -178,6 +178,14 @@ async fn accept_offer(
         id,
         json!({ "type": "status", "status": "accepted", "driver_id": claims.sub }).to_string(),
     );
+    let _ = crate::notify::send(
+        &st.db,
+        trip.rider_id,
+        "transactional",
+        "Driver on the way",
+        "Your driver accepted the trip and is heading to your pickup.",
+    )
+    .await;
     Ok(Json(trip))
 }
 

@@ -5,8 +5,22 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-const NAV = [
-  { href: "/drivers", label: "Driver Verification" },
+const SECTIONS = [
+  { title: "Operations", items: [
+    { href: "/live", label: "Live Tracking" },
+    { href: "/sos", label: "SOS Console" },
+    { href: "/reports", label: "Reports" },
+  ] },
+  { title: "Compliance", items: [
+    { href: "/drivers", label: "Driver Verification" },
+  ] },
+  { title: "Finance", items: [
+    { href: "/ledger", label: "Ledger" },
+    { href: "/payouts", label: "Payouts" },
+  ] },
+  { title: "Growth", items: [
+    { href: "/campaigns", label: "Campaigns & Offers" },
+  ] },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -37,27 +51,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="brand">
           <span className="dot" /> Saarathi Ops
         </div>
-        <div className="nav-section">Compliance</div>
-        {NAV.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`nav-item ${pathname.startsWith(item.href) ? "active" : ""}`}
-          >
-            {item.label}
-          </Link>
+        {SECTIONS.map((section) => (
+          <div key={section.title}>
+            <div className="nav-section">{section.title}</div>
+            {section.items.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`nav-item ${pathname.startsWith(item.href) ? "active" : ""}`}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
         ))}
-        <div className="nav-section">Growth</div>
-        <Link
-          href="/campaigns"
-          className={`nav-item ${pathname.startsWith("/campaigns") ? "active" : ""}`}
-        >
-          Campaigns &amp; Offers
-        </Link>
         <div className="nav-section">Coming soon</div>
-        <span className="nav-item" style={{ opacity: 0.5 }}>Live Tracking</span>
         <span className="nav-item" style={{ opacity: 0.5 }}>Pricing Config</span>
-        <span className="nav-item" style={{ opacity: 0.5 }}>Ledger</span>
       </aside>
 
       <div className="main">
@@ -81,5 +90,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 function titleFor(pathname: string): string {
   if (pathname.startsWith("/drivers")) return "Driver Verification";
   if (pathname.startsWith("/campaigns")) return "Campaigns & Offers";
+  if (pathname.startsWith("/live")) return "Live Tracking";
+  if (pathname.startsWith("/sos")) return "SOS Console";
+  if (pathname.startsWith("/reports")) return "Reports";
+  if (pathname.startsWith("/ledger")) return "Ledger";
+  if (pathname.startsWith("/payouts")) return "Payouts";
   return "";
 }

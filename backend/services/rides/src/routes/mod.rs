@@ -1,10 +1,15 @@
 //! Router assembly + CORS.
 
+pub mod analytics;
 pub mod campaigns;
 pub mod dispatch;
+pub mod feedback;
 pub mod ledger;
+pub mod notifications;
 pub mod payments;
 pub mod rides;
+pub mod safety;
+pub mod tracking;
 
 use crate::state::AppState;
 use crate::ws;
@@ -49,6 +54,11 @@ pub fn router(state: AppState) -> Router {
         .merge(ledger::routes())
         .merge(dispatch::routes())
         .merge(payments::routes())
+        .merge(tracking::routes())
+        .merge(safety::routes())
+        .merge(feedback::routes())
+        .merge(notifications::routes())
+        .merge(analytics::routes())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
