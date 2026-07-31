@@ -16,7 +16,7 @@ flowchart TD
     C --> C2[Commercial driving license]
     C --> C3[Vehicle Bluebook + fitness cert]
     C --> C4[Insurance + tax clearance]
-    C --> C5[Photo + emergency contact]
+    C --> C5[Driver photo + vehicle photo + emergency contact]
     C1 & C2 & C3 & C4 & C5 --> D[Background check]
     D -->|Pass| E[3-day orientation training]
     D -->|Fail| X[Reject + reason]

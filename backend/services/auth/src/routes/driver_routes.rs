@@ -195,6 +195,7 @@ fn parse_kind(s: &str) -> Result<DocumentKind, AppError> {
         "insurance" => DocumentKind::Insurance,
         "tax_clearance" => DocumentKind::TaxClearance,
         "profile_photo" => DocumentKind::ProfilePhoto,
+        "vehicle_photo" => DocumentKind::VehiclePhoto,
         other => return Err(AppError::BadRequest(format!("unknown document kind '{other}'"))),
     })
 }

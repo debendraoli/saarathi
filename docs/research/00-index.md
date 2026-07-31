@@ -28,12 +28,29 @@ The single most important finding shaping everything below:
 | 05 | [Technical Architecture](05-technical-architecture.md) | What to build, in what order, with what stack — compliance-aware, tuned to your Go/Rust background. |
 | 06 | [Phased Build Plan](06-build-plan.md) | Milestone-gated plan for a solo founder + Claude, incl. the rides-first vs both-verticals decision. |
 | 07 | [Financial & Unit-Economics Model](07-financial-model.md) | Per-trip P&L, break-even, capital need, and the super-app margin math. |
+| 08 | [Local Delivery System](08-delivery-system.md) | Parcel → food → grocery on the same fleet; merchant tiers, order lifecycle, COD. |
+| 09 | [Notifications & Referrals](09-notifications-and-referrals.md) | The notification delivery ladder (push→SMS fallback) and the fraud-hardened referral loops. |
+| 10 | [Driver Experience & Analytics](10-driver-experience-and-analytics.md) | Real-time earnings clarity, demand heatmaps, quests, statements — transparency as retention. |
+| 11 | [Trust, Safety, Ratings & SOS](11-trust-safety-ratings-sos.md) | Two-sided ratings, the report/grievance system, and offline-capable emergency SOS. |
 
 ---
 
 ## The one-paragraph strategy (TL;DR)
 
 Dang's two sub-metropolitan cities (Ghorahi, Tulsipur) are **not yet served by Pathao or inDrive**, which concentrate on Kathmandu, Pokhara, Chitwan, and the bigger Terai hubs (Butwal, Bhairahawa, Nepalgunj). That is the wedge: **win the home turf before the incumbents arrive.** Start with **two-wheeler ride-hailing + parcel/food delivery** (lowest cost, highest frequency, matches local vehicle mix), price under the government fare ceiling, keep commission at or below the legal 10%, settle drivers in **cash + Fonepay/eSewa/Khalti**, and design from day one to be **compliance-native** (Nepali hosting, DoTM API hooks, QR stickers, SOS). Expand city-by-city across Lumbini once the unit economics in Dang are proven.
+
+---
+
+## Why Saarathi is different — out of the box
+
+Not a cheaper clone of Pathao/inDrive — a **compliance-native, low-tech-first, hyper-local** platform whose advantages are structural, not features to be copied:
+
+1. **Legally-better driver economics.** ≥90% to the driver (10% cap) vs the ~20–30% global norm — and we make that transparent so drivers *believe* it ([10](10-driver-experience-and-analytics.md)).
+2. **Offline-tolerant everything.** Fares fall back to a haversine estimate, SOS falls back to SMS, notifications escalate push→SMS, pickups are landmark+call. Built for patchy rural data, which incumbents assume away ([08](08-delivery-system.md), [09](09-notifications-and-referrals.md), [11](11-trust-safety-ratings-sos.md)).
+3. **One fleet, many jobs.** Rides + parcel + food on the same driver/dispatch/wallet/ledger — utilization is survival in a thin market ([08](08-delivery-system.md)).
+4. **Merchant-light onboarding.** WhatsApp-assisted → Lite → App tiers get a tier-3 shop live in a day; national apps won't hand-hold a momo cart ([08 §4](08-delivery-system.md)).
+5. **Local trust as a safety feature.** Real Ghorahi desk, Nepali/Tharu/Awadhi support, direct **Nepal Police (100)** SOS integration — "Dang ko aafnai app," not a distant brand ([11](11-trust-safety-ratings-sos.md)).
+6. **Compliance & data sovereignty from day one.** Immutable shared ledger, DoTM hooks, in-country hosting/KYC — a moat that's painful to retrofit ([02](02-regulatory-compliance.md), [05](05-technical-architecture.md)).
 
 ---
 

@@ -107,7 +107,7 @@ Side-states: `NO_DRIVER_FOUND`, `CANCELLED_BY_RIDER`, `CANCELLED_BY_DRIVER`, `SO
 ```mermaid
 stateDiagram-v2
     [*] --> Registered: Phone OTP + basic info
-    Registered --> KYC_Pending: Upload license, bluebook, insurance, tax, PAN, photo
+    Registered --> KYC_Pending: Upload license, bluebook, insurance, tax, PAN, driver photo, vehicle photo
     KYC_Pending --> Training: Background check passes
     KYC_Pending --> Rejected: Fails verification
     Training --> QR_Issued: 3-day orientation done

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { rides, type Campaign, type NewCampaign } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 const EMPTY: NewCampaign = {
   code: "",

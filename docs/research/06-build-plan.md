@@ -119,6 +119,8 @@ flowchart TD
 
 ## 5. Phase 3 — Delivery on the same fleet
 
+> Full design: [08 — Local Delivery System](08-delivery-system.md).
+
 **Goal:** Lift driver utilization → better retention + new revenue, without new fleet.
 
 **Build (in order of cheapness):**

@@ -65,6 +65,7 @@ pub enum DocumentKind {
     Insurance,
     TaxClearance,
     ProfilePhoto,
+    VehiclePhoto,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
