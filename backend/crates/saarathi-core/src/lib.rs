@@ -6,6 +6,7 @@
 //!
 //! See `../../../AGENTS.md` for the golden rules these modules implement.
 
+pub mod ledger;
 pub mod legal;
 pub mod money;
 pub mod pricing;

@@ -1813,9 +1813,11 @@ dependencies = [
 name = "saarathi-core"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "rust_decimal",
  "rust_decimal_macros",
  "serde",
+ "sha2",
  "thiserror",
  "uuid",
 ]

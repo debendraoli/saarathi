@@ -90,3 +90,31 @@ CREATE TABLE IF NOT EXISTS trip_events (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS trip_events_trip_idx ON trip_events (trip_id, created_at DESC);
+
+-- Payment method on the trip (drives the ledger + wallet settlement).
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS payment_method text NOT NULL DEFAULT 'cash';
+
+-- Immutable, hash-chained ledger. One entry per completed trip (unique index).
+CREATE TABLE IF NOT EXISTS ledger_entries (
+    seq            bigint      PRIMARY KEY,
+    trip_id        uuid        NOT NULL,
+    driver_id      uuid,
+    gross          numeric     NOT NULL,
+    commission     numeric     NOT NULL,
+    accident_fund  numeric     NOT NULL,
+    driver_payout  numeric     NOT NULL,
+    payment_method text        NOT NULL,
+    prev_hash      text        NOT NULL,
+    entry_hash     text        NOT NULL UNIQUE,
+    report_status  text        NOT NULL DEFAULT 'pending',  -- DoTM report state (E4)
+    created_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ledger_entries_trip_idx ON ledger_entries (trip_id);
+
+-- Driver balance wallet: +ve = platform owes driver; -ve = driver owes platform.
+CREATE TABLE IF NOT EXISTS driver_wallets (
+    driver_id  uuid        PRIMARY KEY,
+    balance    numeric     NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+

@@ -9,6 +9,7 @@ mod config;
 mod db;
 mod error;
 mod hub;
+mod ledger;
 mod models;
 mod pricing;
 mod routes;

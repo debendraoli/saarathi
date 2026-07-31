@@ -75,4 +75,12 @@ for s in arriving in_progress completed; do
 done
 echo "  trip completed"
 
+step "ledger + wallet (hash-chained)"
+LEDGER_COUNT=$(j "$RIDES/v1/admin/ledger" -H "authorization: Bearer $ADMIN_TOKEN" | jq 'length')
+[ "$LEDGER_COUNT" -ge 1 ] || { echo "  no ledger entries"; exit 1; }
+CHAIN=$(j "$RIDES/v1/admin/ledger/verify" -H "authorization: Bearer $ADMIN_TOKEN" | jq -r '.chain_intact')
+[ "$CHAIN" = "true" ] || { echo "  ledger chain broken"; exit 1; }
+WALLET=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
+echo "  entries=$LEDGER_COUNT  chain_intact=$CHAIN  driver_wallet=NPR $WALLET"
+
 printf '\n✅ SMOKE OK\n'

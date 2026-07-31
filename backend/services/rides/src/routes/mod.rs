@@ -1,6 +1,7 @@
 //! Router assembly + CORS.
 
 pub mod campaigns;
+pub mod ledger;
 pub mod rides;
 
 use crate::state::AppState;
@@ -43,6 +44,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/ws", get(ws::ws_handler))
         .merge(rides::routes())
         .merge(campaigns::routes())
+        .merge(ledger::routes())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

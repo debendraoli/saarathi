@@ -11,9 +11,22 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
+
+#[derive(sqlx::FromRow)]
+struct TripMoney {
+    rider_id: Uuid,
+    driver_id: Option<Uuid>,
+    status: String,
+    gross_fare: Decimal,
+    commission: Decimal,
+    accident_fund: Decimal,
+    driver_payout: Decimal,
+    payment_method: String,
+}
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -157,13 +170,17 @@ async fn update_status(
         return Err(AppError::BadRequest("invalid status transition".into()));
     }
 
-    let row: Option<(Uuid, Option<Uuid>)> =
-        sqlx::query_as("SELECT rider_id, driver_id FROM trips WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&st.db)
-            .await?;
-    let (rider, driver) = row.ok_or(AppError::NotFound)?;
-    if rider != claims.sub && driver != Some(claims.sub) {
+    let mut tx = st.db.begin().await?;
+    let row: Option<TripMoney> = sqlx::query_as(
+        "SELECT rider_id, driver_id, status::text AS status, gross_fare, commission, \
+                accident_fund, driver_payout, payment_method \
+         FROM trips WHERE id = $1 FOR UPDATE",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let m = row.ok_or(AppError::NotFound)?;
+    if m.rider_id != claims.sub && m.driver_id != Some(claims.sub) {
         return Err(AppError::Forbidden);
     }
 
@@ -178,8 +195,27 @@ async fn update_status(
     ))
     .bind(id)
     .bind(&body.status)
-    .fetch_one(&st.db)
+    .fetch_one(&mut *tx)
     .await?;
+
+    // On first completion, append the immutable ledger entry + settle the wallet.
+    if body.status == "completed" && m.status != "completed" {
+        crate::ledger::append(
+            &mut tx,
+            crate::ledger::NewEntry {
+                trip_id: id,
+                driver_id: m.driver_id,
+                gross: m.gross_fare,
+                commission: m.commission,
+                accident_fund: m.accident_fund,
+                driver_payout: m.driver_payout,
+                payment_method: m.payment_method,
+            },
+        )
+        .await?;
+    }
+
+    tx.commit().await?;
 
     st.hub.publish(
         id,
