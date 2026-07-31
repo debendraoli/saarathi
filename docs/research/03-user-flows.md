@@ -84,7 +84,7 @@ Side-states: `NO_DRIVER_FOUND`, `CANCELLED_BY_RIDER`, `CANCELLED_BY_DRIVER`, `SO
 
 ### 2.3 Key UX decisions (localized for Dang)
 
-- **Pricing model:** Use **transparent metered fare** (distance × rate, capped) — *not* inDrive-style haggling — because it's simpler to keep within legal caps and builds trust. Optionally allow a small **tip**.
+- **Pricing model:** Use **transparent metered fare** (distance × rate, capped) as the anchor and legal ceiling. On top, an **optional, bounded fare-bargaining** mode (rider/driver may negotiate within a floor and the legal cap) can be enabled per city/vertical — see [13 §5](13-revenue-and-monetization.md). Launch fixed/metered for trust; enable bargaining later. Optionally allow a small **tip**.
 - **Map-light fallback:** Many pickups are landmark-based, not precise pins. Support **landmark + "share live location" + call driver**.
 - **Female-driver toggle** surfaced at booking (legal requirement + trust differentiator).
 - **QR verification:** Rider scans the vehicle's DoTM QR sticker to confirm driver/vehicle authenticity before boarding.
