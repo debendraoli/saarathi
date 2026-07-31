@@ -59,11 +59,23 @@ echo "  approved $DID"
 
 step "rider fare estimate (haversine offline fallback)"
 RTOKEN=$(login "+97797$(( RANDOM % 900000 + 100000 ))" | jq -r '.access_token')
-BODY='{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler","payment_method":"wallet"}'
+BODY='{"origin":{"lat":28.0336,"lng":82.4836},"stops":[{"lat":28.0400,"lng":82.4900}],"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler","payment_method":"wallet"}'
 j -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $RTOKEN" \
   -H 'content-type: application/json' -d "$BODY" \
   | jq -e '.gross_fare and .final_fare and .distance_km' >/dev/null
 echo "  estimate ok"
+
+step "rider settings + saved places + recent searches"
+j -X PUT "$API/v1/me/preferences" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d '{"default_payment_method":"wallet","theme":"dark"}' >/dev/null
+THEME=$(j "$API/v1/me/preferences" -H "authorization: Bearer $RTOKEN" | jq -r '.theme')
+j -X POST "$API/v1/me/locations" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d '{"label":"home","address":"Ghorahi","lat":28.0336,"lng":82.4836}' >/dev/null
+PLACES=$(j "$API/v1/me/locations" -H "authorization: Bearer $RTOKEN" | jq 'length')
+j -X POST "$API/v1/me/recent-searches" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d '{"label":"Tribhuvan Chowk","address":"Ghorahi","lat":28.045,"lng":82.497}' >/dev/null
+RECENT=$(j "$API/v1/me/recent-searches" -H "authorization: Bearer $RTOKEN" | jq 'length')
+echo "  theme=$THEME  saved_places=$PLACES  recent_searches=$RECENT"
 
 step "rider tops up prepaid credits"
 REF=$(j -X POST "$RIDES/v1/credits/topup" -H "authorization: Bearer $RTOKEN" \
@@ -73,10 +85,13 @@ j -X POST "$RIDES/v1/credits/topup/confirm" -H "authorization: Bearer $RTOKEN" \
 CREDITS0=$(j "$RIDES/v1/credits" -H "authorization: Bearer $RTOKEN" | jq -r '.balance')
 echo "  credits after top-up: NPR $CREDITS0"
 
-step "create trip → accept → complete"
-TID=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
-  -H 'content-type: application/json' -d "$BODY" | jq -r '.id')
-echo "  trip $TID created"
+step "create multi-stop trip → accept → complete"
+TRIPJSON=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d "$BODY")
+TID=$(echo "$TRIPJSON" | jq -r '.id')
+NSTOPS=$(echo "$TRIPJSON" | jq -r '.stops | length')
+[ "$NSTOPS" -eq 1 ] || { echo "  stops not stored"; exit 1; }
+echo "  trip $TID created (stops=$NSTOPS)"
 
 # Driver goes online at the pickup so the dispatcher can reach them.
 j -X POST "$RIDES/v1/driver/online" -H "authorization: Bearer $DTOKEN" \
@@ -153,5 +168,10 @@ echo "  rider unread notifications: $UNREAD"
 
 EARN=$(j "$RIDES/v1/driver/analytics" -H "authorization: Bearer $DTOKEN" | jq -r '.all_time.earnings')
 echo "  driver all-time earnings: NPR $EARN"
+
+step "rider ride history"
+HIST=$(j "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" | jq 'length')
+[ "$HIST" -ge 1 ] || { echo "  no history"; exit 1; }
+echo "  rider history: $HIST trip(s) — can re-request from any"
 
 printf '\n✅ SMOKE OK\n'

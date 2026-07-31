@@ -93,6 +93,8 @@ CREATE INDEX IF NOT EXISTS trip_events_trip_idx ON trip_events (trip_id, created
 
 -- Payment method on the trip (drives the ledger + wallet settlement).
 ALTER TABLE trips ADD COLUMN IF NOT EXISTS payment_method text NOT NULL DEFAULT 'cash';
+-- Multi-stop waypoints: [{ "lat":.., "lng":.. }, …] between origin and destination.
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS stops jsonb NOT NULL DEFAULT '[]';
 
 -- Immutable, hash-chained ledger. One entry per completed trip (unique index).
 CREATE TABLE IF NOT EXISTS ledger_entries (
@@ -237,6 +239,3 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at DESC);
-
-
-

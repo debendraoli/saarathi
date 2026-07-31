@@ -21,6 +21,14 @@ pub fn routes() -> Router<AppState> {
             axum::routing::delete(delete_location),
         )
         .route("/v1/me/location-ping", post(location_ping))
+        .route(
+            "/v1/me/preferences",
+            get(get_preferences).put(update_preferences),
+        )
+        .route(
+            "/v1/me/recent-searches",
+            get(list_recent).post(add_recent).delete(clear_recent),
+        )
 }
 
 async fn me(State(st): State<AppState>, AuthUser(claims): AuthUser) -> AppResult<Json<User>> {
@@ -136,5 +144,146 @@ async fn location_ping(
     .bind(body.speed_mps)
     .execute(&st.db)
     .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+// ── Preferences (default payment method + appearance) ───────────────────────
+
+#[derive(serde::Serialize, sqlx::FromRow)]
+struct Preferences {
+    default_payment_method: String,
+    theme: String,
+}
+
+async fn get_preferences(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<Preferences>> {
+    let prefs: Preferences = sqlx::query_as(
+        "SELECT default_payment_method, theme FROM user_preferences WHERE user_id = $1",
+    )
+    .bind(claims.sub)
+    .fetch_optional(&st.db)
+    .await?
+    .unwrap_or(Preferences {
+        default_payment_method: "cash".into(),
+        theme: "system".into(),
+    });
+    Ok(Json(prefs))
+}
+
+#[derive(Deserialize)]
+struct UpdatePreferences {
+    default_payment_method: Option<String>,
+    theme: Option<String>,
+}
+
+async fn update_preferences(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<UpdatePreferences>,
+) -> AppResult<Json<Preferences>> {
+    if let Some(m) = &body.default_payment_method {
+        if m != "cash" && m != "wallet" {
+            return Err(crate::error::AppError::BadRequest(
+                "payment method must be 'cash' or 'wallet'".into(),
+            ));
+        }
+    }
+    if let Some(t) = &body.theme {
+        if !matches!(t.as_str(), "system" | "light" | "dark") {
+            return Err(crate::error::AppError::BadRequest(
+                "theme must be system|light|dark".into(),
+            ));
+        }
+    }
+    let prefs: Preferences = sqlx::query_as(
+        "INSERT INTO user_preferences (user_id, default_payment_method, theme, updated_at) \
+         VALUES ($1, COALESCE($2, 'cash'), COALESCE($3, 'system'), now()) \
+         ON CONFLICT (user_id) DO UPDATE SET \
+             default_payment_method = COALESCE($2, user_preferences.default_payment_method), \
+             theme = COALESCE($3, user_preferences.theme), updated_at = now() \
+         RETURNING default_payment_method, theme",
+    )
+    .bind(claims.sub)
+    .bind(body.default_payment_method)
+    .bind(body.theme)
+    .fetch_one(&st.db)
+    .await?;
+    Ok(Json(prefs))
+}
+
+// ── Recent searches (synced across the rider's devices) ─────────────────────
+
+#[derive(serde::Serialize, sqlx::FromRow)]
+struct RecentSearch {
+    id: Uuid,
+    label: String,
+    address: Option<String>,
+    lat: Option<f64>,
+    lng: Option<f64>,
+}
+
+async fn list_recent(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<Vec<RecentSearch>>> {
+    let rows: Vec<RecentSearch> = sqlx::query_as(
+        "SELECT id, label, address, lat, lng FROM recent_searches \
+         WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10",
+    )
+    .bind(claims.sub)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+#[derive(Deserialize)]
+struct AddRecent {
+    label: String,
+    address: Option<String>,
+    lat: Option<f64>,
+    lng: Option<f64>,
+}
+
+async fn add_recent(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<AddRecent>,
+) -> AppResult<Json<Value>> {
+    // De-dupe by label, then trim the list back to the 10 most recent.
+    sqlx::query("DELETE FROM recent_searches WHERE user_id = $1 AND label = $2")
+        .bind(claims.sub)
+        .bind(&body.label)
+        .execute(&st.db)
+        .await?;
+    sqlx::query(
+        "INSERT INTO recent_searches (user_id, label, address, lat, lng) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(claims.sub)
+    .bind(&body.label)
+    .bind(body.address)
+    .bind(body.lat)
+    .bind(body.lng)
+    .execute(&st.db)
+    .await?;
+    sqlx::query(
+        "DELETE FROM recent_searches WHERE user_id = $1 AND id NOT IN ( \
+            SELECT id FROM recent_searches WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10)",
+    )
+    .bind(claims.sub)
+    .execute(&st.db)
+    .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn clear_recent(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<Value>> {
+    sqlx::query("DELETE FROM recent_searches WHERE user_id = $1")
+        .bind(claims.sub)
+        .execute(&st.db)
+        .await?;
     Ok(Json(json!({ "ok": true })))
 }

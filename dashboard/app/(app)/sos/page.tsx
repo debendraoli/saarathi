@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { rides, type SosIncident } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 export default function SosPage() {
   const [rows, setRows] = useState<SosIncident[]>([]);

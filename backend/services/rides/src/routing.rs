@@ -64,6 +64,34 @@ impl Router {
         self.haversine(origin, dest)
     }
 
+    /// Route through an ordered path (origin, waypoints…, dest), summing legs.
+    /// This is how multi-stop fares are measured.
+    pub async fn route_path(&self, points: &[LatLng]) -> RouteResult {
+        if points.len() < 2 {
+            return RouteResult {
+                distance_km: Decimal::ZERO,
+                duration_secs: 0,
+                source: "none",
+            };
+        }
+        let mut distance_km = Decimal::ZERO;
+        let mut duration_secs = 0i32;
+        let mut source = "osrm";
+        for leg in points.windows(2) {
+            let r = self.route(leg[0], leg[1]).await;
+            distance_km += r.distance_km;
+            duration_secs += r.duration_secs;
+            if r.source != "osrm" {
+                source = r.source; // any fallback leg taints the whole estimate's source
+            }
+        }
+        RouteResult {
+            distance_km,
+            duration_secs,
+            source,
+        }
+    }
+
     async fn osrm(&self, o: LatLng, d: LatLng) -> anyhow::Result<RouteResult> {
         // OSRM expects lng,lat order.
         let url = format!(

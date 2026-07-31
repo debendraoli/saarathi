@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { rides, type ActiveTrip, type TripLocation } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 export default function LivePage() {
   const [trips, setTrips] = useState<ActiveTrip[]>([]);

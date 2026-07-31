@@ -43,6 +43,9 @@ struct RideRequest {
     origin: LatLng,
     dest: LatLng,
     vehicle_class: String,
+    /// Optional intermediate waypoints (multi-stop rides).
+    #[serde(default)]
+    stops: Vec<LatLng>,
     #[serde(default)]
     code: Option<String>,
     /// 'cash' (default) or 'wallet' (pay from prepaid credits).
@@ -59,6 +62,7 @@ async fn estimate(
         &st,
         body.origin,
         body.dest,
+        &body.stops,
         &body.vehicle_class,
         body.code.as_deref(),
     )
@@ -75,6 +79,7 @@ async fn create(
         &st,
         body.origin,
         body.dest,
+        &body.stops,
         &body.vehicle_class,
         body.code.as_deref(),
     )
@@ -125,8 +130,8 @@ async fn create(
     let trip: Trip = sqlx::query_as(&format!(
         "INSERT INTO trips (rider_id, vehicle_class, origin_lat, origin_lng, dest_lat, dest_lng, \
             distance_km, duration_secs, gross_fare, discount_code, discount_amount, final_fare, \
-            commission, accident_fund, driver_payout, payment_method) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING {TRIP_COLS}"
+            commission, accident_fund, driver_payout, payment_method, stops) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING {TRIP_COLS}"
     ))
     .bind(claims.sub)
     .bind(&body.vehicle_class)
@@ -144,6 +149,7 @@ async fn create(
     .bind(est.accident_fund)
     .bind(est.driver_payout)
     .bind(method)
+    .bind(serde_json::to_value(&body.stops).unwrap_or_else(|_| serde_json::json!([])))
     .fetch_one(&mut *tx)
     .await?;
 

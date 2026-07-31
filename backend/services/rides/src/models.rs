@@ -11,7 +11,7 @@ use uuid::Uuid;
 pub const TRIP_COLS: &str = "id, rider_id, driver_id, trip_type::text AS trip_type, \
     status::text AS status, vehicle_class, origin_lat, origin_lng, dest_lat, dest_lng, \
     distance_km, duration_secs, gross_fare, discount_code, discount_amount, final_fare, \
-    commission, accident_fund, driver_payout, created_at, accepted_at, completed_at, cancelled_at";
+    commission, accident_fund, driver_payout, stops, created_at, accepted_at, completed_at, cancelled_at";
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct Trip {
@@ -34,6 +34,7 @@ pub struct Trip {
     pub commission: Decimal,
     pub accident_fund: Decimal,
     pub driver_payout: Decimal,
+    pub stops: serde_json::Value,
     pub created_at: DateTime<Utc>,
     pub accepted_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,

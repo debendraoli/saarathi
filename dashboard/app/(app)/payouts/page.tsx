@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { rides, type Payout } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 export default function PayoutsPage() {
   const [rows, setRows] = useState<Payout[]>([]);

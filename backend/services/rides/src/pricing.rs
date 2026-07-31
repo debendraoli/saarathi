@@ -64,11 +64,17 @@ pub async fn estimate(
     st: &AppState,
     origin: LatLng,
     dest: LatLng,
+    stops: &[LatLng],
     vehicle_class: &str,
     code: Option<&str>,
 ) -> AppResult<(Estimate, RouteResult)> {
     let vclass = parse_vehicle_class(vehicle_class)?;
-    let route = st.router.route(origin, dest).await;
+    // Fare distance runs origin → each stop → destination.
+    let mut path = Vec::with_capacity(stops.len() + 2);
+    path.push(origin);
+    path.extend_from_slice(stops);
+    path.push(dest);
+    let route = st.router.route_path(&path).await;
 
     let per_km = match vclass {
         VehicleClass::TwoWheeler => st.config.two_wheeler_per_km,
