@@ -12,4 +12,5 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub router: Arc<Router>,
     pub hub: Hub,
+    pub redis: redis::aio::ConnectionManager,
 }

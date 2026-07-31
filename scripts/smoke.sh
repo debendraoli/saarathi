@@ -67,8 +67,25 @@ step "create trip → accept → complete"
 TID=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
   -H 'content-type: application/json' -d "$BODY" | jq -r '.id')
 echo "  trip $TID created"
-j -X POST "$RIDES/v1/rides/$TID/accept" -H "authorization: Bearer $DTOKEN" >/dev/null
-echo "  driver accepted"
+
+# Driver goes online at the pickup so the dispatcher can reach them.
+j -X POST "$RIDES/v1/driver/online" -H "authorization: Bearer $DTOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"lat":28.0336,"lng":82.4836,"job_types":["ride"]}' >/dev/null
+echo "  driver online near pickup"
+
+# Wait for the dispatch engine to offer this trip to our driver.
+OFFER=""
+for _ in $(seq 1 15); do
+  OFFER=$(j "$RIDES/v1/driver/offers" -H "authorization: Bearer $DTOKEN" \
+    | jq -r --arg t "$TID" '.[] | select(.trip_id==$t) | .trip_id' | head -n1)
+  [ -n "$OFFER" ] && break
+  sleep 1
+done
+[ -n "$OFFER" ] || { echo "  no dispatch offer received"; exit 1; }
+echo "  dispatch offered trip to driver"
+j -X POST "$RIDES/v1/rides/$TID/offer/accept" -H "authorization: Bearer $DTOKEN" >/dev/null
+echo "  driver accepted offer"
 for s in arriving in_progress completed; do
   j -X POST "$RIDES/v1/rides/$TID/status" -H "authorization: Bearer $DTOKEN" \
     -H 'content-type: application/json' -d "{\"status\":\"$s\"}" >/dev/null

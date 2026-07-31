@@ -126,6 +126,16 @@ async fn create(
     .await?;
 
     tx.commit().await?;
+
+    // Kick dispatch immediately (the background loop is the safety net).
+    tokio::spawn({
+        let st = st.clone();
+        let trip_id = trip.id;
+        async move {
+            let _ = crate::dispatch::dispatch_trip(&st, trip_id).await;
+        }
+    });
+
     Ok(Json(trip))
 }
 

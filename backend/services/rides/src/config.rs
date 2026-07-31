@@ -20,6 +20,15 @@ pub struct Config {
     pub two_wheeler_per_km: Decimal,
     pub four_wheeler_per_km: Decimal,
     pub commission_rate: Decimal,
+    /// Redis connection for the driver geo-index + dispatch.
+    pub redis_url: String,
+    /// How long a driver has to respond to a job offer before it moves on.
+    pub offer_ttl_secs: i64,
+    /// Dispatch search radius (km); expands up to the max if no driver responds.
+    pub dispatch_radius_km: f64,
+    pub dispatch_max_radius_km: f64,
+    /// How stale a driver heartbeat may be before we treat them as offline (secs).
+    pub presence_ttl_secs: i64,
 }
 
 impl Config {
@@ -45,6 +54,11 @@ impl Config {
             two_wheeler_per_km: dec_env("FARE_TWO_WHEELER_PER_KM", "20"),
             four_wheeler_per_km: dec_env("FARE_FOUR_WHEELER_PER_KM", "45"),
             commission_rate: dec_env("FARE_COMMISSION_RATE", "0.10"),
+            redis_url: opt("REDIS_URL").unwrap_or_else(|| "redis://localhost:6379".into()),
+            offer_ttl_secs: int_env("DISPATCH_OFFER_TTL_SECS", 15),
+            dispatch_radius_km: float_env("DISPATCH_RADIUS_KM", 2.0),
+            dispatch_max_radius_km: float_env("DISPATCH_MAX_RADIUS_KM", 8.0),
+            presence_ttl_secs: int_env("DISPATCH_PRESENCE_TTL_SECS", 60),
         })
     }
 }
@@ -61,4 +75,12 @@ fn dec_env(key: &str, default: &str) -> Decimal {
     opt(key)
         .and_then(|v| v.parse().ok())
         .unwrap_or_else(|| default.parse().expect("valid default decimal"))
+}
+
+fn int_env(key: &str, default: i64) -> i64 {
+    opt(key).and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+fn float_env(key: &str, default: f64) -> f64 {
+    opt(key).and_then(|v| v.parse().ok()).unwrap_or(default)
 }

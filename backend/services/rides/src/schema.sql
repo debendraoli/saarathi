@@ -118,3 +118,16 @@ CREATE TABLE IF NOT EXISTS driver_wallets (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Dispatch offers: one row per (trip, driver) offer in the sequential-offer flow.
+CREATE TABLE IF NOT EXISTS trip_offers (
+    id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id    uuid        NOT NULL,
+    driver_id  uuid        NOT NULL,
+    status     text        NOT NULL DEFAULT 'offered',  -- offered | accepted | declined | expired
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS trip_offers_trip_idx   ON trip_offers (trip_id);
+CREATE INDEX IF NOT EXISTS trip_offers_driver_idx ON trip_offers (driver_id, status);
+CREATE INDEX IF NOT EXISTS trip_offers_active_idx ON trip_offers (status, expires_at);
+

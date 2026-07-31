@@ -7,6 +7,7 @@
 mod auth;
 mod config;
 mod db;
+mod dispatch;
 mod error;
 mod hub;
 mod ledger;
@@ -36,6 +37,9 @@ async fn main() -> anyhow::Result<()> {
     let pool = db::connect(&config.database_url).await?;
     db::init_schema(&pool).await?;
 
+    let redis_client = redis::Client::open(config.redis_url.clone())?;
+    let redis = redis::aio::ConnectionManager::new(redis_client).await?;
+
     let router = Arc::new(Router::new(&config));
     let port = config.port;
     let state = AppState {
@@ -43,7 +47,10 @@ async fn main() -> anyhow::Result<()> {
         config: Arc::new(config),
         router,
         hub: Hub::new(),
+        redis,
     };
+
+    tokio::spawn(dispatch::run_dispatcher(state.clone()));
 
     let app = routes::router(state);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));

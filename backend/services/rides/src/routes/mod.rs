@@ -1,6 +1,7 @@
 //! Router assembly + CORS.
 
 pub mod campaigns;
+pub mod dispatch;
 pub mod ledger;
 pub mod rides;
 
@@ -45,6 +46,7 @@ pub fn router(state: AppState) -> Router {
         .merge(rides::routes())
         .merge(campaigns::routes())
         .merge(ledger::routes())
+        .merge(dispatch::routes())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
