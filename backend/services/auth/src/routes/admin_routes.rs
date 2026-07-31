@@ -61,10 +61,12 @@ async fn list_drivers(
         .fetch_all(&st.db)
         .await?
     } else {
-        sqlx::query_as(&format!("{base} WHERE d.kyc_status::text = $1 ORDER BY d.created_at DESC"))
-            .bind(&status_filter)
-            .fetch_all(&st.db)
-            .await?
+        sqlx::query_as(&format!(
+            "{base} WHERE d.kyc_status::text = $1 ORDER BY d.created_at DESC"
+        ))
+        .bind(&status_filter)
+        .fetch_all(&st.db)
+        .await?
     };
 
     Ok(Json(items))
@@ -115,7 +117,12 @@ async fn driver_detail(
     .fetch_all(&st.db)
     .await?;
 
-    Ok(Json(DriverDetail { driver, user, vehicle, documents }))
+    Ok(Json(DriverDetail {
+        driver,
+        user,
+        vehicle,
+        documents,
+    }))
 }
 
 async fn approve_driver(
@@ -149,7 +156,15 @@ async fn approve_driver(
     .execute(&mut *tx)
     .await?;
 
-    audit::record(&st.db, claims.sub, "driver.approve", "driver", id, json!({})).await?;
+    audit::record(
+        &st.db,
+        claims.sub,
+        "driver.approve",
+        "driver",
+        id,
+        json!({}),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(json!({ "ok": true, "kyc_status": "approved" })))
 }
@@ -169,7 +184,9 @@ async fn reject_driver(
         return Err(AppError::Forbidden);
     }
     if body.reason.trim().is_empty() {
-        return Err(AppError::BadRequest("a rejection reason is required".into()));
+        return Err(AppError::BadRequest(
+            "a rejection reason is required".into(),
+        ));
     }
 
     let updated = sqlx::query(
@@ -185,7 +202,15 @@ async fn reject_driver(
         return Err(AppError::NotFound);
     }
 
-    audit::record(&st.db, claims.sub, "driver.reject", "driver", id, json!({ "reason": body.reason })).await?;
+    audit::record(
+        &st.db,
+        claims.sub,
+        "driver.reject",
+        "driver",
+        id,
+        json!({ "reason": body.reason }),
+    )
+    .await?;
     Ok(Json(json!({ "ok": true, "kyc_status": "rejected" })))
 }
 
@@ -201,8 +226,20 @@ async fn document_content(
             .await?;
     let (storage_key, content_type) = row.ok_or(AppError::NotFound)?;
 
-    let bytes = st.docs.get(&storage_key).await.map_err(|_| AppError::NotFound)?;
-    audit::record(&st.db, claims.sub, "document.view", "driver_document", id, json!({})).await?;
+    let bytes = st
+        .docs
+        .get(&storage_key)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    audit::record(
+        &st.db,
+        claims.sub,
+        "document.view",
+        "driver_document",
+        id,
+        json!({}),
+    )
+    .await?;
 
     let ct = content_type.unwrap_or_else(|| "application/octet-stream".into());
     Ok(([(header::CONTENT_TYPE, ct)], bytes).into_response())

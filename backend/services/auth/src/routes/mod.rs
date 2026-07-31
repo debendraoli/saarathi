@@ -13,7 +13,9 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 async fn health() -> Json<serde_json::Value> {
-    Json(json!({ "service": "saarathi-auth", "status": "ok", "version": env!("CARGO_PKG_VERSION") }))
+    Json(
+        json!({ "service": "saarathi-auth", "status": "ok", "version": env!("CARGO_PKG_VERSION") }),
+    )
 }
 
 pub fn router(state: AppState) -> Router {
@@ -26,7 +28,13 @@ pub fn router(state: AppState) -> Router {
 
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers([
             HeaderName::from_static("authorization"),
             HeaderName::from_static("content-type"),

@@ -38,8 +38,14 @@ async fn estimate(
     _auth: AuthUser,
     Json(body): Json<RideRequest>,
 ) -> AppResult<Json<Estimate>> {
-    let (est, _route) =
-        pricing::estimate(&st, body.origin, body.dest, &body.vehicle_class, body.code.as_deref()).await?;
+    let (est, _route) = pricing::estimate(
+        &st,
+        body.origin,
+        body.dest,
+        &body.vehicle_class,
+        body.code.as_deref(),
+    )
+    .await?;
     Ok(Json(est))
 }
 
@@ -48,8 +54,14 @@ async fn create(
     AuthUser(claims): AuthUser,
     Json(body): Json<RideRequest>,
 ) -> AppResult<Json<Trip>> {
-    let (est, _route) =
-        pricing::estimate(&st, body.origin, body.dest, &body.vehicle_class, body.code.as_deref()).await?;
+    let (est, _route) = pricing::estimate(
+        &st,
+        body.origin,
+        body.dest,
+        &body.vehicle_class,
+        body.code.as_deref(),
+    )
+    .await?;
 
     let mut tx = st.db.begin().await?;
 
@@ -169,7 +181,10 @@ async fn update_status(
     .fetch_one(&st.db)
     .await?;
 
-    st.hub.publish(id, json!({ "type": "status", "status": body.status }).to_string());
+    st.hub.publish(
+        id,
+        json!({ "type": "status", "status": body.status }).to_string(),
+    );
     Ok(Json(trip))
 }
 
@@ -189,7 +204,10 @@ async fn get_trip(
     Ok(Json(trip))
 }
 
-async fn list_mine(State(st): State<AppState>, AuthUser(claims): AuthUser) -> AppResult<Json<Vec<Trip>>> {
+async fn list_mine(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<Vec<Trip>>> {
     let trips: Vec<Trip> = sqlx::query_as(&format!(
         "SELECT {TRIP_COLS} FROM trips WHERE rider_id = $1 OR driver_id = $1 ORDER BY created_at DESC LIMIT 100"
     ))

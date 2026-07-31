@@ -26,10 +26,18 @@ impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         Ok(Config {
             database_url: req("DATABASE_URL")?,
-            port: opt("RIDES_PORT").unwrap_or_else(|| "8082".into()).parse().context("RIDES_PORT")?,
+            port: opt("RIDES_PORT")
+                .unwrap_or_else(|| "8082".into())
+                .parse()
+                .context("RIDES_PORT")?,
             jwt_secret: req("JWT_SECRET")?,
             cors_origins: opt("CORS_ORIGINS")
-                .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                .map(|v| {
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
                 .unwrap_or_else(|| vec!["http://localhost:3000".into()]),
             routing_url: opt("ROUTING_URL").unwrap_or_default(),
             road_factor: dec_env("ROUTING_ROAD_FACTOR", "1.3"),

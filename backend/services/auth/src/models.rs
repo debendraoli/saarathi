@@ -30,7 +30,10 @@ impl UserRole {
 
     /// Roles allowed to make KYC approve/reject decisions.
     pub fn can_review_kyc(self) -> bool {
-        matches!(self, UserRole::SuperAdmin | UserRole::Admin | UserRole::Compliance)
+        matches!(
+            self,
+            UserRole::SuperAdmin | UserRole::Admin | UserRole::Compliance
+        )
     }
 }
 

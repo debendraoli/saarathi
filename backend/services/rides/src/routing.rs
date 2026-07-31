@@ -56,7 +56,9 @@ impl Router {
         if !self.url.is_empty() {
             match self.osrm(origin, dest).await {
                 Ok(r) => return r,
-                Err(e) => tracing::warn!(error = %e, "routing provider failed; using haversine fallback"),
+                Err(e) => {
+                    tracing::warn!(error = %e, "routing provider failed; using haversine fallback")
+                }
             }
         }
         self.haversine(origin, dest)
@@ -68,10 +70,27 @@ impl Router {
             "{}/route/v1/driving/{},{};{},{}?overview=false",
             self.url, o.lng, o.lat, d.lng, d.lat
         );
-        let resp: OsrmResponse = self.http.get(url).send().await?.error_for_status()?.json().await?;
-        let route = resp.routes.into_iter().next().ok_or_else(|| anyhow::anyhow!("no route"))?;
-        let km = Decimal::from_f64(route.distance / 1000.0).unwrap_or_default().round_dp(3);
-        Ok(RouteResult { distance_km: km, duration_secs: route.duration.round() as i32, source: "osrm" })
+        let resp: OsrmResponse = self
+            .http
+            .get(url)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        let route = resp
+            .routes
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("no route"))?;
+        let km = Decimal::from_f64(route.distance / 1000.0)
+            .unwrap_or_default()
+            .round_dp(3);
+        Ok(RouteResult {
+            distance_km: km,
+            duration_secs: route.duration.round() as i32,
+            source: "osrm",
+        })
     }
 
     fn haversine(&self, o: LatLng, d: LatLng) -> RouteResult {

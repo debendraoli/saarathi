@@ -16,7 +16,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/me", get(me).put(update_me))
         .route("/v1/me/locations", get(list_locations).post(add_location))
-        .route("/v1/me/locations/{id}", axum::routing::delete(delete_location))
+        .route(
+            "/v1/me/locations/{id}",
+            axum::routing::delete(delete_location),
+        )
         .route("/v1/me/location-ping", post(location_ping))
 }
 

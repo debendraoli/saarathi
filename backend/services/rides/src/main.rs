@@ -11,8 +11,8 @@ mod error;
 mod hub;
 mod models;
 mod pricing;
-mod routing;
 mod routes;
+mod routing;
 mod state;
 mod ws;
 
@@ -37,7 +37,12 @@ async fn main() -> anyhow::Result<()> {
 
     let router = Arc::new(Router::new(&config));
     let port = config.port;
-    let state = AppState { db: pool, config: Arc::new(config), router, hub: Hub::new() };
+    let state = AppState {
+        db: pool,
+        config: Arc::new(config),
+        router,
+        hub: Hub::new(),
+    };
 
     let app = routes::router(state);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));

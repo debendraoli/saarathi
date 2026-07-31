@@ -14,6 +14,8 @@ pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
 }
 
 pub async fn init_schema(pool: &PgPool) -> anyhow::Result<()> {
-    sqlx::raw_sql(include_str!("schema.sql")).execute(pool).await?;
+    sqlx::raw_sql(include_str!("schema.sql"))
+        .execute(pool)
+        .await?;
     Ok(())
 }

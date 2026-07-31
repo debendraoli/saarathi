@@ -18,7 +18,10 @@ impl Hub {
 
     fn sender(&self, trip: Uuid) -> broadcast::Sender<String> {
         let mut rooms = self.rooms.lock().expect("hub lock");
-        rooms.entry(trip).or_insert_with(|| broadcast::channel(128).0).clone()
+        rooms
+            .entry(trip)
+            .or_insert_with(|| broadcast::channel(128).0)
+            .clone()
     }
 
     pub fn subscribe(&self, trip: Uuid) -> broadcast::Receiver<String> {

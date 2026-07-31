@@ -14,6 +14,17 @@ use saarathi_core::legal::VehicleClass;
 use saarathi_core::pricing::{quote_fare, PricingConfig};
 use serde::Serialize;
 
+#[derive(sqlx::FromRow)]
+struct PromoRow {
+    kind: String,
+    value: Decimal,
+    min_fare: Decimal,
+    max_discount: Option<Decimal>,
+    vehicle_class: Option<String>,
+    usage_limit: Option<i32>,
+    used_count: i32,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Estimate {
     pub vehicle_class: String,
@@ -36,7 +47,9 @@ pub fn parse_vehicle_class(s: &str) -> AppResult<VehicleClass> {
     match s {
         "two_wheeler" => Ok(VehicleClass::TwoWheeler),
         "four_wheeler" => Ok(VehicleClass::FourWheeler),
-        other => Err(AppError::BadRequest(format!("unknown vehicle class '{other}'"))),
+        other => Err(AppError::BadRequest(format!(
+            "unknown vehicle class '{other}'"
+        ))),
     }
 }
 
@@ -65,15 +78,20 @@ pub async fn estimate(
         vclass,
         route.distance_km,
         dec!(1.0),
-        PricingConfig { per_km_rate: per_km, commission_rate: st.config.commission_rate },
+        PricingConfig {
+            per_km_rate: per_km,
+            commission_rate: st.config.commission_rate,
+        },
     );
     let gross = quote.fare.amount();
 
     let (discount_code, discount_amount, note) = match code {
-        Some(c) if !c.trim().is_empty() => match apply_rider_discount(st, c.trim(), gross, vclass).await {
-            Ok(amount) => (Some(c.trim().to_string()), amount, None),
-            Err(msg) => (None, Decimal::ZERO, Some(msg)),
-        },
+        Some(c) if !c.trim().is_empty() => {
+            match apply_rider_discount(st, c.trim(), gross, vclass).await {
+                Ok(amount) => (Some(c.trim().to_string()), amount, None),
+                Err(msg) => (None, Decimal::ZERO, Some(msg)),
+            }
+        }
         _ => (None, Decimal::ZERO, None),
     };
 
@@ -106,20 +124,28 @@ async fn apply_rider_discount(
     gross: Decimal,
     vclass: VehicleClass,
 ) -> Result<Decimal, String> {
-    let row: Option<(String, Decimal, Decimal, Option<Decimal>, Option<String>, Option<i32>, i32)> =
-        sqlx::query_as(
-            "SELECT kind::text, value, min_fare, max_discount, vehicle_class, usage_limit, used_count \
+    let row: Option<PromoRow> = sqlx::query_as(
+        "SELECT kind::text, value, min_fare, max_discount, vehicle_class, usage_limit, used_count \
              FROM campaigns \
              WHERE code = $1 AND audience = 'rider' AND active = true \
                AND (starts_at IS NULL OR starts_at <= now()) \
                AND (ends_at IS NULL OR ends_at >= now())",
-        )
-        .bind(code)
-        .fetch_optional(&st.db)
-        .await
-        .map_err(|_| "could not validate code".to_string())?;
+    )
+    .bind(code)
+    .fetch_optional(&st.db)
+    .await
+    .map_err(|_| "could not validate code".to_string())?;
 
-    let Some((kind, value, min_fare, max_discount, vclass_filter, usage_limit, used_count)) = row else {
+    let Some(PromoRow {
+        kind,
+        value,
+        min_fare,
+        max_discount,
+        vehicle_class: vclass_filter,
+        usage_limit,
+        used_count,
+    }) = row
+    else {
         return Err("invalid or expired code".into());
     };
 
@@ -129,7 +155,9 @@ async fn apply_rider_discount(
         }
     }
     if gross < min_fare {
-        return Err(format!("minimum fare NPR {min_fare} required for this code"));
+        return Err(format!(
+            "minimum fare NPR {min_fare} required for this code"
+        ));
     }
     if let Some(limit) = usage_limit {
         if used_count >= limit {

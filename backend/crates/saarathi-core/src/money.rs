@@ -90,14 +90,23 @@ mod tests {
 
     #[test]
     fn add_and_sub() {
-        assert_eq!(Money::from_rupees(10) + Money::from_rupees(5), Money::from_rupees(15));
-        assert_eq!(Money::from_rupees(10) - Money::from_rupees(5), Money::from_rupees(5));
+        assert_eq!(
+            Money::from_rupees(10) + Money::from_rupees(5),
+            Money::from_rupees(15)
+        );
+        assert_eq!(
+            Money::from_rupees(10) - Money::from_rupees(5),
+            Money::from_rupees(5)
+        );
     }
 
     #[test]
     fn scale_and_round() {
         let fare = Money::from_rupees(100);
         assert_eq!(fare.scale(dec!(0.10)), Money::from_decimal(dec!(10.0)));
-        assert_eq!(Money::from_decimal(dec!(10.005)).round_paisa(), Money::from_decimal(dec!(10.00)));
+        assert_eq!(
+            Money::from_decimal(dec!(10.005)).round_paisa(),
+            Money::from_decimal(dec!(10.00))
+        );
     }
 }

@@ -41,7 +41,11 @@ async fn main() -> anyhow::Result<()> {
 
     let docs = Arc::new(LocalDocumentStore::new(&config.kyc_storage_dir));
     let port = config.port;
-    let state = AppState { db: pool, config: Arc::new(config), docs };
+    let state = AppState {
+        db: pool,
+        config: Arc::new(config),
+        docs,
+    };
 
     let app = routes::router(state);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));

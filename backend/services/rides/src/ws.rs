@@ -72,13 +72,20 @@ async fn socket_loop(socket: WebSocket, st: AppState, uid: Uuid, trip: Uuid) {
         }
     });
 
-    st.hub.publish(trip, json!({ "type": "presence", "event": "join", "sender_id": uid }).to_string());
+    st.hub.publish(
+        trip,
+        json!({ "type": "presence", "event": "join", "sender_id": uid }).to_string(),
+    );
 
     while let Some(Ok(msg)) = stream.next().await {
         match msg {
             Message::Text(text) => {
                 let enriched = enrich(text.as_str(), uid);
-                let kind = enriched.get("type").and_then(Value::as_str).unwrap_or("event").to_string();
+                let kind = enriched
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("event")
+                    .to_string();
                 let _ = sqlx::query(
                     "INSERT INTO trip_events (trip_id, sender_id, kind, payload) VALUES ($1, $2, $3, $4)",
                 )
@@ -96,11 +103,15 @@ async fn socket_loop(socket: WebSocket, st: AppState, uid: Uuid, trip: Uuid) {
     }
 
     send_task.abort();
-    st.hub.publish(trip, json!({ "type": "presence", "event": "leave", "sender_id": uid }).to_string());
+    st.hub.publish(
+        trip,
+        json!({ "type": "presence", "event": "leave", "sender_id": uid }).to_string(),
+    );
 }
 
 fn enrich(raw: &str, uid: Uuid) -> Value {
-    let mut v: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!({ "type": "chat", "body": raw }));
+    let mut v: Value =
+        serde_json::from_str(raw).unwrap_or_else(|_| json!({ "type": "chat", "body": raw }));
     if !v.is_object() {
         v = json!({ "type": "message", "data": v });
     }

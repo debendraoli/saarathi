@@ -75,7 +75,11 @@ pub fn quote_fare(
     let billable_distance_km = distance_km.max(MIN_DISTANCE_KM);
 
     // 3. Surge is clamped to the legal +20% ceiling.
-    let effective_surge = clamp(dynamic_multiplier, NO_SURGE_MULTIPLIER, MAX_SURGE_MULTIPLIER);
+    let effective_surge = clamp(
+        dynamic_multiplier,
+        NO_SURGE_MULTIPLIER,
+        MAX_SURGE_MULTIPLIER,
+    );
 
     // 4. Assemble the fare.
     let base = Money::from_decimal(billable_distance_km * effective_per_km_rate);
@@ -113,7 +117,12 @@ mod tests {
     #[test]
     fn basic_two_wheeler_fare() {
         // 5 km at NPR 20/km, no surge => 100. Commission 10% => 10, fund 1% => 1.
-        let q = quote_fare(VehicleClass::TwoWheeler, dec!(5), dec!(1.0), cfg(dec!(20), dec!(0.10)));
+        let q = quote_fare(
+            VehicleClass::TwoWheeler,
+            dec!(5),
+            dec!(1.0),
+            cfg(dec!(20), dec!(0.10)),
+        );
         assert_eq!(q.fare, Money::from_decimal(dec!(100.00)));
         assert_eq!(q.commission, Money::from_decimal(dec!(10.00)));
         assert_eq!(q.accident_fund, Money::from_decimal(dec!(1.00)));
@@ -123,7 +132,12 @@ mod tests {
     #[test]
     fn minimum_distance_is_enforced() {
         // A 0.5 km ride is billed as 2 km.
-        let q = quote_fare(VehicleClass::TwoWheeler, dec!(0.5), dec!(1.0), cfg(dec!(25), dec!(0.10)));
+        let q = quote_fare(
+            VehicleClass::TwoWheeler,
+            dec!(0.5),
+            dec!(1.0),
+            cfg(dec!(25), dec!(0.10)),
+        );
         assert_eq!(q.billable_distance_km, dec!(2));
         assert_eq!(q.fare, Money::from_decimal(dec!(50.00))); // 2 * 25
     }
@@ -131,7 +145,12 @@ mod tests {
     #[test]
     fn per_km_rate_cannot_exceed_legal_cap() {
         // Admin tries NPR 999/km on a two-wheeler; clamps to 25.
-        let q = quote_fare(VehicleClass::TwoWheeler, dec!(10), dec!(1.0), cfg(dec!(999), dec!(0.10)));
+        let q = quote_fare(
+            VehicleClass::TwoWheeler,
+            dec!(10),
+            dec!(1.0),
+            cfg(dec!(999), dec!(0.10)),
+        );
         assert_eq!(q.effective_per_km_rate, dec!(25));
         assert_eq!(q.fare, Money::from_decimal(dec!(250.00)));
     }
@@ -139,7 +158,12 @@ mod tests {
     #[test]
     fn surge_cannot_exceed_20_percent() {
         // Admin/engine proposes 3x surge; clamps to 1.20.
-        let q = quote_fare(VehicleClass::FourWheeler, dec!(10), dec!(3.0), cfg(dec!(55), dec!(0.10)));
+        let q = quote_fare(
+            VehicleClass::FourWheeler,
+            dec!(10),
+            dec!(3.0),
+            cfg(dec!(55), dec!(0.10)),
+        );
         assert_eq!(q.effective_surge, dec!(1.20));
         // 10 km * 55 * 1.20 = 660
         assert_eq!(q.fare, Money::from_decimal(dec!(660.00)));
@@ -148,14 +172,24 @@ mod tests {
     #[test]
     fn commission_cannot_exceed_10_percent() {
         // Admin tries 50% commission; clamps to 10%.
-        let q = quote_fare(VehicleClass::TwoWheeler, dec!(4), dec!(1.0), cfg(dec!(25), dec!(0.50)));
+        let q = quote_fare(
+            VehicleClass::TwoWheeler,
+            dec!(4),
+            dec!(1.0),
+            cfg(dec!(25), dec!(0.50)),
+        );
         // fare = 100; commission clamped to 10
         assert_eq!(q.commission, Money::from_decimal(dec!(10.00)));
     }
 
     #[test]
     fn payout_is_fare_minus_commission_and_fund() {
-        let q = quote_fare(VehicleClass::TwoWheeler, dec!(4), dec!(1.0), cfg(dec!(25), dec!(0.10)));
+        let q = quote_fare(
+            VehicleClass::TwoWheeler,
+            dec!(4),
+            dec!(1.0),
+            cfg(dec!(25), dec!(0.10)),
+        );
         assert_eq!(q.fare, q.commission + q.accident_fund + q.driver_payout);
     }
 }

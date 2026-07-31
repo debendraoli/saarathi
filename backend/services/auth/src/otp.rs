@@ -21,7 +21,9 @@ pub fn hash_code(code: &str) -> anyhow::Result<String> {
 
 pub fn verify_code(code: &str, hash: &str) -> bool {
     match PasswordHash::new(hash) {
-        Ok(parsed) => Argon2::default().verify_password(code.as_bytes(), &parsed).is_ok(),
+        Ok(parsed) => Argon2::default()
+            .verify_password(code.as_bytes(), &parsed)
+            .is_ok(),
         Err(_) => false,
     }
 }

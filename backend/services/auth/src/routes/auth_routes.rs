@@ -25,19 +25,25 @@ struct OtpRequest {
     phone: String,
 }
 
-async fn request_otp(State(st): State<AppState>, Json(body): Json<OtpRequest>) -> AppResult<Json<Value>> {
+async fn request_otp(
+    State(st): State<AppState>,
+    Json(body): Json<OtpRequest>,
+) -> AppResult<Json<Value>> {
     let phone = body.phone.trim().to_string();
     if !otp::valid_phone(&phone) {
-        return Err(AppError::BadRequest("invalid phone number (use E.164, e.g. +9779800000000)".into()));
+        return Err(AppError::BadRequest(
+            "invalid phone number (use E.164, e.g. +9779800000000)".into(),
+        ));
     }
 
     // Rate limit by phone over the configured window.
     let since = Utc::now() - Duration::seconds(st.config.otp_rate_window_secs);
-    let recent: i64 = sqlx::query_scalar("SELECT count(*) FROM otp_codes WHERE phone = $1 AND created_at > $2")
-        .bind(&phone)
-        .bind(since)
-        .fetch_one(&st.db)
-        .await?;
+    let recent: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM otp_codes WHERE phone = $1 AND created_at > $2")
+            .bind(&phone)
+            .bind(since)
+            .fetch_one(&st.db)
+            .await?;
     if recent >= st.config.otp_rate_max {
         return Err(AppError::RateLimited);
     }
@@ -78,7 +84,10 @@ struct TokenPair {
     user: User,
 }
 
-async fn verify_otp(State(st): State<AppState>, Json(body): Json<VerifyRequest>) -> AppResult<Json<TokenPair>> {
+async fn verify_otp(
+    State(st): State<AppState>,
+    Json(body): Json<VerifyRequest>,
+) -> AppResult<Json<TokenPair>> {
     let phone = body.phone.trim().to_string();
 
     let row: Option<(Uuid, String, i32)> = sqlx::query_as(
@@ -109,7 +118,11 @@ async fn verify_otp(State(st): State<AppState>, Json(body): Json<VerifyRequest>)
         .await?;
 
     // Upsert the user by phone. Never downgrade an existing (e.g. staff) role.
-    let default_role = if body.as_driver { UserRole::Driver } else { UserRole::Rider };
+    let default_role = if body.as_driver {
+        UserRole::Driver
+    } else {
+        UserRole::Rider
+    };
     let user: User = sqlx::query_as(
         "INSERT INTO users (phone, role) VALUES ($1, $2) \
          ON CONFLICT (phone) DO UPDATE SET updated_at = now() \
@@ -129,7 +142,10 @@ struct RefreshRequest {
     refresh_token: String,
 }
 
-async fn refresh(State(st): State<AppState>, Json(body): Json<RefreshRequest>) -> AppResult<Json<TokenPair>> {
+async fn refresh(
+    State(st): State<AppState>,
+    Json(body): Json<RefreshRequest>,
+) -> AppResult<Json<TokenPair>> {
     let hash = token::hash_token(&body.refresh_token);
 
     let row: Option<(Uuid, Uuid)> = sqlx::query_as(
@@ -158,18 +174,28 @@ async fn refresh(State(st): State<AppState>, Json(body): Json<RefreshRequest>) -
     Ok(Json(pair))
 }
 
-async fn logout(State(st): State<AppState>, Json(body): Json<RefreshRequest>) -> AppResult<Json<Value>> {
+async fn logout(
+    State(st): State<AppState>,
+    Json(body): Json<RefreshRequest>,
+) -> AppResult<Json<Value>> {
     let hash = token::hash_token(&body.refresh_token);
-    sqlx::query("UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL")
-        .bind(&hash)
-        .execute(&st.db)
-        .await?;
+    sqlx::query(
+        "UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL",
+    )
+    .bind(&hash)
+    .execute(&st.db)
+    .await?;
     Ok(Json(json!({ "ok": true })))
 }
 
 async fn issue_tokens(st: &AppState, user: &User) -> AppResult<TokenPair> {
-    let access = token::issue_access(&st.config.jwt_secret, user.id, user.role, st.config.access_ttl_secs)
-        .map_err(AppError::Other)?;
+    let access = token::issue_access(
+        &st.config.jwt_secret,
+        user.id,
+        user.role,
+        st.config.access_ttl_secs,
+    )
+    .map_err(AppError::Other)?;
     let refresh = token::generate_refresh_token();
     let refresh_hash = token::hash_token(&refresh);
     let expires_at = Utc::now() + Duration::seconds(st.config.refresh_ttl_secs);
@@ -181,5 +207,9 @@ async fn issue_tokens(st: &AppState, user: &User) -> AppResult<TokenPair> {
         .execute(&st.db)
         .await?;
 
-    Ok(TokenPair { access_token: access, refresh_token: refresh, user: user.clone() })
+    Ok(TokenPair {
+        access_token: access,
+        refresh_token: refresh,
+        user: user.clone(),
+    })
 }

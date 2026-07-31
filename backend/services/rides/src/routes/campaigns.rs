@@ -44,10 +44,14 @@ async fn create(
     Json(body): Json<NewCampaign>,
 ) -> AppResult<Json<Campaign>> {
     if !matches!(body.audience.as_str(), "rider" | "driver") {
-        return Err(AppError::BadRequest("audience must be 'rider' or 'driver'".into()));
+        return Err(AppError::BadRequest(
+            "audience must be 'rider' or 'driver'".into(),
+        ));
     }
     if !matches!(body.kind.as_str(), "percent" | "flat") {
-        return Err(AppError::BadRequest("kind must be 'percent' or 'flat'".into()));
+        return Err(AppError::BadRequest(
+            "kind must be 'percent' or 'flat'".into(),
+        ));
     }
     if body.code.trim().is_empty() {
         return Err(AppError::BadRequest("code is required".into()));
@@ -85,10 +89,11 @@ async fn create(
 }
 
 async fn list(State(st): State<AppState>, _staff: StaffUser) -> AppResult<Json<Vec<Campaign>>> {
-    let rows: Vec<Campaign> =
-        sqlx::query_as(&format!("SELECT {CAMPAIGN_COLS} FROM campaigns ORDER BY created_at DESC"))
-            .fetch_all(&st.db)
-            .await?;
+    let rows: Vec<Campaign> = sqlx::query_as(&format!(
+        "SELECT {CAMPAIGN_COLS} FROM campaigns ORDER BY created_at DESC"
+    ))
+    .fetch_all(&st.db)
+    .await?;
     Ok(Json(rows))
 }
 

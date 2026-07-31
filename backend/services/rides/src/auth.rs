@@ -24,9 +24,13 @@ impl Claims {
 }
 
 pub fn verify_access(secret: &str, token: &str) -> Result<Claims, AppError> {
-    decode::<Claims>(token, &DecodingKey::from_secret(secret.as_bytes()), &Validation::default())
-        .map(|d| d.claims)
-        .map_err(|_| AppError::Unauthorized)
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &Validation::default(),
+    )
+    .map(|d| d.claims)
+    .map_err(|_| AppError::Unauthorized)
 }
 
 /// Any authenticated user.
@@ -35,13 +39,18 @@ pub struct AuthUser(pub Claims);
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = AppError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let header = parts
             .headers
             .get(AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .ok_or(AppError::Unauthorized)?;
-        let token = header.strip_prefix("Bearer ").ok_or(AppError::Unauthorized)?;
+        let token = header
+            .strip_prefix("Bearer ")
+            .ok_or(AppError::Unauthorized)?;
         Ok(AuthUser(verify_access(&state.config.jwt_secret, token)?))
     }
 }
@@ -52,7 +61,10 @@ pub struct StaffUser(pub Claims);
 impl FromRequestParts<AppState> for StaffUser {
     type Rejection = AppError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let AuthUser(claims) = AuthUser::from_request_parts(parts, state).await?;
         if !claims.is_staff() {
             return Err(AppError::Forbidden);

@@ -25,7 +25,10 @@ impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         Ok(Config {
             database_url: req("DATABASE_URL")?,
-            port: opt("PORT").unwrap_or_else(|| "8081".into()).parse().context("PORT")?,
+            port: opt("PORT")
+                .unwrap_or_else(|| "8081".into())
+                .parse()
+                .context("PORT")?,
             jwt_secret: req("JWT_SECRET")?,
             access_ttl_secs: opt_parse("JWT_ACCESS_TTL_SECS", 900),
             refresh_ttl_secs: opt_parse("JWT_REFRESH_TTL_DAYS", 30) * 86_400,
@@ -35,7 +38,12 @@ impl Config {
             otp_dev_mode: flag("OTP_DEV_MODE"),
             kyc_storage_dir: opt("KYC_STORAGE_DIR").unwrap_or_else(|| "./.data/kyc".into()),
             cors_origins: opt("CORS_ORIGINS")
-                .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                .map(|v| {
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
                 .unwrap_or_else(|| vec!["http://localhost:3000".into()]),
             seed_dev_admin_phone: opt("SEED_DEV_ADMIN_PHONE"),
         })

@@ -1,7 +1,7 @@
 //! Driver registration + KYC document submission.
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Driver, DriverDocument, DocumentKind, Vehicle, VehicleClass};
+use crate::models::{DocumentKind, Driver, DriverDocument, Vehicle, VehicleClass};
 use crate::state::{AppState, AuthUser};
 use axum::extract::{Multipart, State};
 use axum::{
@@ -112,15 +112,25 @@ async fn upload_document(
     let mut content_type: Option<String> = None;
     let mut bytes: Option<Vec<u8>> = None;
 
-    while let Some(field) = multipart.next_field().await.map_err(|e| AppError::BadRequest(e.to_string()))? {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?
+    {
         match field.name() {
             Some("kind") => {
-                let text = field.text().await.map_err(|e| AppError::BadRequest(e.to_string()))?;
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
                 kind = Some(parse_kind(&text)?);
             }
             Some("file") => {
                 content_type = field.content_type().map(|s| s.to_string());
-                let data = field.bytes().await.map_err(|e| AppError::BadRequest(e.to_string()))?;
+                let data = field
+                    .bytes()
+                    .await
+                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
                 bytes = Some(data.to_vec());
             }
             _ => {}
@@ -134,7 +144,10 @@ async fn upload_document(
     }
 
     let storage_key = format!("{driver_id}/{}", Uuid::new_v4());
-    st.docs.put(&storage_key, bytes).await.map_err(AppError::Other)?;
+    st.docs
+        .put(&storage_key, bytes)
+        .await
+        .map_err(AppError::Other)?;
 
     let doc: DriverDocument = sqlx::query_as(
         "INSERT INTO driver_documents (driver_id, kind, storage_key, content_type, status) \
@@ -149,15 +162,20 @@ async fn upload_document(
     .await?;
 
     // First submission moves the driver into the review queue.
-    sqlx::query("UPDATE drivers SET kyc_status = 'under_review' WHERE id = $1 AND kyc_status = 'pending'")
-        .bind(driver_id)
-        .execute(&st.db)
-        .await?;
+    sqlx::query(
+        "UPDATE drivers SET kyc_status = 'under_review' WHERE id = $1 AND kyc_status = 'pending'",
+    )
+    .bind(driver_id)
+    .execute(&st.db)
+    .await?;
 
     Ok(Json(doc))
 }
 
-async fn status(State(st): State<AppState>, AuthUser(claims): AuthUser) -> AppResult<Json<DriverProfile>> {
+async fn status(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<DriverProfile>> {
     let driver: Driver = sqlx::query_as(
         "SELECT id, user_id, kyc_status, license_number, date_of_birth, address, \
                 rejection_reason, reviewed_by, reviewed_at, approved_at, created_at, updated_at \
@@ -183,7 +201,11 @@ async fn status(State(st): State<AppState>, AuthUser(claims): AuthUser) -> AppRe
     .fetch_all(&st.db)
     .await?;
 
-    Ok(Json(DriverProfile { driver, vehicle, documents }))
+    Ok(Json(DriverProfile {
+        driver,
+        vehicle,
+        documents,
+    }))
 }
 
 fn parse_kind(s: &str) -> Result<DocumentKind, AppError> {
@@ -196,6 +218,10 @@ fn parse_kind(s: &str) -> Result<DocumentKind, AppError> {
         "tax_clearance" => DocumentKind::TaxClearance,
         "profile_photo" => DocumentKind::ProfilePhoto,
         "vehicle_photo" => DocumentKind::VehiclePhoto,
-        other => return Err(AppError::BadRequest(format!("unknown document kind '{other}'"))),
+        other => {
+            return Err(AppError::BadRequest(format!(
+                "unknown document kind '{other}'"
+            )))
+        }
     })
 }

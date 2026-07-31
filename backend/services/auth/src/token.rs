@@ -16,15 +16,33 @@ pub struct Claims {
     pub exp: i64,
 }
 
-pub fn issue_access(secret: &str, user_id: Uuid, role: UserRole, ttl_secs: i64) -> anyhow::Result<String> {
+pub fn issue_access(
+    secret: &str,
+    user_id: Uuid,
+    role: UserRole,
+    ttl_secs: i64,
+) -> anyhow::Result<String> {
     let now = Utc::now().timestamp();
-    let claims = Claims { sub: user_id, role, iat: now, exp: now + ttl_secs };
-    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))?;
+    let claims = Claims {
+        sub: user_id,
+        role,
+        iat: now,
+        exp: now + ttl_secs,
+    };
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )?;
     Ok(token)
 }
 
 pub fn verify_access(secret: &str, token: &str) -> anyhow::Result<Claims> {
-    let data = decode::<Claims>(token, &DecodingKey::from_secret(secret.as_bytes()), &Validation::default())?;
+    let data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &Validation::default(),
+    )?;
     Ok(data.claims)
 }
 

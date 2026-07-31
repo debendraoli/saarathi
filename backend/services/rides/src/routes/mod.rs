@@ -12,14 +12,27 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 async fn health() -> Json<serde_json::Value> {
-    Json(json!({ "service": "saarathi-rides", "status": "ok", "version": env!("CARGO_PKG_VERSION") }))
+    Json(
+        json!({ "service": "saarathi-rides", "status": "ok", "version": env!("CARGO_PKG_VERSION") }),
+    )
 }
 
 pub fn router(state: AppState) -> Router {
-    let origins: Vec<_> = state.config.cors_origins.iter().filter_map(|o| o.parse().ok()).collect();
+    let origins: Vec<_> = state
+        .config
+        .cors_origins
+        .iter()
+        .filter_map(|o| o.parse().ok())
+        .collect();
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers([
             HeaderName::from_static("authorization"),
             HeaderName::from_static("content-type"),
