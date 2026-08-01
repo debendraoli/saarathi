@@ -469,6 +469,33 @@ export const rides = {
 
   // Fleet analytics (partner-scoped)
   partnerAnalytics: (pid: string) => ridesRequest<FleetAnalytics>(`/v1/partner/${pid}/analytics`),
+
+  // Fleet money (partner-scoped)
+  partnerWallet: (pid: string) => ridesRequest<PartnerWallet>(`/v1/partner/${pid}/wallet`),
+  partnerLedger: (pid: string) => ridesRequest<PartnerLedgerRow[]>(`/v1/partner/${pid}/ledger`),
+  partnerTopup: (pid: string, amount: number) =>
+    ridesRequest<{ reference: string }>(`/v1/partner/${pid}/wallet/topup`, {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    }),
+  partnerConfirmTopup: (pid: string, reference: string) =>
+    ridesRequest<{ confirmed: boolean; balance: string }>(`/v1/partner/${pid}/wallet/topup/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ reference }),
+    }),
+  partnerRequestPayout: (pid: string, amount?: number) =>
+    ridesRequest<{ amount: string; balance: string }>(`/v1/partner/${pid}/payouts`, {
+      method: "POST",
+      body: JSON.stringify(amount ? { amount } : {}),
+    }),
+  partnerCampaigns: (pid: string) => ridesRequest<FleetCampaign[]>(`/v1/partner/${pid}/campaigns`),
+  partnerCreateCampaign: (pid: string, body: NewFleetCampaign) =>
+    ridesRequest<FleetCampaign>(`/v1/partner/${pid}/campaigns`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  partnerDeactivateCampaign: (pid: string, id: string) =>
+    ridesRequest<{ ok: boolean }>(`/v1/partner/${pid}/campaigns/${id}/deactivate`, { method: "POST" }),
 };
 
 export interface FleetAnalytics {
@@ -476,6 +503,41 @@ export interface FleetAnalytics {
   trips: { total: number; completed: number; cancelled: number };
   money: { gmv: string; driver_earnings: string; currency: string };
   leaderboard: { driver_id: string; name: string | null; trips: number; earnings: string }[];
+}
+
+export interface PartnerWallet {
+  balance: string;
+  lifetime_share: string;
+  currency: string;
+}
+
+export interface PartnerLedgerRow {
+  kind: string;
+  amount: string;
+  balance_after: string;
+  trip_id: string | null;
+  created_at: string;
+}
+
+export interface FleetCampaign {
+  id: string;
+  code: string;
+  title: string;
+  kind: "percent" | "flat";
+  value: string;
+  max_discount: string | null;
+  active: boolean;
+  used_count: number;
+  created_at: string;
+}
+
+export interface NewFleetCampaign {
+  code: string;
+  title: string;
+  kind: "percent" | "flat";
+  value: number;
+  max_discount?: number | null;
+  min_fare?: number;
 }
 
 export interface FeatureFlag {

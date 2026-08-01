@@ -370,6 +370,15 @@ async fn update_status(
                 &trip.vehicle_class,
             )
             .await?;
+            // Fleet revenue-share: carve the partner's cut from the platform's commission.
+            let _ = crate::partner_ledger::accrue_commission_share(
+                &mut tx,
+                did,
+                id,
+                m.gross_fare,
+                commission,
+            )
+            .await?;
         }
     }
 

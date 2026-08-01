@@ -362,3 +362,54 @@ CREATE TABLE IF NOT EXISTS driver_bonus_grants (
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS driver_bonus_grants_driver_idx ON driver_bonus_grants (driver_id, created_at DESC);
+
+-- ── Fleet partner money (doc 14, Phase 2) ──────────────────────────────────
+-- A partner earns a revenue-share carved from the platform's ≤10% commission
+-- (never from the driver's ≥90%), and prepays a wallet to fund fleet promos.
+-- Balance is +ve when the platform owes the partner (earnings/leftover top-up).
+CREATE TABLE IF NOT EXISTS partner_wallets (
+    partner_id uuid        PRIMARY KEY,
+    balance    numeric     NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Append-only, hash-chained partner money movements (single global chain).
+CREATE TABLE IF NOT EXISTS partner_ledger (
+    seq         bigint      PRIMARY KEY,
+    partner_id  uuid        NOT NULL,
+    trip_id     uuid,
+    kind        text        NOT NULL,   -- commission_share | promo_spend | topup | payout
+    amount      numeric     NOT NULL,   -- signed: +owed to partner, -spent/withdrawn
+    balance_after numeric   NOT NULL,
+    prev_hash   text        NOT NULL,
+    entry_hash  text        NOT NULL UNIQUE,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS partner_ledger_partner_idx ON partner_ledger (partner_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS partner_payouts (
+    id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    partner_id   uuid        NOT NULL,
+    amount       numeric     NOT NULL,
+    status       text        NOT NULL DEFAULT 'paid',   -- processing | paid | failed
+    reference    text,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    processed_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS partner_payouts_partner_idx ON partner_payouts (partner_id, created_at DESC);
+
+-- Partner top-up intents share the PSP hand-off shape.
+CREATE TABLE IF NOT EXISTS partner_topup_intents (
+    reference    text        PRIMARY KEY,
+    partner_id   uuid        NOT NULL,
+    amount       numeric     NOT NULL,
+    provider     text        NOT NULL,
+    status       text        NOT NULL DEFAULT 'pending',  -- pending | confirmed | failed
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    confirmed_at timestamptz
+);
+
+-- Fleet campaigns: a campaign may belong to a partner + be partner-funded.
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS partner_id uuid;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS funded_by text NOT NULL DEFAULT 'platform';  -- platform | partner
+CREATE INDEX IF NOT EXISTS campaigns_partner_idx ON campaigns (partner_id);

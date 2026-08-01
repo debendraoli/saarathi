@@ -360,4 +360,58 @@ FORBID=$(curl -sS -o /dev/null -w '%{http_code}' "$API/v1/partner/$PID2/drivers"
 [ "$FORBID" = "403" ] || { echo "  tenant isolation breach (got $FORBID)"; exit 1; }
 echo "  partner onboarded; owner→manager→driver; fleet completed trips=$FLEET_TRIPS; cross-tenant=$FORBID (isolated)"
 
+step "fleet partnership (phase 2: revenue-share + wallet + fleet bonus + payout)"
+# A fresh approved fleet driver (no subscription pass, so commission is non-zero).
+FDPHONE="+97798$(( RANDOM % 900000 + 100000 ))"
+FDLOGIN=$(login "$FDPHONE" true)
+FDTOKEN=$(echo "$FDLOGIN" | jq -r '.access_token')
+FDUID=$(echo "$FDLOGIN" | jq -r '.user.id')
+j -X POST "$API/v1/driver/register" -H "authorization: Bearer $FDTOKEN" -H 'content-type: application/json' \
+  -d '{"license_number":"DL-FLEET","vehicle":{"class":"two_wheeler","plate_number":"BA-9-PA-9"}}' >/dev/null
+j -X POST "$API/v1/driver/documents" -H "authorization: Bearer $FDTOKEN" \
+  -F kind=license -F file=@/tmp/saarathi_lic.jpg >/dev/null
+FDID=$(j "$API/v1/admin/drivers?status=queue" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq -r --arg p "$FDPHONE" '.[] | select(.phone==$p) | .id' | head -n1)
+j -X POST "$API/v1/admin/drivers/$FDID/approve" -H "authorization: Bearer $ADMIN_TOKEN" >/dev/null
+j -X POST "$API/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" \
+  -H 'content-type: application/json' -d "{\"phone\":\"$FDPHONE\"}" >/dev/null
+
+fleet_trip() { # completes a trip driven by the fleet driver via ops-assign; echoes trip id
+  local t
+  t=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
+    -H 'content-type: application/json' -d "$EBODY" | jq -r '.id')
+  j -X POST "$RIDES/v1/admin/rides/$t/assign" -H "authorization: Bearer $ADMIN_TOKEN" \
+    -H 'content-type: application/json' -d "{\"driver_id\":\"$FDUID\"}" >/dev/null
+  for s in arriving in_progress completed; do
+    j -X POST "$RIDES/v1/rides/$t/status" -H "authorization: Bearer $FDTOKEN" \
+      -H 'content-type: application/json' -d "{\"status\":\"$s\"}" >/dev/null
+  done
+  echo "$t"
+}
+
+fleet_trip >/dev/null   # first fleet trip → partner earns its revenue-share
+SHARE=$(j "$RIDES/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.balance')
+awk -v s="$SHARE" 'BEGIN{exit !(s+0>0)}' \
+  || { echo "  partner revenue-share not accrued ($SHARE)"; exit 1; }
+
+# Owner tops up the fleet wallet and launches a partner-funded driver bonus.
+TREF=$(j -X POST "$RIDES/v1/partner/$PID/wallet/topup" -H "authorization: Bearer $OWNER_TOKEN" \
+  -H 'content-type: application/json' -d '{"amount":500}' | jq -r '.reference')
+j -X POST "$RIDES/v1/partner/$PID/wallet/topup/confirm" -H "authorization: Bearer $OWNER_TOKEN" \
+  -H 'content-type: application/json' -d "{\"reference\":\"$TREF\"}" >/dev/null
+j -X POST "$RIDES/v1/partner/$PID/campaigns" -H "authorization: Bearer $OWNER_TOKEN" \
+  -H 'content-type: application/json' -d '{"code":"FLEET10","title":"Fleet bonus","kind":"flat","value":10}' >/dev/null
+
+fleet_trip >/dev/null   # next fleet trip → partner-funded bonus paid from the wallet
+FUSED=$(j "$RIDES/v1/partner/$PID/campaigns" -H "authorization: Bearer $OWNER_TOKEN" \
+  | jq -r '.[] | select(.code=="FLEET10") | .used_count')
+awk -v u="$FUSED" 'BEGIN{exit !(u+0>=1)}' || { echo "  fleet bonus not granted ($FUSED)"; exit 1; }
+SPENT=$(j "$RIDES/v1/partner/$PID/ledger" -H "authorization: Bearer $OWNER_TOKEN" \
+  | jq '[.[] | select(.kind=="promo_spend")] | length')
+[ "$SPENT" -ge 1 ] || { echo "  fleet bonus not debited from wallet"; exit 1; }
+
+PAYOUT=$(j -X POST "$RIDES/v1/partner/$PID/payouts" -H "authorization: Bearer $OWNER_TOKEN" \
+  -H 'content-type: application/json' -d '{}' | jq -r '.amount')
+echo "  revenue-share=NPR $SHARE; wallet topup → fleet bonus used=$FUSED (debited) → payout NPR $PAYOUT"
+
 printf '\n✅ SMOKE OK\n'

@@ -1,12 +1,15 @@
 "use client";
 
 import {
-  api,
-  rides,
-  type FleetAnalytics,
-  type FleetDriver,
-  type Membership,
-  type PartnerMemberRow,
+    api,
+    rides,
+    type FleetAnalytics,
+    type FleetCampaign,
+    type FleetDriver,
+    type Membership,
+    type PartnerLedgerRow,
+    type PartnerMemberRow,
+    type PartnerWallet,
 } from "@/lib/api";
 import { useCallback, useEffect, useState } from "react";
 
@@ -18,15 +21,23 @@ export default function PartnerPortalPage() {
   const [members, setMembers] = useState<PartnerMemberRow[]>([]);
   const [drivers, setDrivers] = useState<FleetDriver[]>([]);
   const [stats, setStats] = useState<FleetAnalytics | null>(null);
+  const [wallet, setWallet] = useState<PartnerWallet | null>(null);
+  const [ledger, setLedger] = useState<PartnerLedgerRow[]>([]);
+  const [campaigns, setCampaigns] = useState<FleetCampaign[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const [invPhone, setInvPhone] = useState("+977");
   const [invRole, setInvRole] = useState("manager");
   const [drvPhone, setDrvPhone] = useState("+977");
+  const [topupAmt, setTopupAmt] = useState(5000);
+  const [campCode, setCampCode] = useState("");
+  const [campValue, setCampValue] = useState(10);
 
   const active = memberships.find((m) => m.partner_id === pid);
   const canManageMembers = active?.role === "owner" || active?.role === "admin";
   const canManageDrivers = canManageMembers || active?.role === "manager";
+  const canManageMoney = canManageMembers || active?.role === "finance";
+  const canManageCampaigns = canManageDrivers;
 
   useEffect(() => {
     api
@@ -41,14 +52,20 @@ export default function PartnerPortalPage() {
   const loadFleet = useCallback(async (p: string) => {
     setError(null);
     try {
-      const [mem, drv, an] = await Promise.all([
+      const [mem, drv, an, wal, led, camp] = await Promise.all([
         api.partnerMembers(p),
         api.partnerDrivers(p),
         rides.partnerAnalytics(p),
+        rides.partnerWallet(p),
+        rides.partnerLedger(p),
+        rides.partnerCampaigns(p),
       ]);
       setMembers(mem);
       setDrivers(drv);
       setStats(an);
+      setWallet(wal);
+      setLedger(led);
+      setCampaigns(camp);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -84,6 +101,43 @@ export default function PartnerPortalPage() {
     if (!pid) return;
     try {
       await api.partnerSetDriverStatus(pid, driverUserId, "left");
+      await loadFleet(pid);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function topup() {
+    if (!pid) return;
+    try {
+      const { reference } = await rides.partnerTopup(pid, Number(topupAmt));
+      await rides.partnerConfirmTopup(pid, reference); // mock PSP callback
+      await loadFleet(pid);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function payout() {
+    if (!pid) return;
+    try {
+      await rides.partnerRequestPayout(pid);
+      await loadFleet(pid);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function createCampaign() {
+    if (!pid || !campCode.trim()) return;
+    try {
+      await rides.partnerCreateCampaign(pid, {
+        code: campCode.trim().toUpperCase(),
+        title: `Fleet bonus ${campCode.trim().toUpperCase()}`,
+        kind: "flat",
+        value: Number(campValue),
+      });
+      setCampCode("");
       await loadFleet(pid);
     } catch (e) {
       setError((e as Error).message);
@@ -130,6 +184,109 @@ export default function PartnerPortalPage() {
           <Stat label="Driver earnings" value={`NPR ${Number(stats.money.driver_earnings).toLocaleString()}`} />
         </div>
       )}
+
+      {wallet && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Finance</h3>
+          <div className="stat-grid" style={{ marginBottom: 12 }}>
+            <Stat label="Wallet balance" value={`NPR ${Number(wallet.balance).toLocaleString()}`} />
+            <Stat label="Lifetime revenue share" value={`NPR ${Number(wallet.lifetime_share).toLocaleString()}`} />
+          </div>
+          {canManageMoney && (
+            <div className="row" style={{ marginBottom: 12, flexWrap: "wrap" }}>
+              <input className="input" style={{ maxWidth: 160 }} type="number" value={topupAmt} onChange={(e) => setTopupAmt(Number(e.target.value))} />
+              <button className="btn primary" onClick={topup}>
+                Top up wallet
+              </button>
+              <button className="btn ghost" onClick={payout}>
+                Withdraw balance
+              </button>
+            </div>
+          )}
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Balance</th>
+                <th>When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ledger.map((l, i) => (
+                <tr key={i}>
+                  <td className="subtle">{l.kind}</td>
+                  <td>NPR {Number(l.amount).toLocaleString()}</td>
+                  <td>NPR {Number(l.balance_after).toLocaleString()}</td>
+                  <td className="subtle">{new Date(l.created_at).toLocaleString()}</td>
+                </tr>
+              ))}
+              {ledger.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="subtle" style={{ textAlign: "center" }}>
+                    No movements yet — earn a share when your drivers complete trips.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Fleet bonus campaigns</h3>
+        <p className="subtle" style={{ marginTop: 0 }}>
+          Partner-funded driver bonuses, paid from your wallet on trip completion.
+        </p>
+        {canManageCampaigns && (
+          <div className="row" style={{ marginBottom: 12 }}>
+            <input className="input" style={{ maxWidth: 180 }} value={campCode} onChange={(e) => setCampCode(e.target.value.toUpperCase())} placeholder="CODE" />
+            <input className="input" style={{ maxWidth: 140 }} type="number" value={campValue} onChange={(e) => setCampValue(Number(e.target.value))} placeholder="NPR bonus" />
+            <button className="btn primary" onClick={createCampaign}>
+              Create bonus
+            </button>
+          </div>
+        )}
+        <table>
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Bonus</th>
+              <th>Used</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {campaigns.map((c) => (
+              <tr key={c.id}>
+                <td>
+                  <b>{c.code}</b>
+                </td>
+                <td>{c.kind === "percent" ? `${c.value}%` : `NPR ${c.value}`}</td>
+                <td className="subtle">{c.used_count}</td>
+                <td>
+                  <span className={`badge ${c.active ? "approved" : "rejected"}`}>{c.active ? "active" : "off"}</span>
+                </td>
+                <td style={{ textAlign: "right" }}>
+                  {canManageCampaigns && c.active && (
+                    <button className="btn ghost" onClick={() => rides.partnerDeactivateCampaign(pid!, c.id).then(() => loadFleet(pid!))}>
+                      Stop
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {campaigns.length === 0 && (
+              <tr>
+                <td colSpan={5} className="subtle" style={{ textAlign: "center" }}>
+                  No fleet campaigns yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Fleet drivers</h3>

@@ -11,6 +11,16 @@ use sha2::{Digest, Sha256};
 /// Predecessor hash for the very first entry (64 hex zeros).
 pub const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
+/// Generic hash-chain link: SHA-256 over `seq | prev_hash | payload`. Callers
+/// build `payload` from their entry's canonical fields. Used by secondary
+/// append-only ledgers (e.g. partner revenue-share) that share the chain
+/// discipline but not the trip-specific fields of [`LedgerLink`].
+pub fn chain_hash(seq: i64, prev_hash: &str, payload: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("{seq}|{prev_hash}|{payload}").as_bytes());
+    hex::encode(hasher.finalize())
+}
+
 /// The canonical, hashed content of one ledger entry.
 #[derive(Debug, Clone)]
 pub struct LedgerLink<'a> {
