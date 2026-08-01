@@ -99,10 +99,10 @@ async fn create(
     .await?;
 
     let method = body.payment_method.as_deref().unwrap_or("cash");
-    if method != "cash" && method != "wallet" {
+    if !matches!(method, "cash" | "wallet" | "corporate") {
         return Err(AppError::bad(
             ErrorCode::InvalidPaymentMethod,
-            "payment_method must be 'cash' or 'wallet'",
+            "payment_method must be 'cash', 'wallet', or 'corporate'",
         ));
     }
 
@@ -146,6 +146,10 @@ async fn create(
                 "insufficient credits for this trip",
             ));
         }
+    }
+    // Corporate tab: the rider's company wallet must cover the fare + cap.
+    if method == "corporate" {
+        crate::partner_ledger::corporate_precheck(&st.db, claims.sub, final_fare).await?;
     }
 
     if let Some(code) = &est.discount_code {
@@ -326,7 +330,7 @@ async fn update_status(
 
     // On first completion, append the immutable ledger entry + settle the wallet.
     if body.status == "completed" && m.status != "completed" {
-        let is_wallet = m.payment_method != "cash";
+        let payment_method = m.payment_method.clone();
         // A driver on an active subscription pass pays 0% commission (keeps 100%,
         // minus the legally-mandatory 1% accident fund).
         let (commission, driver_payout) = match m.driver_id {
@@ -354,10 +358,24 @@ async fn update_status(
             },
         )
         .await?;
-        // Wallet-paid trips: the platform collects the fare from rider credits.
-        if is_wallet {
-            crate::payments::debit_rider(&mut tx, m.rider_id, m.final_fare, "payment", Some(id))
+        // Settle the fare: wallet from rider credits, corporate from the company
+        // wallet; cash is collected in-vehicle. The driver split is unaffected.
+        match payment_method.as_str() {
+            "wallet" => {
+                crate::payments::debit_rider(
+                    &mut tx,
+                    m.rider_id,
+                    m.final_fare,
+                    "payment",
+                    Some(id),
+                )
                 .await?;
+            }
+            "corporate" => {
+                crate::partner_ledger::charge_corporate_ride(&mut tx, m.rider_id, id, m.final_fare)
+                    .await?;
+            }
+            _ => {}
         }
         // Driver-side campaign incentive (platform-funded, into the earnings wallet).
         if let Some(did) = m.driver_id {

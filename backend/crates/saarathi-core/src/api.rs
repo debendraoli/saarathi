@@ -42,4 +42,6 @@ pub enum ErrorCode {
     // Partnership / fleets
     DriverAlreadyInFleet,
     PartnerSuspended,
+    /// A corporate ride tab can't cover this trip (no active tab, wallet, or cap).
+    CorporateTabUnavailable,
 }

@@ -36,6 +36,11 @@ pub fn routes() -> Router<AppState> {
             "/v1/partner/{pid}/drivers/{driver_user_id}",
             post(set_driver_status),
         )
+        .route("/v1/partner/{pid}/riders", get(list_riders).post(add_rider))
+        .route(
+            "/v1/partner/{pid}/riders/{rider_user_id}",
+            post(set_rider_status),
+        )
 }
 
 /// Resolve the caller's active membership + confirm the partner is active.
@@ -414,6 +419,133 @@ async fn set_driver_status(
         sqlx::Error::Database(db) if db.is_unique_violation() => AppError::conflict(
             ErrorCode::DriverAlreadyInFleet,
             "this driver is already active in a fleet",
+        ),
+        other => AppError::Db(other),
+    })?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(json!({ "ok": true, "status": body.status })))
+}
+
+// ── Corporate rider tabs (ride-on-company-tab) ──────────────────────────────
+
+#[derive(Serialize, sqlx::FromRow)]
+struct FleetRider {
+    rider_user_id: Uuid,
+    phone: String,
+    full_name: Option<String>,
+    status: String,
+    monthly_cap: Option<rust_decimal::Decimal>,
+    joined_at: DateTime<Utc>,
+}
+
+async fn list_riders(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(pid): Path<Uuid>,
+) -> AppResult<Json<Vec<FleetRider>>> {
+    require_member(&st.db, claims.sub, pid).await?;
+    let rows: Vec<FleetRider> = sqlx::query_as(
+        "SELECT pr.rider_user_id, u.phone, u.full_name, pr.status, pr.monthly_cap, pr.joined_at \
+         FROM partner_riders pr JOIN users u ON u.id = pr.rider_user_id \
+         WHERE pr.partner_id = $1 AND pr.status <> 'left' ORDER BY pr.joined_at DESC",
+    )
+    .bind(pid)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+#[derive(Deserialize)]
+struct AddRider {
+    phone: String,
+    full_name: Option<String>,
+    monthly_cap: Option<rust_decimal::Decimal>,
+}
+
+async fn add_rider(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(pid): Path<Uuid>,
+    Json(body): Json<AddRider>,
+) -> AppResult<Json<serde_json::Value>> {
+    let my_role = require_member(&st.db, claims.sub, pid).await?;
+    if !my_role.can_manage_drivers() {
+        return Err(AppError::Forbidden);
+    }
+    let phone = body.phone.trim();
+    if phone.is_empty() {
+        return Err(AppError::BadRequest("phone is required".into()));
+    }
+    let mut tx = st.db.begin().await?;
+    let user_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO users (phone, full_name, role, status) VALUES ($1, $2, 'rider', 'active') \
+         ON CONFLICT (phone) DO UPDATE SET full_name = COALESCE(EXCLUDED.full_name, users.full_name) \
+         RETURNING id",
+    )
+    .bind(phone)
+    .bind(body.full_name.as_deref())
+    .fetch_one(&mut *tx)
+    .await?;
+    let linked = sqlx::query(
+        "INSERT INTO partner_riders (partner_id, rider_user_id, monthly_cap, invited_by) \
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(pid)
+    .bind(user_id)
+    .bind(body.monthly_cap)
+    .bind(claims.sub)
+    .execute(&mut *tx)
+    .await;
+    if let Err(sqlx::Error::Database(db)) = &linked {
+        if db.is_unique_violation() {
+            return Err(AppError::conflict(
+                ErrorCode::Conflict,
+                "this rider is already on a corporate tab",
+            ));
+        }
+    }
+    linked?;
+    audit_partner(&mut tx, claims.sub, pid, "partner.rider.add", user_id).await?;
+    tx.commit().await?;
+    Ok(Json(
+        json!({ "rider_user_id": user_id, "status": "active" }),
+    ))
+}
+
+#[derive(Deserialize)]
+struct SetRiderStatus {
+    status: String, // active | suspended | left
+}
+
+async fn set_rider_status(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path((pid, rider_user_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<SetRiderStatus>,
+) -> AppResult<Json<serde_json::Value>> {
+    let my_role = require_member(&st.db, claims.sub, pid).await?;
+    if !my_role.can_manage_drivers() {
+        return Err(AppError::Forbidden);
+    }
+    if !matches!(body.status.as_str(), "active" | "suspended" | "left") {
+        return Err(AppError::BadRequest("invalid status".into()));
+    }
+    let res = sqlx::query(
+        "UPDATE partner_riders SET status = $3, \
+            left_at = CASE WHEN $3 = 'left' THEN now() ELSE left_at END \
+         WHERE partner_id = $1 AND rider_user_id = $2 AND status <> 'left'",
+    )
+    .bind(pid)
+    .bind(rider_user_id)
+    .bind(&body.status)
+    .execute(&st.db)
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::Database(db) if db.is_unique_violation() => AppError::conflict(
+            ErrorCode::Conflict,
+            "this rider is already on a corporate tab",
         ),
         other => AppError::Db(other),
     })?;

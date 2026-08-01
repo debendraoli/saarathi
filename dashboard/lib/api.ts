@@ -248,6 +248,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ status }),
     }),
+  partnerRiders: (pid: string) => request<FleetRider[]>(`/v1/partner/${pid}/riders`),
+  partnerAddRider: (pid: string, body: AddFleetRider) =>
+    request<{ rider_user_id: string; status: string }>(`/v1/partner/${pid}/riders`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  partnerSetRiderStatus: (pid: string, riderUserId: string, status: string) =>
+    request<{ ok: boolean }>(`/v1/partner/${pid}/riders/${riderUserId}`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    }),
 };
 
 export type PartnerType = "fleet" | "corporate" | "agent";
@@ -315,6 +326,21 @@ export interface AddFleetDriver {
   license_number?: string | null;
   vehicle_class?: VehicleClass | null;
   plate_number?: string | null;
+}
+
+export interface FleetRider {
+  rider_user_id: string;
+  phone: string;
+  full_name: string | null;
+  status: string;
+  monthly_cap: string | null;
+  joined_at: string;
+}
+
+export interface AddFleetRider {
+  phone: string;
+  full_name?: string | null;
+  monthly_cap?: number | null;
 }
 
 export interface OnboardDriverInput {
@@ -473,6 +499,8 @@ export const rides = {
   // Fleet money (partner-scoped)
   partnerWallet: (pid: string) => ridesRequest<PartnerWallet>(`/v1/partner/${pid}/wallet`),
   partnerLedger: (pid: string) => ridesRequest<PartnerLedgerRow[]>(`/v1/partner/${pid}/ledger`),
+  partnerVerifyLedger: (pid: string) =>
+    ridesRequest<{ chain_intact: boolean }>(`/v1/partner/${pid}/ledger/verify`),
   partnerTopup: (pid: string, amount: number) =>
     ridesRequest<{ reference: string }>(`/v1/partner/${pid}/wallet/topup`, {
       method: "POST",

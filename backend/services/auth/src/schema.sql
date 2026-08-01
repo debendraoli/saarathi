@@ -287,5 +287,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS partner_drivers_one_active_idx
     ON partner_drivers (driver_user_id) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS partner_drivers_partner_idx ON partner_drivers (partner_id, status);
 
+-- Corporate rider tabs: riders whose trips are billed to the partner's wallet
+-- (ride-on-company-tab). Optional monthly spend cap per rider.
+CREATE TABLE IF NOT EXISTS partner_riders (
+    id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    partner_id    uuid        NOT NULL REFERENCES partners (id) ON DELETE CASCADE,
+    rider_user_id uuid        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    status        text        NOT NULL DEFAULT 'active',   -- active | suspended | left
+    monthly_cap   numeric,                                 -- null = unlimited
+    invited_by    uuid        REFERENCES users (id),
+    joined_at     timestamptz NOT NULL DEFAULT now(),
+    left_at       timestamptz
+);
+-- A rider is on at most one active corporate tab at a time.
+CREATE UNIQUE INDEX IF NOT EXISTS partner_riders_one_active_idx
+    ON partner_riders (rider_user_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS partner_riders_partner_idx ON partner_riders (partner_id, status);
+
 -- Partner dimension on the audit trail (partner-staff actions).
 ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS partner_id uuid;

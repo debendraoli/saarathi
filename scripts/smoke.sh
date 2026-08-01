@@ -414,4 +414,36 @@ PAYOUT=$(j -X POST "$RIDES/v1/partner/$PID/payouts" -H "authorization: Bearer $O
   -H 'content-type: application/json' -d '{}' | jq -r '.amount')
 echo "  revenue-share=NPR $SHARE; wallet topup → fleet bonus used=$FUSED (debited) → payout NPR $PAYOUT"
 
+step "fleet partnership (phase 3: corporate rider tab + ledger integrity)"
+# Owner puts a rider on the company tab with a monthly cap.
+CRPHONE="+97797$(( RANDOM % 900000 + 100000 ))"
+j -X POST "$API/v1/partner/$PID/riders" -H "authorization: Bearer $OWNER_TOKEN" \
+  -H 'content-type: application/json' -d "{\"phone\":\"$CRPHONE\",\"monthly_cap\":2000}" >/dev/null
+CRTOKEN=$(login "$CRPHONE" | jq -r '.access_token')
+# Fund the company wallet so it can cover corporate rides.
+TREF2=$(j -X POST "$RIDES/v1/partner/$PID/wallet/topup" -H "authorization: Bearer $OWNER_TOKEN" \
+  -H 'content-type: application/json' -d '{"amount":1000}' | jq -r '.reference')
+j -X POST "$RIDES/v1/partner/$PID/wallet/topup/confirm" -H "authorization: Bearer $OWNER_TOKEN" \
+  -H 'content-type: application/json' -d "{\"reference\":\"$TREF2\"}" >/dev/null
+BAL0=$(j "$RIDES/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.balance')
+# The corporate rider books on the company tab; a fleet driver completes it.
+CT=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $CRTOKEN" -H 'content-type: application/json' \
+  -d '{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler","payment_method":"corporate"}' | jq -r '.id')
+j -X POST "$RIDES/v1/admin/rides/$CT/assign" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' -d "{\"driver_id\":\"$FDUID\"}" >/dev/null
+for s in arriving in_progress completed; do
+  j -X POST "$RIDES/v1/rides/$CT/status" -H "authorization: Bearer $FDTOKEN" \
+    -H 'content-type: application/json' -d "{\"status\":\"$s\"}" >/dev/null
+done
+CHARGED=$(j "$RIDES/v1/partner/$PID/ledger" -H "authorization: Bearer $OWNER_TOKEN" \
+  | jq '[.[] | select(.kind=="ride_charge")] | length')
+[ "$CHARGED" -ge 1 ] || { echo "  corporate ride not charged to company wallet"; exit 1; }
+RIDER_CREDITS=$(j "$RIDES/v1/credits" -H "authorization: Bearer $CRTOKEN" | jq -r '.balance')
+awk -v b="$RIDER_CREDITS" 'BEGIN{exit !(b+0==0)}' \
+  || { echo "  corporate rider charged personally ($RIDER_CREDITS)"; exit 1; }
+BAL1=$(j "$RIDES/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.balance')
+INTACT=$(j "$RIDES/v1/partner/$PID/ledger/verify" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.chain_intact')
+[ "$INTACT" = "true" ] || { echo "  partner ledger chain broken"; exit 1; }
+echo "  corporate tab: wallet ${BAL0} -> ${BAL1}, ride_charges=$CHARGED, rider paid NPR 0; ledger intact=$INTACT"
+
 printf '\n✅ SMOKE OK\n'

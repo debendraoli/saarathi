@@ -6,6 +6,7 @@ import {
     type FleetAnalytics,
     type FleetCampaign,
     type FleetDriver,
+    type FleetRider,
     type Membership,
     type PartnerLedgerRow,
     type PartnerMemberRow,
@@ -24,11 +25,15 @@ export default function PartnerPortalPage() {
   const [wallet, setWallet] = useState<PartnerWallet | null>(null);
   const [ledger, setLedger] = useState<PartnerLedgerRow[]>([]);
   const [campaigns, setCampaigns] = useState<FleetCampaign[]>([]);
+    const [riders, setRiders] = useState<FleetRider[]>([]);
+    const [chainIntact, setChainIntact] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [invPhone, setInvPhone] = useState("+977");
   const [invRole, setInvRole] = useState("manager");
   const [drvPhone, setDrvPhone] = useState("+977");
+    const [rdrPhone, setRdrPhone] = useState("+977");
+    const [rdrCap, setRdrCap] = useState("");
   const [topupAmt, setTopupAmt] = useState(5000);
   const [campCode, setCampCode] = useState("");
   const [campValue, setCampValue] = useState(10);
@@ -52,13 +57,15 @@ export default function PartnerPortalPage() {
   const loadFleet = useCallback(async (p: string) => {
     setError(null);
     try {
-      const [mem, drv, an, wal, led, camp] = await Promise.all([
+        const [mem, drv, an, wal, led, camp, rdr, vrf] = await Promise.all([
         api.partnerMembers(p),
         api.partnerDrivers(p),
         rides.partnerAnalytics(p),
         rides.partnerWallet(p),
         rides.partnerLedger(p),
         rides.partnerCampaigns(p),
+          api.partnerRiders(p),
+          rides.partnerVerifyLedger(p),
       ]);
       setMembers(mem);
       setDrivers(drv);
@@ -66,6 +73,8 @@ export default function PartnerPortalPage() {
       setWallet(wal);
       setLedger(led);
       setCampaigns(camp);
+        setRiders(rdr);
+        setChainIntact(vrf.chain_intact);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -106,6 +115,31 @@ export default function PartnerPortalPage() {
       setError((e as Error).message);
     }
   }
+
+    async function addRider() {
+        if (!pid) return;
+        try {
+            await api.partnerAddRider(pid, {
+                phone: rdrPhone.trim(),
+                monthly_cap: rdrCap ? Number(rdrCap) : null,
+            });
+            setRdrPhone("+977");
+            setRdrCap("");
+            await loadFleet(pid);
+        } catch (e) {
+            setError((e as Error).message);
+        }
+    }
+
+    async function releaseRider(riderUserId: string) {
+        if (!pid) return;
+        try {
+            await api.partnerSetRiderStatus(pid, riderUserId, "left");
+            await loadFleet(pid);
+        } catch (e) {
+            setError((e as Error).message);
+        }
+    }
 
   async function topup() {
     if (!pid) return;
@@ -187,7 +221,14 @@ export default function PartnerPortalPage() {
 
       {wallet && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Finance</h3>
+          <h3 style={{ marginTop: 0 }}>
+            Finance{" "}
+            {chainIntact !== null && (
+              <span className={`badge ${chainIntact ? "ok" : "danger"}`} style={{ marginLeft: 8 }}>
+                {chainIntact ? "ledger intact" : "ledger TAMPERED"}
+              </span>
+            )}
+          </h3>
           <div className="stat-grid" style={{ marginBottom: 12 }}>
             <Stat label="Wallet balance" value={`NPR ${Number(wallet.balance).toLocaleString()}`} />
             <Stat label="Lifetime revenue share" value={`NPR ${Number(wallet.lifetime_share).toLocaleString()}`} />
@@ -330,6 +371,58 @@ export default function PartnerPortalPage() {
               <tr>
                 <td colSpan={5} className="subtle" style={{ textAlign: "center" }}>
                   No drivers in this fleet yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Corporate riders</h3>
+        <p className="subtle" style={{ marginTop: 0 }}>
+          Riders whose trips are billed to your wallet (ride-on-company-tab), with an optional
+          monthly cap.
+        </p>
+        {canManageDrivers && (
+          <div className="row" style={{ marginBottom: 12 }}>
+            <input className="input" style={{ maxWidth: 220 }} value={rdrPhone} onChange={(e) => setRdrPhone(e.target.value)} placeholder="rider phone +977…" />
+            <input className="input" style={{ maxWidth: 160 }} type="number" value={rdrCap} onChange={(e) => setRdrCap(e.target.value)} placeholder="monthly cap (opt)" />
+            <button className="btn primary" onClick={addRider}>
+              Add rider
+            </button>
+          </div>
+        )}
+        <table>
+          <thead>
+            <tr>
+              <th>Phone</th>
+              <th>Name</th>
+              <th>Monthly cap</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {riders.map((r) => (
+              <tr key={r.rider_user_id}>
+                <td>{r.phone}</td>
+                <td>{r.full_name ?? "—"}</td>
+                <td className="subtle">{r.monthly_cap ? `NPR ${Number(r.monthly_cap).toLocaleString()}` : "unlimited"}</td>
+                <td className="subtle">{r.status}</td>
+                <td style={{ textAlign: "right" }}>
+                  {canManageDrivers && r.status !== "left" && (
+                    <button className="btn ghost" onClick={() => releaseRider(r.rider_user_id)}>
+                      Remove
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {riders.length === 0 && (
+              <tr>
+                <td colSpan={5} className="subtle" style={{ textAlign: "center" }}>
+                  No corporate riders yet.
                 </td>
               </tr>
             )}

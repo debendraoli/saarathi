@@ -27,6 +27,7 @@ pub fn routes() -> Router<AppState> {
             post(confirm_topup),
         )
         .route("/v1/partner/{pid}/ledger", get(ledger))
+        .route("/v1/partner/{pid}/ledger/verify", get(verify_ledger))
         .route(
             "/v1/partner/{pid}/payouts",
             get(list_payouts).post(request_payout),
@@ -181,6 +182,17 @@ async fn ledger(
     .fetch_all(&st.db)
     .await?;
     Ok(Json(rows))
+}
+
+/// Tamper-evidence: recompute the (global) partner ledger chain.
+async fn verify_ledger(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(pid): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    require_member(&st, claims.sub, pid).await?;
+    let intact = crate::partner_ledger::verify_chain(&st.db).await?;
+    Ok(Json(json!({ "chain_intact": intact })))
 }
 
 #[derive(Deserialize)]
