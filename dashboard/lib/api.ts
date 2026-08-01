@@ -277,7 +277,66 @@ export const rides = {
   listLedger: () => ridesRequest<LedgerEntry[]>("/v1/admin/ledger"),
   verifyLedger: () => ridesRequest<{ chain_intact: boolean }>("/v1/admin/ledger/verify"),
   listPayouts: () => ridesRequest<Payout[]>("/v1/admin/payouts"),
+
+  // Credit plans (maker-checker)
+  listCreditPlans: () => ridesRequest<CreditPlan[]>("/v1/admin/credit-plans"),
+  createCreditPlan: (p: NewCreditPlan) =>
+    ridesRequest<CreditPlan>("/v1/admin/credit-plans", { method: "POST", body: JSON.stringify(p) }),
+  approveCreditPlan: (id: string) =>
+    ridesRequest<{ status: string }>(`/v1/admin/credit-plans/${id}/approve`, { method: "POST" }),
+  rejectCreditPlan: (id: string, note?: string) =>
+    ridesRequest<{ status: string }>(`/v1/admin/credit-plans/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+
+  // Ops insights
+  adminRides: (status?: string) =>
+    ridesRequest<RideRow[]>(`/v1/admin/rides${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  cancellations: () => ridesRequest<RideRow[]>("/v1/admin/cancellations"),
+  leaderboard: (role: string, by: string) =>
+    ridesRequest<LeaderRow[]>(`/v1/admin/leaderboard?role=${role}&by=${by}`),
 };
+
+export interface CreditPlan {
+  id: string;
+  name: string;
+  min_amount: string;
+  max_amount: string;
+  bonus_percent: string;
+  status: string;
+  review_note: string | null;
+  created_at: string;
+}
+
+export interface NewCreditPlan {
+  name: string;
+  min_amount: number;
+  max_amount: number;
+  bonus_percent?: number;
+}
+
+export interface RideRow {
+  id: string;
+  rider_id: string;
+  rider_name: string | null;
+  driver_id: string | null;
+  driver_name: string | null;
+  status: string;
+  final_fare: string;
+  payment_method: string;
+  cancel_reason: string | null;
+  cancelled_by_role: string | null;
+  driver_stars: number | null;
+  created_at: string;
+}
+
+export interface LeaderRow {
+  user_id: string;
+  name: string | null;
+  phone: string;
+  value: number;
+}
 
 export interface ActiveTrip {
   id: string;

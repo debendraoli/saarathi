@@ -21,6 +21,11 @@ impl Claims {
     pub fn is_staff(&self) -> bool {
         !matches!(self.role.as_str(), "rider" | "driver")
     }
+
+    /// Roles allowed to approve/reject (maker-checker): admin & super-admin.
+    pub fn can_approve(&self) -> bool {
+        matches!(self.role.as_str(), "super_admin" | "admin")
+    }
 }
 
 pub fn verify_access(secret: &str, token: &str) -> Result<Claims, AppError> {

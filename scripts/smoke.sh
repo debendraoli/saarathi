@@ -223,4 +223,31 @@ awk -v c="$COMM" 'BEGIN{exit !(c+0==0)}' \
   || { echo "  subscription commission not 0 ($COMM)"; exit 1; }
 echo "  pass trip commission = NPR $COMM (driver kept 100% minus fund)"
 
+step "cancellation with reason → complaints feed"
+CID=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d "$EBODY" | jq -r '.id')
+j -X POST "$RIDES/v1/rides/$CID/status" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d '{"status":"cancelled","reason":"changed my mind"}' >/dev/null
+INFEED=$(j "$RIDES/v1/admin/cancellations" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq --arg t "$CID" '[.[] | select(.id==$t)] | length')
+[ "$INFEED" -eq 1 ] || { echo "  cancellation not in complaints feed"; exit 1; }
+echo "  ride cancelled with reason; appears in complaints feed"
+
+step "credit plans (maker-checker approval)"
+PID=$(j -X POST "$RIDES/v1/admin/credit-plans" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"name":"Standard","min_amount":1000,"max_amount":10000,"bonus_percent":5}' | jq -r '.id')
+PSTAT=$(j "$RIDES/v1/admin/credit-plans" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq -r --arg p "$PID" '.[] | select(.id==$p) | .status')
+j -X POST "$RIDES/v1/admin/credit-plans/$PID/approve" -H "authorization: Bearer $ADMIN_TOKEN" >/dev/null
+ACTIVEP=$(j "$RIDES/v1/credit-plans" -H "authorization: Bearer $RTOKEN" \
+  | jq --arg p "$PID" '[.[] | select(.id==$p)] | length')
+[ "$ACTIVEP" -eq 1 ] || { echo "  plan not active for riders"; exit 1; }
+echo "  plan created (was '$PSTAT') → approved → visible to riders"
+
+step "filters / leaderboards + rides history"
+TOPEARN=$(j "$RIDES/v1/admin/leaderboard?role=driver&by=earnings" -H "authorization: Bearer $ADMIN_TOKEN" | jq 'length')
+RIDESN=$(j "$RIDES/v1/admin/rides" -H "authorization: Bearer $ADMIN_TOKEN" | jq 'length')
+echo "  top-earner drivers=$TOPEARN  admin rides listed=$RIDESN"
+
 printf '\n✅ SMOKE OK\n'

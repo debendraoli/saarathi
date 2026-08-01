@@ -8,8 +8,13 @@ import { useEffect, useState } from "react";
 const SECTIONS = [
   { title: "Operations", items: [
     { href: "/live", label: "Live Tracking" },
+    { href: "/rides", label: "Rides History" },
     { href: "/sos", label: "SOS Console" },
     { href: "/reports", label: "Reports" },
+    { href: "/complaints", label: "Complaints" },
+  ] },
+  { title: "Insights", items: [
+    { href: "/leaderboards", label: "Leaderboards" },
   ] },
   { title: "Compliance", items: [
     { href: "/drivers", label: "Driver Verification" },
@@ -17,6 +22,7 @@ const SECTIONS = [
   { title: "Finance", items: [
     { href: "/ledger", label: "Ledger" },
     { href: "/payouts", label: "Payouts" },
+    { href: "/credit-plans", label: "Credit Plans" },
   ] },
   { title: "Growth", items: [
     { href: "/campaigns", label: "Campaigns & Offers" },
@@ -95,5 +101,9 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/reports")) return "Reports";
   if (pathname.startsWith("/ledger")) return "Ledger";
   if (pathname.startsWith("/payouts")) return "Payouts";
+  if (pathname.startsWith("/credit-plans")) return "Credit Plans";
+  if (pathname.startsWith("/rides")) return "Rides History";
+  if (pathname.startsWith("/complaints")) return "Complaints";
+  if (pathname.startsWith("/leaderboards")) return "Leaderboards";
   return "";
 }

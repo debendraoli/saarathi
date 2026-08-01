@@ -93,6 +93,10 @@ CREATE INDEX IF NOT EXISTS trip_events_trip_idx ON trip_events (trip_id, created
 
 -- Payment method on the trip (drives the ledger + wallet settlement).
 ALTER TABLE trips ADD COLUMN IF NOT EXISTS payment_method text NOT NULL DEFAULT 'cash';
+-- Cancellation: riders/drivers can cancel with a reason (feeds the complaints tab).
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS cancel_reason text;
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS cancelled_by uuid;
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS cancelled_by_role text;  -- rider | driver
 -- Multi-stop waypoints: [{ "lat":.., "lng":.. }, …] between origin and destination.
 ALTER TABLE trips ADD COLUMN IF NOT EXISTS stops jsonb NOT NULL DEFAULT '[]';
 
@@ -270,4 +274,23 @@ CREATE INDEX IF NOT EXISTS fare_negotiations_trip_idx ON fare_negotiations (trip
 
 -- Top-ups can fund a rider prepaid balance or a driver credit balance.
 ALTER TABLE topup_intents ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'rider';
+
+-- Credit top-up plans (min/max amount + optional bonus). Maker-checker:
+-- staff create/edit (→ pending); admin/super-admin approve (→ active).
+CREATE TABLE IF NOT EXISTS credit_plans (
+    id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    name          text        NOT NULL,
+    min_amount    numeric     NOT NULL,
+    max_amount    numeric     NOT NULL,
+    bonus_percent numeric     NOT NULL DEFAULT 0,
+    status        text        NOT NULL DEFAULT 'pending',  -- pending | active | rejected
+    created_by    uuid,
+    approved_by   uuid,
+    review_note   text,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    approved_at   timestamptz,
+    updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS credit_plans_status_idx ON credit_plans (status);
+
 

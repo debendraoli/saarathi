@@ -235,6 +235,9 @@ async fn accept(
 #[derive(Deserialize)]
 struct StatusRequest {
     status: String,
+    /// Required when cancelling: why the rider/driver cancelled.
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 async fn update_status(
@@ -267,12 +270,24 @@ async fn update_status(
         "cancelled" => ", cancelled_at = now()",
         _ => "",
     };
+    // Who cancelled, for the complaints view.
+    let cancelled_by_role = if m.rider_id == claims.sub {
+        "rider"
+    } else {
+        "driver"
+    };
     let trip: Trip = sqlx::query_as(&format!(
-        "UPDATE trips SET status = $2::trip_status, updated_at = now(){ts_col} \
+        "UPDATE trips SET status = $2::trip_status, updated_at = now(){ts_col}, \
+            cancel_reason = CASE WHEN $2 = 'cancelled' THEN $3 ELSE cancel_reason END, \
+            cancelled_by = CASE WHEN $2 = 'cancelled' THEN $4 ELSE cancelled_by END, \
+            cancelled_by_role = CASE WHEN $2 = 'cancelled' THEN $5 ELSE cancelled_by_role END \
          WHERE id = $1 RETURNING {TRIP_COLS}"
     ))
     .bind(id)
     .bind(&body.status)
+    .bind(&body.reason)
+    .bind(claims.sub)
+    .bind(cancelled_by_role)
     .fetch_one(&mut *tx)
     .await?;
 

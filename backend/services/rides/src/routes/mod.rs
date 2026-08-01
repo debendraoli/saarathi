@@ -4,9 +4,11 @@ pub mod analytics;
 pub mod campaigns;
 pub mod dispatch;
 pub mod feedback;
+pub mod insights;
 pub mod ledger;
 pub mod notifications;
 pub mod payments;
+pub mod plans;
 pub mod rides;
 pub mod safety;
 pub mod subscription;
@@ -61,6 +63,8 @@ pub fn router(state: AppState) -> Router {
         .merge(notifications::routes())
         .merge(analytics::routes())
         .merge(subscription::routes())
+        .merge(plans::routes())
+        .merge(insights::routes())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
