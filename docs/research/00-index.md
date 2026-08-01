@@ -34,6 +34,7 @@ The single most important finding shaping everything below:
 | 11 | [Trust, Safety, Ratings & SOS](11-trust-safety-ratings-sos.md) | Two-sided ratings, the report/grievance system, and offline-capable emergency SOS. |
 | 12 | [Detailed Execution Build Plan](12-execution-roadmap.md) | Engineering roadmap: what's built, the epic backlog, sequencing, and out-of-the-box bets. |
 | 13 | [Revenue, Credits & Bargaining](13-revenue-and-monetization.md) | Making money under the 10% cap: prepaid credits, subscription passes, and bounded fare bargaining. |
+| 14 | [Partnership / Fleet Program](14-partnership-fleet-program.md) | Multi-tenant fleet partners (à la Yango/inDrive): partner RBAC, fleet driver management, fleet campaigns, and legal revenue-share. |
 
 ---
 
