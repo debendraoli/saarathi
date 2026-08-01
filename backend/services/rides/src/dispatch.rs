@@ -86,6 +86,17 @@ async fn nearby(st: &AppState, lng: f64, lat: f64, radius_km: f64) -> anyhow::Re
     Ok(ids.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect())
 }
 
+/// How many drivers are online within `radius_km` of a point. Used by the surge
+/// engine to detect supply scarcity.
+pub async fn nearby_count(
+    st: &AppState,
+    lng: f64,
+    lat: f64,
+    radius_km: f64,
+) -> anyhow::Result<usize> {
+    Ok(nearby(st, lng, lat, radius_km).await?.len())
+}
+
 /// A driver is eligible if their heartbeat is fresh and they opted into this job type.
 async fn eligible(st: &AppState, driver_id: Uuid, job_type: &str) -> anyhow::Result<bool> {
     let mut r = st.redis.clone();
@@ -146,40 +157,61 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
             .fetch_all(&st.db)
             .await?;
 
+    // Gather eligible, not-yet-offered drivers, widening the radius until we
+    // have more than the broadcast threshold or exhaust the max radius.
     let mut radius = st.config.dispatch_radius_km;
+    let mut candidates: Vec<Uuid> = Vec::new();
     while radius <= st.config.dispatch_max_radius_km {
         for did in nearby(st, lng, lat, radius).await? {
-            if already.contains(&did) {
+            if already.contains(&did) || candidates.contains(&did) {
                 continue;
             }
             if !eligible(st, did, &job_type).await? {
                 continue;
             }
-            let expires_at =
-                chrono::Utc::now() + chrono::Duration::seconds(st.config.offer_ttl_secs);
-            sqlx::query(
-                "INSERT INTO trip_offers (trip_id, driver_id, expires_at) VALUES ($1, $2, $3)",
-            )
+            candidates.push(did);
+        }
+        if candidates.len() > st.config.dispatch_broadcast_threshold {
+            break;
+        }
+        radius *= 2.0;
+    }
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+
+    // Blast radius: when supply is thin (few candidates, or drivers going
+    // offline), broadcast the offer to all of them at once so a scarce ride is
+    // not stuck cycling through sequential timeouts. When supply is plentiful,
+    // keep the polite one-at-a-time offer to the nearest driver.
+    let broadcast = candidates.len() <= st.config.dispatch_broadcast_threshold;
+    let targets: &[Uuid] = if broadcast {
+        &candidates
+    } else {
+        &candidates[..1]
+    };
+
+    let expires_at = chrono::Utc::now() + chrono::Duration::seconds(st.config.offer_ttl_secs);
+    for &did in targets {
+        sqlx::query("INSERT INTO trip_offers (trip_id, driver_id, expires_at) VALUES ($1, $2, $3)")
             .bind(trip_id)
             .bind(did)
             .bind(expires_at)
             .execute(&st.db)
             .await?;
-            st.hub.publish(
-                trip_id,
-                serde_json::json!({
-                    "type": "offer",
-                    "trip_id": trip_id,
-                    "driver_id": did,
-                    "expires_at": expires_at.to_rfc3339(),
-                })
-                .to_string(),
-            );
-            return Ok(Some(did));
-        }
-        radius *= 2.0;
+        st.hub.publish(
+            trip_id,
+            serde_json::json!({
+                "type": "offer",
+                "trip_id": trip_id,
+                "driver_id": did,
+                "expires_at": expires_at.to_rfc3339(),
+                "broadcast": broadcast,
+            })
+            .to_string(),
+        );
     }
-    Ok(None)
+    Ok(Some(targets[0]))
 }
 
 /// Background loop: expire stale offers and (re)dispatch waiting trips.
@@ -187,6 +219,10 @@ pub async fn run_dispatcher(st: AppState) {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(3));
     loop {
         tick.tick().await;
+        // Circuit breaker: ops can freeze matching from the dashboard.
+        if !crate::flags::is_enabled(&st, crate::flags::DISPATCH, true).await {
+            continue;
+        }
         let _ = sqlx::query(
             "UPDATE trip_offers SET status = 'expired' WHERE status = 'offered' AND expires_at <= now()",
         )

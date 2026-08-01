@@ -232,6 +232,37 @@ pub async fn debit_driver(
     Ok(new_balance)
 }
 
+/// Credit a driver's earnings wallet (withdrawable). Used for platform-funded
+/// driver incentives / campaign bonuses. Returns the new wallet balance.
+pub async fn credit_driver_wallet(
+    tx: &mut Transaction<'_, Postgres>,
+    driver_id: Uuid,
+    amount: Decimal,
+    reference: &str,
+) -> AppResult<Decimal> {
+    let (balance,): (Decimal,) = sqlx::query_as(
+        "INSERT INTO driver_wallets (driver_id, balance, updated_at) VALUES ($1, $2, now()) \
+         ON CONFLICT (driver_id) DO UPDATE SET balance = driver_wallets.balance + $2, updated_at = now() \
+         RETURNING balance",
+    )
+    .bind(driver_id)
+    .bind(amount)
+    .fetch_one(&mut **tx)
+    .await?;
+    log_txn(
+        tx,
+        driver_id,
+        "driver",
+        "bonus",
+        amount,
+        balance,
+        Some(reference),
+        None,
+    )
+    .await?;
+    Ok(balance)
+}
+
 pub async fn driver_credit_balance(pool: &sqlx::PgPool, user_id: Uuid) -> AppResult<Decimal> {
     let bal: Option<(Decimal,)> = sqlx::query_as(
         "SELECT balance FROM credit_accounts WHERE user_id = $1 AND kind = 'driver'",

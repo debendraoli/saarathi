@@ -42,6 +42,8 @@ pub struct Estimate {
     /// Bounded bargaining band: a rider may propose any fare in [floor, ceiling].
     pub fare_floor: Decimal,
     pub fare_ceiling: Decimal,
+    /// The surge multiplier actually applied (already clamped to the legal +20%).
+    pub surge_multiplier: Decimal,
     /// Feedback when a promo code was supplied but could not be applied.
     pub note: Option<String>,
     pub currency: &'static str,
@@ -85,10 +87,12 @@ pub async fn estimate(
         VehicleClass::TwoWheeler => st.config.two_wheeler_per_km,
         VehicleClass::FourWheeler => st.config.four_wheeler_per_km,
     };
+    // Dynamic surge (time windows + supply scarcity); the core clamps it to +20%.
+    let surge = crate::surge::effective_multiplier(st, vehicle_class, origin).await;
     let quote = quote_fare(
         vclass,
         route.distance_km,
-        dec!(1.0),
+        surge,
         PricingConfig {
             per_km_rate: per_km,
             commission_rate: st.config.commission_rate,
@@ -128,6 +132,7 @@ pub async fn estimate(
             driver_payout: quote.driver_payout.amount(),
             fare_floor,
             fare_ceiling,
+            surge_multiplier: quote.effective_surge,
             note,
             currency: "NPR",
         },

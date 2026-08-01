@@ -3,15 +3,16 @@
 
 use crate::audit;
 use crate::error::{AppError, AppResult};
-use crate::models::{Driver, DriverDocument, User, Vehicle};
+use crate::models::{DocumentKind, Driver, DriverDocument, User, Vehicle, VehicleClass};
 use crate::state::{AppState, StaffUser};
-use axum::extract::{Path, Query, State};
+use axum::extract::{Multipart, Path, Query, State};
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use axum::{
     routing::{get, post},
     Json, Router,
 };
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -19,9 +20,14 @@ use uuid::Uuid;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/admin/drivers", get(list_drivers))
+        .route("/v1/admin/drivers/onboard", post(onboard_driver))
         .route("/v1/admin/drivers/{id}", get(driver_detail))
         .route("/v1/admin/drivers/{id}/approve", post(approve_driver))
         .route("/v1/admin/drivers/{id}/reject", post(reject_driver))
+        .route(
+            "/v1/admin/drivers/{id}/documents",
+            post(upload_driver_document),
+        )
         .route("/v1/admin/documents/{id}/content", get(document_content))
 }
 
@@ -212,6 +218,216 @@ async fn reject_driver(
     )
     .await?;
     Ok(Json(json!({ "ok": true, "kyc_status": "rejected" })))
+}
+
+// ── On-site KYC entry (staff onboards a walk-in driver) ────────────────────
+
+#[derive(Deserialize)]
+struct OnboardVehicle {
+    class: VehicleClass,
+    make: Option<String>,
+    model: Option<String>,
+    year: Option<i32>,
+    plate_number: String,
+    color: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OnboardInput {
+    phone: String,
+    full_name: Option<String>,
+    license_number: Option<String>,
+    date_of_birth: Option<NaiveDate>,
+    address: Option<String>,
+    vehicle: OnboardVehicle,
+}
+
+/// Staff captures a driver's KYC on-site (walk-in): creates/promotes the user,
+/// their driver profile, and vehicle in one shot. The driver lands in the
+/// review queue (documents can then be uploaded on their behalf and approved).
+async fn onboard_driver(
+    State(st): State<AppState>,
+    StaffUser(claims): StaffUser,
+    Json(body): Json<OnboardInput>,
+) -> AppResult<Json<Driver>> {
+    if !claims.role.can_review_kyc() {
+        return Err(AppError::Forbidden);
+    }
+    let phone = body.phone.trim();
+    if phone.is_empty() {
+        return Err(AppError::BadRequest("phone is required".into()));
+    }
+    if body.vehicle.plate_number.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "vehicle plate_number is required".into(),
+        ));
+    }
+
+    let mut tx = st.db.begin().await?;
+
+    // Create or find the user, promoting a plain rider to a driver.
+    let user_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO users (phone, full_name, role, status) VALUES ($1, $2, 'driver', 'pending') \
+         ON CONFLICT (phone) DO UPDATE SET \
+             full_name = COALESCE(EXCLUDED.full_name, users.full_name), \
+             role = CASE WHEN users.role = 'rider' THEN 'driver'::user_role ELSE users.role END \
+         RETURNING id",
+    )
+    .bind(phone)
+    .bind(body.full_name.as_deref())
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let driver: Driver = sqlx::query_as(
+        "INSERT INTO drivers (user_id, license_number, date_of_birth, address, kyc_status, onboarded_by) \
+         VALUES ($1, $2, $3, $4, 'under_review', $5) \
+         ON CONFLICT (user_id) DO UPDATE SET \
+             license_number = EXCLUDED.license_number, \
+             date_of_birth = EXCLUDED.date_of_birth, \
+             address = EXCLUDED.address, \
+             onboarded_by = EXCLUDED.onboarded_by \
+         RETURNING id, user_id, kyc_status, license_number, date_of_birth, address, \
+                   rejection_reason, reviewed_by, reviewed_at, approved_at, created_at, updated_at",
+    )
+    .bind(user_id)
+    .bind(body.license_number)
+    .bind(body.date_of_birth)
+    .bind(body.address)
+    .bind(claims.sub)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // One vehicle per driver for now: replace any existing.
+    sqlx::query("DELETE FROM vehicles WHERE driver_id = $1")
+        .bind(driver.id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "INSERT INTO vehicles (driver_id, class, make, model, year, plate_number, color) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(driver.id)
+    .bind(body.vehicle.class)
+    .bind(body.vehicle.make)
+    .bind(body.vehicle.model)
+    .bind(body.vehicle.year)
+    .bind(body.vehicle.plate_number.trim())
+    .bind(body.vehicle.color)
+    .execute(&mut *tx)
+    .await?;
+
+    audit::record(
+        &st.db,
+        claims.sub,
+        "driver.onboard",
+        "driver",
+        driver.id,
+        json!({ "phone": phone }),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(driver))
+}
+
+/// Staff uploads a KYC document on a walk-in driver's behalf.
+async fn upload_driver_document(
+    State(st): State<AppState>,
+    StaffUser(claims): StaffUser,
+    Path(driver_id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> AppResult<Json<DriverDocument>> {
+    if !claims.role.can_review_kyc() {
+        return Err(AppError::Forbidden);
+    }
+    // Confirm the driver exists.
+    let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM drivers WHERE id = $1")
+        .bind(driver_id)
+        .fetch_optional(&st.db)
+        .await?;
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    let mut kind: Option<DocumentKind> = None;
+    let mut content_type: Option<String> = None;
+    let mut bytes: Option<Vec<u8>> = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?
+    {
+        match field.name() {
+            Some("kind") => {
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
+                kind = Some(parse_document_kind(&text)?);
+            }
+            Some("file") => {
+                content_type = field.content_type().map(|s| s.to_string());
+                let data = field
+                    .bytes()
+                    .await
+                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
+                bytes = Some(data.to_vec());
+            }
+            _ => {}
+        }
+    }
+    let kind = kind.ok_or_else(|| AppError::BadRequest("missing 'kind' field".into()))?;
+    let bytes = bytes.ok_or_else(|| AppError::BadRequest("missing 'file' field".into()))?;
+    if bytes.is_empty() {
+        return Err(AppError::BadRequest("empty file".into()));
+    }
+
+    let storage_key = format!("{driver_id}/{}", Uuid::new_v4());
+    st.docs
+        .put(&storage_key, bytes)
+        .await
+        .map_err(AppError::Other)?;
+
+    let doc: DriverDocument = sqlx::query_as(
+        "INSERT INTO driver_documents (driver_id, kind, storage_key, content_type, status) \
+         VALUES ($1, $2, $3, $4, 'submitted') \
+         RETURNING id, driver_id, kind, storage_key, content_type, status, expires_at, rejection_reason, created_at",
+    )
+    .bind(driver_id)
+    .bind(kind)
+    .bind(&storage_key)
+    .bind(content_type)
+    .fetch_one(&st.db)
+    .await?;
+
+    audit::record(
+        &st.db,
+        claims.sub,
+        "driver.document.upload",
+        "driver",
+        driver_id,
+        json!({}),
+    )
+    .await?;
+    Ok(Json(doc))
+}
+
+fn parse_document_kind(s: &str) -> Result<DocumentKind, AppError> {
+    Ok(match s {
+        "citizenship" => DocumentKind::Citizenship,
+        "license" => DocumentKind::License,
+        "bluebook" => DocumentKind::Bluebook,
+        "vehicle_fitness" => DocumentKind::VehicleFitness,
+        "insurance" => DocumentKind::Insurance,
+        "tax_clearance" => DocumentKind::TaxClearance,
+        "profile_photo" => DocumentKind::ProfilePhoto,
+        "vehicle_photo" => DocumentKind::VehiclePhoto,
+        other => {
+            return Err(AppError::bad(
+                saarathi_core::api::ErrorCode::DocumentInvalid,
+                format!("unknown document kind '{other}'"),
+            ))
+        }
+    })
 }
 
 async fn document_content(

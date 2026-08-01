@@ -4,14 +4,17 @@ pub mod analytics;
 pub mod campaigns;
 pub mod dispatch;
 pub mod feedback;
+pub mod flags;
 pub mod insights;
 pub mod ledger;
+pub mod metrics;
 pub mod notifications;
 pub mod payments;
 pub mod plans;
 pub mod rides;
 pub mod safety;
 pub mod subscription;
+pub mod surge;
 pub mod tracking;
 
 use crate::state::AppState;
@@ -57,6 +60,9 @@ pub fn router(state: AppState) -> Router {
         .merge(ledger::routes())
         .merge(dispatch::routes())
         .merge(payments::routes())
+        .merge(flags::routes())
+        .merge(surge::routes())
+        .merge(metrics::routes())
         .merge(tracking::routes())
         .merge(safety::routes())
         .merge(feedback::routes())

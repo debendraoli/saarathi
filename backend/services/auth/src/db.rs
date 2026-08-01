@@ -1,4 +1,4 @@
-//! Database pool + migrations.
+//! Database pool + idempotent schema bootstrap.
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
@@ -13,7 +13,12 @@ pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
     Ok(pool)
 }
 
-pub async fn migrate(pool: &PgPool) -> anyhow::Result<()> {
-    sqlx::migrate!("./migrations").run(pool).await?;
+/// Provision the schema idempotently from a single embedded source of truth.
+/// There are no migration files — a fresh database is brought fully up to date
+/// by running `schema.sql` (guarded with IF NOT EXISTS so restarts are safe).
+pub async fn init_schema(pool: &PgPool) -> anyhow::Result<()> {
+    sqlx::raw_sql(include_str!("schema.sql"))
+        .execute(pool)
+        .await?;
     Ok(())
 }

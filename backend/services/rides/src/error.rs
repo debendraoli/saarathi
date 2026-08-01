@@ -41,6 +41,14 @@ impl AppError {
     pub fn conflict(code: ErrorCode, msg: impl Into<String>) -> Self {
         AppError::Coded(StatusCode::CONFLICT, code, msg.into())
     }
+    /// A 503: a feature has been turned off from the admin dashboard.
+    pub fn disabled(msg: impl Into<String>) -> Self {
+        AppError::Coded(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::FeatureDisabled,
+            msg.into(),
+        )
+    }
 }
 
 impl IntoResponse for AppError {

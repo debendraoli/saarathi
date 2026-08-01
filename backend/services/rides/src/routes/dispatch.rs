@@ -60,6 +60,14 @@ async fn go_online(
     dispatch::set_online(&st, claims.sub, body.lat, body.lng, &job_types)
         .await
         .map_err(AppError::Other)?;
+    // Persist the availability toggle so the dashboard sees who is online and it
+    // survives a Redis flush.
+    let _ = sqlx::query(
+        "UPDATE drivers SET is_online = true, last_online_at = now() WHERE user_id = $1",
+    )
+    .bind(claims.sub)
+    .execute(&st.db)
+    .await;
     Ok(Json(json!({ "online": true, "job_types": job_types })))
 }
 
@@ -97,6 +105,10 @@ async fn go_offline(
     dispatch::set_offline(&st, claims.sub)
         .await
         .map_err(AppError::Other)?;
+    let _ = sqlx::query("UPDATE drivers SET is_online = false WHERE user_id = $1")
+        .bind(claims.sub)
+        .execute(&st.db)
+        .await;
     Ok(Json(json!({ "online": false })))
 }
 

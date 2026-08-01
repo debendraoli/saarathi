@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     store::ensure_dir(&config.kyc_storage_dir)?;
 
     let pool = db::connect(&config.database_url).await?;
-    db::migrate(&pool).await?;
+    db::init_schema(&pool).await?;
 
     if let Some(phone) = &config.seed_dev_admin_phone {
         seed_dev_admin(&pool, phone).await?;

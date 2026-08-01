@@ -14,9 +14,11 @@ const SECTIONS = [
     { href: "/complaints", label: "Complaints" },
   ] },
   { title: "Insights", items: [
+    { href: "/analytics", label: "Analytics" },
     { href: "/leaderboards", label: "Leaderboards" },
   ] },
   { title: "Compliance", items: [
+    { href: "/drivers/new", label: "On-site KYC" },
     { href: "/drivers", label: "Driver Verification" },
   ] },
   { title: "Finance", items: [
@@ -26,6 +28,10 @@ const SECTIONS = [
   ] },
   { title: "Growth", items: [
     { href: "/campaigns", label: "Campaigns & Offers" },
+    { href: "/surge", label: "Surge Hours" },
+  ] },
+  { title: "Platform", items: [
+    { href: "/flags", label: "Feature Flags" },
   ] },
 ];
 
@@ -94,8 +100,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 }
 
 function titleFor(pathname: string): string {
+  if (pathname.startsWith("/drivers/new")) return "On-site Driver KYC";
   if (pathname.startsWith("/drivers")) return "Driver Verification";
   if (pathname.startsWith("/campaigns")) return "Campaigns & Offers";
+  if (pathname.startsWith("/surge")) return "Surge Hours";
+  if (pathname.startsWith("/flags")) return "Feature Flags";
+  if (pathname.startsWith("/analytics")) return "Analytics";
   if (pathname.startsWith("/live")) return "Live Tracking";
   if (pathname.startsWith("/sos")) return "SOS Console";
   if (pathname.startsWith("/reports")) return "Reports";

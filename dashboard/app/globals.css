@@ -184,6 +184,36 @@ tbody tr:hover {
   color: var(--red);
   background: rgba(231, 76, 60, 0.12);
 }
+.badge.ok {
+  color: var(--green);
+  background: rgba(46, 204, 113, 0.12);
+}
+.badge.danger,
+.badge.off {
+  color: var(--red);
+  background: rgba(231, 76, 60, 0.12);
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+.stat {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.stat .label {
+  color: var(--muted);
+  font-size: 13px;
+}
+.stat .value {
+  font-size: 24px;
+  font-weight: 700;
+  margin-top: 4px;
+}
 
 .btn {
   border: 1px solid var(--border);

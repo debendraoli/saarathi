@@ -292,3 +292,70 @@ CREATE TABLE IF NOT EXISTS credit_plans (
     updated_at    timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS credit_plans_status_idx ON credit_plans (status);
+
+-- ── Feature flags (dashboard-controlled circuit breakers) ──────────────────
+-- Runtime kill-switches. The engine reads these on the hot paths (ride intake,
+-- bargaining, surge, dispatch, delivery) so ops can shed load or freeze a
+-- misbehaving subsystem from the dashboard without a deploy.
+CREATE TABLE IF NOT EXISTS feature_flags (
+    key         text        PRIMARY KEY,
+    enabled     boolean     NOT NULL DEFAULT true,
+    description text,
+    updated_by  uuid,
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO feature_flags (key, enabled, description) VALUES
+    ('rides.new_requests', true,  'Master switch for accepting new ride requests (circuit breaker).'),
+    ('rides.bargaining',   true,  'Allow bounded fare bargaining on ride requests.'),
+    ('pricing.surge',      true,  'Apply time-window and supply-based surge (clamped to the legal +20%).'),
+    ('dispatch.enabled',   true,  'Run the automatic dispatch / matching engine.'),
+    ('delivery.enabled',   false, 'Accept parcel / delivery jobs.')
+ON CONFLICT (key) DO NOTHING;
+
+-- ── Surge windows (dashboard-controlled time-of-day surcharge) ─────────────
+-- Each active window that matches the current local time contributes a
+-- multiplier; the engine takes the max and the legal clamp caps it at +20%.
+CREATE TABLE IF NOT EXISTS surge_windows (
+    id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    label         text        NOT NULL,
+    start_minute  int         NOT NULL,          -- minutes past local midnight [0,1440)
+    end_minute    int         NOT NULL,          -- exclusive; may wrap past midnight
+    multiplier    numeric     NOT NULL,          -- e.g. 1.15 (clamped to 1.20 by the engine)
+    days_mask     int         NOT NULL DEFAULT 127,  -- bitmask, bit0=Sun … bit6=Sat
+    vehicle_class text,                          -- null = any
+    city          text,
+    active        boolean     NOT NULL DEFAULT true,
+    created_by    uuid,
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS surge_windows_active_idx ON surge_windows (active);
+
+-- ── Product analytics events (funnel / effectiveness tracking) ─────────────
+-- Lightweight append-only event stream from the apps + server. Powers the
+-- dashboard overview KPIs and future funnel analysis. Not money — kept separate
+-- from the ledger.
+CREATE TABLE IF NOT EXISTS analytics_events (
+    id         bigserial   PRIMARY KEY,
+    name       text        NOT NULL,             -- e.g. ride_requested, ride_completed, app_open
+    user_id    uuid,
+    role       text,                             -- rider | driver | staff | anon
+    trip_id    uuid,
+    props      jsonb       NOT NULL DEFAULT '{}',
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS analytics_events_name_idx ON analytics_events (name, created_at DESC);
+CREATE INDEX IF NOT EXISTS analytics_events_user_idx ON analytics_events (user_id, created_at DESC);
+
+-- ── Driver campaign payouts (driver-side incentives / quests) ──────────────
+-- When a driver-audience campaign applies on trip completion, the bonus is
+-- platform-funded and credited to the driver's earnings wallet; recorded here
+-- (and in campaign_redemptions) for audit.
+CREATE TABLE IF NOT EXISTS driver_bonus_grants (
+    id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id uuid        NOT NULL REFERENCES campaigns (id) ON DELETE CASCADE,
+    driver_id   uuid        NOT NULL,
+    trip_id     uuid,
+    amount      numeric     NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS driver_bonus_grants_driver_idx ON driver_bonus_grants (driver_id, created_at DESC);

@@ -79,6 +79,13 @@ async fn create(
     AuthUser(claims): AuthUser,
     Json(body): Json<RideRequest>,
 ) -> AppResult<Json<Trip>> {
+    // Circuit breaker: ops can freeze new ride intake from the dashboard.
+    if !crate::flags::is_enabled(&st, crate::flags::RIDES_NEW_REQUESTS, true).await {
+        return Err(AppError::disabled(
+            "ride requests are temporarily paused; please try again shortly",
+        ));
+    }
+
     let (est, _route) = pricing::estimate(
         &st,
         body.origin,
@@ -97,10 +104,18 @@ async fn create(
         ));
     }
 
+    // Bargaining is a dashboard-toggleable feature; when off, ignore any
+    // proposed fare and charge the algorithmic price.
+    let offered_fare = if crate::flags::is_enabled(&st, crate::flags::BARGAINING, true).await {
+        body.offered_fare
+    } else {
+        None
+    };
+
     // Bargaining: clamp the rider's proposed fare to [floor, legal ceiling] and
     // recompute the split on the agreed amount (commission still capped at 10%).
     let (gross_fare, commission, accident_fund, driver_payout, final_fare, agreed) =
-        if let Some(offered) = body.offered_fare {
+        if let Some(offered) = offered_fare {
             let agreed = offered.max(est.fare_floor).min(est.fare_ceiling);
             let commission = (agreed * st.config.commission_rate).round_dp(2);
             let fund = (agreed * Decimal::new(1, 2)).round_dp(2);
@@ -206,6 +221,16 @@ async fn create(
             let _ = crate::dispatch::dispatch_trip(&st, trip_id).await;
         }
     });
+
+    crate::routes::metrics::track(
+        &st.db,
+        "ride_requested",
+        Some(claims.sub),
+        Some("rider"),
+        Some(trip.id),
+        json!({ "vehicle_class": body.vehicle_class, "payment_method": method, "gross": gross_fare }),
+    )
+    .await;
 
     Ok(Json(trip))
 }
@@ -332,6 +357,17 @@ async fn update_status(
             crate::payments::debit_rider(&mut tx, m.rider_id, m.final_fare, "payment", Some(id))
                 .await?;
         }
+        // Driver-side campaign incentive (platform-funded, into the earnings wallet).
+        if let Some(did) = m.driver_id {
+            let _ = crate::bonus::grant_driver_bonus(
+                &mut tx,
+                did,
+                id,
+                m.gross_fare,
+                &trip.vehicle_class,
+            )
+            .await?;
+        }
     }
 
     tx.commit().await?;
@@ -340,6 +376,27 @@ async fn update_status(
         id,
         json!({ "type": "status", "status": body.status }).to_string(),
     );
+    if body.status == "completed" && m.status != "completed" {
+        crate::routes::metrics::track(
+            &st.db,
+            "ride_completed",
+            m.driver_id,
+            Some("driver"),
+            Some(id),
+            json!({ "gross": m.gross_fare, "payment_method": m.payment_method }),
+        )
+        .await;
+    } else if body.status == "cancelled" && m.status != "cancelled" {
+        crate::routes::metrics::track(
+            &st.db,
+            "ride_cancelled",
+            Some(claims.sub),
+            Some(cancelled_by_role),
+            Some(id),
+            json!({ "by": cancelled_by_role }),
+        )
+        .await;
+    }
     Ok(Json(trip))
 }
 

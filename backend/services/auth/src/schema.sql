@@ -1,23 +1,44 @@
--- 0001_init.sql — Saarathi identity, KYC, and location schema (Phase 0).
--- Enforces the shape the compliance rules require: driver KYC with manual
--- staff verification, an audit trail, and PostGIS-backed location data for
--- riders and drivers. See ../../../../AGENTS.md for the golden rules.
+-- Saarathi identity, KYC, and location schema. Applied idempotently at startup
+-- via sqlx::raw_sql (no migration files — the DB is provisioned from this single
+-- source of truth). Enforces the shape the compliance rules require: driver KYC
+-- with manual staff verification, an audit trail, and PostGIS-backed location
+-- data for riders and drivers. See ../../../../AGENTS.md for the golden rules.
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ── Enums ──────────────────────────────────────────────────────────────────
-CREATE TYPE user_role AS ENUM (
-    'rider', 'driver',
-    'super_admin', 'admin', 'dispatcher', 'finance', 'compliance', 'support', 'analyst'
-);
-CREATE TYPE user_status     AS ENUM ('pending', 'active', 'suspended', 'banned');
-CREATE TYPE kyc_status      AS ENUM ('pending', 'under_review', 'approved', 'rejected');
-CREATE TYPE document_kind   AS ENUM (
-    'citizenship', 'license', 'bluebook', 'vehicle_fitness', 'insurance', 'tax_clearance', 'profile_photo'
-);
-CREATE TYPE document_status AS ENUM ('submitted', 'approved', 'rejected');
-CREATE TYPE vehicle_class   AS ENUM ('two_wheeler', 'four_wheeler');
+DO $$ BEGIN
+    CREATE TYPE user_role AS ENUM (
+        'rider', 'driver',
+        'super_admin', 'admin', 'dispatcher', 'finance', 'compliance', 'support', 'analyst'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE user_status AS ENUM ('pending', 'active', 'suspended', 'banned');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE kyc_status AS ENUM ('pending', 'under_review', 'approved', 'rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE document_kind AS ENUM (
+        'citizenship', 'license', 'bluebook', 'vehicle_fitness', 'insurance',
+        'tax_clearance', 'profile_photo', 'vehicle_photo'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Fold-in of the old 0002 migration (safe if the type predates 'vehicle_photo').
+ALTER TYPE document_kind ADD VALUE IF NOT EXISTS 'vehicle_photo';
+
+DO $$ BEGIN
+    CREATE TYPE document_status AS ENUM ('submitted', 'approved', 'rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE vehicle_class AS ENUM ('two_wheeler', 'four_wheeler');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Keep updated_at honest.
 CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
@@ -28,7 +49,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ── Users ──────────────────────────────────────────────────────────────────
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     phone      text        NOT NULL UNIQUE,          -- E.164, e.g. +9779800000000
     full_name  text,
@@ -37,11 +58,12 @@ CREATE TABLE users (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+DROP TRIGGER IF EXISTS users_updated_at ON users;
 CREATE TRIGGER users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ── OTP codes ──────────────────────────────────────────────────────────────
-CREATE TABLE otp_codes (
+CREATE TABLE IF NOT EXISTS otp_codes (
     id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     phone      text        NOT NULL,
     code_hash  text        NOT NULL,                 -- argon2 hash; never store the raw code
@@ -51,10 +73,10 @@ CREATE TABLE otp_codes (
     consumed_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX otp_codes_phone_created_idx ON otp_codes (phone, created_at DESC);
+CREATE INDEX IF NOT EXISTS otp_codes_phone_created_idx ON otp_codes (phone, created_at DESC);
 
 -- ── Refresh tokens ─────────────────────────────────────────────────────────
-CREATE TABLE refresh_tokens (
+CREATE TABLE IF NOT EXISTS refresh_tokens (
     id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id    uuid        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     token_hash text        NOT NULL UNIQUE,          -- sha256 of the random token
@@ -62,10 +84,10 @@ CREATE TABLE refresh_tokens (
     revoked_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX refresh_tokens_user_idx ON refresh_tokens (user_id);
+CREATE INDEX IF NOT EXISTS refresh_tokens_user_idx ON refresh_tokens (user_id);
 
 -- ── Drivers (KYC) ──────────────────────────────────────────────────────────
-CREATE TABLE drivers (
+CREATE TABLE IF NOT EXISTS drivers (
     id               uuid       PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id          uuid       NOT NULL UNIQUE REFERENCES users (id) ON DELETE CASCADE,
     kyc_status       kyc_status NOT NULL DEFAULT 'pending',
@@ -76,15 +98,24 @@ CREATE TABLE drivers (
     reviewed_by      uuid       REFERENCES users (id),  -- staff who decided
     reviewed_at      timestamptz,
     approved_at      timestamptz,
+    -- On-site onboarding: which staff member captured this walk-in KYC (if any).
+    onboarded_by     uuid       REFERENCES users (id),
     created_at       timestamptz NOT NULL DEFAULT now(),
     updated_at       timestamptz NOT NULL DEFAULT now()
 );
+DROP TRIGGER IF EXISTS drivers_updated_at ON drivers;
 CREATE TRIGGER drivers_updated_at BEFORE UPDATE ON drivers
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE INDEX drivers_kyc_status_idx ON drivers (kyc_status);
+CREATE INDEX IF NOT EXISTS drivers_kyc_status_idx ON drivers (kyc_status);
+-- Safe on pre-existing databases that predate on-site onboarding.
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS onboarded_by uuid REFERENCES users (id);
+-- Persisted availability toggle (mirrors the rides service's Redis presence so
+-- the dashboard can show who is online and it survives a Redis flush).
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS is_online boolean NOT NULL DEFAULT false;
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_online_at timestamptz;
 
 -- ── Vehicles ───────────────────────────────────────────────────────────────
-CREATE TABLE vehicles (
+CREATE TABLE IF NOT EXISTS vehicles (
     id           uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
     driver_id    uuid          NOT NULL REFERENCES drivers (id) ON DELETE CASCADE,
     class        vehicle_class NOT NULL,
@@ -96,12 +127,13 @@ CREATE TABLE vehicles (
     created_at   timestamptz   NOT NULL DEFAULT now(),
     updated_at   timestamptz   NOT NULL DEFAULT now()
 );
+DROP TRIGGER IF EXISTS vehicles_updated_at ON vehicles;
 CREATE TRIGGER vehicles_updated_at BEFORE UPDATE ON vehicles
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE INDEX vehicles_driver_idx ON vehicles (driver_id);
+CREATE INDEX IF NOT EXISTS vehicles_driver_idx ON vehicles (driver_id);
 
 -- ── Driver documents ───────────────────────────────────────────────────────
-CREATE TABLE driver_documents (
+CREATE TABLE IF NOT EXISTS driver_documents (
     id               uuid            PRIMARY KEY DEFAULT gen_random_uuid(),
     driver_id        uuid            NOT NULL REFERENCES drivers (id) ON DELETE CASCADE,
     kind             document_kind   NOT NULL,
@@ -113,12 +145,13 @@ CREATE TABLE driver_documents (
     created_at       timestamptz     NOT NULL DEFAULT now(),
     updated_at       timestamptz     NOT NULL DEFAULT now()
 );
+DROP TRIGGER IF EXISTS driver_documents_updated_at ON driver_documents;
 CREATE TRIGGER driver_documents_updated_at BEFORE UPDATE ON driver_documents
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-CREATE INDEX driver_documents_driver_idx ON driver_documents (driver_id);
+CREATE INDEX IF NOT EXISTS driver_documents_driver_idx ON driver_documents (driver_id);
 
 -- ── Saved locations (rider & driver favourites) ────────────────────────────
-CREATE TABLE saved_locations (
+CREATE TABLE IF NOT EXISTS saved_locations (
     id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id    uuid        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     label      text        NOT NULL,                 -- home / work / custom
@@ -129,11 +162,11 @@ CREATE TABLE saved_locations (
                GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint(lng, lat), 4326)::geography) STORED,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX saved_locations_user_idx ON saved_locations (user_id);
-CREATE INDEX saved_locations_geog_idx ON saved_locations USING GIST (geog);
+CREATE INDEX IF NOT EXISTS saved_locations_user_idx ON saved_locations (user_id);
+CREATE INDEX IF NOT EXISTS saved_locations_geog_idx ON saved_locations USING GIST (geog);
 
 -- ── Location pings (live / last-known position, riders and drivers) ─────────
-CREATE TABLE location_pings (
+CREATE TABLE IF NOT EXISTS location_pings (
     id          bigserial   PRIMARY KEY,
     user_id     uuid        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     lat         double precision NOT NULL,
@@ -145,11 +178,11 @@ CREATE TABLE location_pings (
     speed_mps   double precision,
     recorded_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX location_pings_user_time_idx ON location_pings (user_id, recorded_at DESC);
-CREATE INDEX location_pings_geog_idx ON location_pings USING GIST (geog);
+CREATE INDEX IF NOT EXISTS location_pings_user_time_idx ON location_pings (user_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS location_pings_geog_idx ON location_pings USING GIST (geog);
 
 -- ── Audit log (every privileged staff action) ──────────────────────────────
-CREATE TABLE audit_log (
+CREATE TABLE IF NOT EXISTS audit_log (
     id            bigserial   PRIMARY KEY,
     actor_user_id uuid        REFERENCES users (id),
     action        text        NOT NULL,
@@ -158,5 +191,24 @@ CREATE TABLE audit_log (
     detail        jsonb,
     created_at    timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX audit_log_actor_idx  ON audit_log (actor_user_id, created_at DESC);
-CREATE INDEX audit_log_entity_idx ON audit_log (entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS audit_log_actor_idx  ON audit_log (actor_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS audit_log_entity_idx ON audit_log (entity_type, entity_id);
+
+-- ── Per-user settings + synced recent searches (was migration 0003) ────────
+CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id                uuid        PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+    default_payment_method text        NOT NULL DEFAULT 'cash',    -- cash | wallet
+    theme                  text        NOT NULL DEFAULT 'system',  -- system | light | dark
+    updated_at             timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recent_searches (
+    id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    uuid        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    label      text        NOT NULL,
+    address    text,
+    lat        double precision,
+    lng        double precision,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS recent_searches_user_idx ON recent_searches (user_id, created_at DESC);

@@ -18,6 +18,8 @@ pub enum ErrorCode {
     RateLimited,
     Conflict,
     Internal,
+    /// A feature is turned off from the admin dashboard (circuit breaker).
+    FeatureDisabled,
     // Auth / identity
     PhoneInvalid,
     OtpInvalid,

@@ -5,10 +5,12 @@
 //! near-realtime status/location, chat, and WebRTC signaling. See ../../../AGENTS.md.
 
 mod auth;
+mod bonus;
 mod config;
 mod db;
 mod dispatch;
 mod error;
+mod flags;
 mod hub;
 mod ledger;
 mod models;
@@ -18,6 +20,7 @@ mod pricing;
 mod routes;
 mod routing;
 mod state;
+mod surge;
 mod ws;
 
 use config::Config;

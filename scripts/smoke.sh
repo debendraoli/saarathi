@@ -73,6 +73,18 @@ ECODE=$(curl -sS -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $R
 [ "$ECODE" = "INVALID_VEHICLE_CLASS" ] || { echo "  expected INVALID_VEHICLE_CLASS, got '$ECODE'"; exit 1; }
 echo "  error body → { error: { code: $ECODE, message } }"
 
+step "feature flags (circuit breaker)"
+FLAGCOUNT=$(j "$RIDES/v1/admin/flags" -H "authorization: Bearer $ADMIN_TOKEN" | jq 'length')
+[ "$FLAGCOUNT" -ge 1 ] || { echo "  no feature flags seeded"; exit 1; }
+j -X PUT "$RIDES/v1/admin/flags/rides.new_requests" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' -d '{"enabled":false}' >/dev/null
+BREAK=$(curl -sS -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d "$BODY" | jq -r '.error.code')
+[ "$BREAK" = "FEATURE_DISABLED" ] || { echo "  circuit breaker not enforced (got '$BREAK')"; exit 1; }
+j -X PUT "$RIDES/v1/admin/flags/rides.new_requests" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' -d '{"enabled":true}' >/dev/null
+echo "  $FLAGCOUNT flags; ride intake breaker → $BREAK → restored"
+
 step "bounded fare bargaining"
 EBODY='{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler"}'
 EST=$(j -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $RTOKEN" \
@@ -86,6 +98,37 @@ AGREED=$(echo "$BTRIP" | jq -r '.gross_fare')
 awk -v a="$AGREED" -v f="$FLOOR" 'BEGIN{exit !(a+0==f+0)}' \
   || { echo "  bargain not applied ($AGREED != $FLOOR)"; exit 1; }
 echo "  algo=$ALGO  band=[$FLOOR, $CEIL]  agreed=$AGREED"
+
+step "surge window (legal-clamped to +20%)"
+SWID=$(j -X POST "$RIDES/v1/admin/surge" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"label":"smoke all-day","start_minute":0,"end_minute":1440,"multiplier":1.15,"vehicle_class":"two_wheeler"}' | jq -r '.id')
+SURGE=$(j -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d "$EBODY" | jq -r '.surge_multiplier')
+awk -v s="$SURGE" 'BEGIN{exit !(s+0>=1.15 && s+0<=1.20)}' \
+  || { echo "  surge not applied/clamped ($SURGE)"; exit 1; }
+j -X POST "$RIDES/v1/admin/surge/$SWID/deactivate" -H "authorization: Bearer $ADMIN_TOKEN" >/dev/null
+echo "  surge multiplier during window: $SURGE (≤ legal 1.20)"
+
+step "on-site KYC entry (staff onboards a walk-in driver)"
+OPHONE="+97798$(( RANDOM % 900000 + 100000 ))"
+ODID=$(j -X POST "$API/v1/admin/drivers/onboard" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d "{\"phone\":\"$OPHONE\",\"full_name\":\"Walk In\",\"license_number\":\"DL-9\",\"vehicle\":{\"class\":\"two_wheeler\",\"plate_number\":\"BA-2-PA-9\"}}" | jq -r '.id')
+[ -n "$ODID" ] && [ "$ODID" != "null" ] || { echo "  onboard failed"; exit 1; }
+printf 'license bytes' > /tmp/saarathi_lic.jpg
+j -X POST "$API/v1/admin/drivers/$ODID/documents" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -F kind=license -F file=@/tmp/saarathi_lic.jpg >/dev/null
+INQUEUE=$(j "$API/v1/admin/drivers?status=queue" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq --arg p "$OPHONE" '[.[] | select(.phone==$p)] | length')
+[ "$INQUEUE" -eq 1 ] || { echo "  onboarded driver not in queue"; exit 1; }
+echo "  onboarded $OPHONE on-site + license doc; in review queue"
+
+step "driver bonus campaign"
+j -X POST "$RIDES/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"code":"DRIVE5","title":"Driver quest","audience":"driver","kind":"flat","value":5}' >/dev/null
+echo "  driver bonus campaign DRIVE5 created (granted on completion below)"
 
 step "rider settings + saved places + recent searches"
 j -X PUT "$API/v1/me/preferences" -H "authorization: Bearer $RTOKEN" \
@@ -231,6 +274,12 @@ awk -v c="$COMM" 'BEGIN{exit !(c+0==0)}' \
   || { echo "  subscription commission not 0 ($COMM)"; exit 1; }
 echo "  pass trip commission = NPR $COMM (driver kept 100% minus fund)"
 
+DUSED=$(j "$RIDES/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq -r '.[] | select(.code=="DRIVE5") | .used_count')
+awk -v u="$DUSED" 'BEGIN{exit !(u+0>=1)}' \
+  || { echo "  driver bonus not granted on completion ($DUSED)"; exit 1; }
+echo "  driver bonus granted on trip completion (redemptions=$DUSED)"
+
 step "cancellation with reason → complaints feed"
 CID=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
   -H 'content-type: application/json' -d "$EBODY" | jq -r '.id')
@@ -257,5 +306,15 @@ step "filters / leaderboards + rides history"
 TOPEARN=$(j "$RIDES/v1/admin/leaderboard?role=driver&by=earnings" -H "authorization: Bearer $ADMIN_TOKEN" | jq 'length')
 RIDESN=$(j "$RIDES/v1/admin/rides" -H "authorization: Bearer $ADMIN_TOKEN" | jq 'length')
 echo "  top-earner drivers=$TOPEARN  admin rides listed=$RIDESN"
+
+step "platform analytics + event tracking"
+OVR=$(j "$RIDES/v1/admin/analytics/overview" -H "authorization: Bearer $ADMIN_TOKEN")
+TT=$(echo "$OVR" | jq -r '.trips.total')
+GMV=$(echo "$OVR" | jq -r '.money.gmv')
+COMPRATE=$(echo "$OVR" | jq -r '.trips.completion_rate')
+TSN=$(j "$RIDES/v1/admin/analytics/timeseries?days=7" -H "authorization: Bearer $ADMIN_TOKEN" | jq '.series | length')
+[ "$TT" -ge 1 ] || { echo "  analytics missing trips"; exit 1; }
+[ "$TSN" -eq 7 ] || { echo "  timeseries wrong length ($TSN)"; exit 1; }
+echo "  analytics: trips=$TT gmv=NPR $GMV completion_rate=$COMPRATE timeseries_days=$TSN"
 
 printf '\n✅ SMOKE OK\n'

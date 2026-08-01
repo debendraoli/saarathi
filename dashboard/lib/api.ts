@@ -196,7 +196,39 @@ export const api = {
     const blob = await res.blob();
     return URL.createObjectURL(blob);
   },
+
+  // On-site KYC entry (staff onboards a walk-in driver).
+  onboardDriver: (input: OnboardDriverInput) =>
+    request<Driver>("/v1/admin/drivers/onboard", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  async uploadDriverDocument(driverId: string, kind: string, file: File): Promise<DriverDocument> {
+    const fd = new FormData();
+    fd.append("kind", kind);
+    fd.append("file", file);
+    const res = await raw(`/v1/admin/drivers/${driverId}/documents`, { method: "POST", body: fd }, true);
+    if (!res.ok) throw new Error(await apiError(res));
+    return (await res.json()) as DriverDocument;
+  },
 };
+
+export interface OnboardDriverInput {
+  phone: string;
+  full_name?: string | null;
+  license_number?: string | null;
+  date_of_birth?: string | null;
+  address?: string | null;
+  vehicle: {
+    class: VehicleClass;
+    make?: string | null;
+    model?: string | null;
+    year?: number | null;
+    plate_number: string;
+    color?: string | null;
+  };
+}
 
 // ── Rides service (campaigns) ────────────────────────────────────────────────
 
@@ -296,7 +328,88 @@ export const rides = {
   cancellations: () => ridesRequest<RideRow[]>("/v1/admin/cancellations"),
   leaderboard: (role: string, by: string) =>
     ridesRequest<LeaderRow[]>(`/v1/admin/leaderboard?role=${role}&by=${by}`),
+
+  // Feature flags (circuit breakers)
+  listFlags: () => ridesRequest<FeatureFlag[]>("/v1/admin/flags"),
+  setFlag: (key: string, enabled: boolean, description?: string) =>
+    ridesRequest<FeatureFlag>(`/v1/admin/flags/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled, description }),
+    }),
+
+  // Surge windows
+  listSurge: () => ridesRequest<SurgeWindow[]>("/v1/admin/surge"),
+  createSurge: (w: NewSurgeWindow) =>
+    ridesRequest<SurgeWindow>("/v1/admin/surge", { method: "POST", body: JSON.stringify(w) }),
+  deactivateSurge: (id: string) =>
+    ridesRequest<{ ok: boolean }>(`/v1/admin/surge/${id}/deactivate`, { method: "POST" }),
+
+  // Platform analytics
+  analyticsOverview: () => ridesRequest<AnalyticsOverview>("/v1/admin/analytics/overview"),
+  analyticsTimeseries: (days = 14) =>
+    ridesRequest<{ days: number; series: TimeseriesPoint[] }>(
+      `/v1/admin/analytics/timeseries?days=${days}`,
+    ),
 };
+
+export interface FeatureFlag {
+  key: string;
+  enabled: boolean;
+  description: string | null;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export interface SurgeWindow {
+  id: string;
+  label: string;
+  start_minute: number;
+  end_minute: number;
+  multiplier: string;
+  days_mask: number;
+  vehicle_class: string | null;
+  city: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export interface NewSurgeWindow {
+  label: string;
+  start_minute: number;
+  end_minute: number;
+  multiplier: number;
+  days_mask?: number;
+  vehicle_class?: string | null;
+  city?: string | null;
+}
+
+export interface AnalyticsOverview {
+  trips: {
+    total: number;
+    completed: number;
+    cancelled: number;
+    active: number;
+    completed_today: number;
+    completion_rate: number;
+    cancellation_rate: number;
+  };
+  money: {
+    gmv: string;
+    commission_earned: string;
+    accident_fund_levied: string;
+    driver_payouts: string;
+    currency: string;
+  };
+  supply: { drivers_total: number; drivers_approved: number; drivers_online: number };
+  demand: { users_total: number; riders: number; signups_7d: number };
+}
+
+export interface TimeseriesPoint {
+  day: string;
+  requested: number;
+  completed: number;
+  gmv: string;
+}
 
 export interface CreditPlan {
   id: string;

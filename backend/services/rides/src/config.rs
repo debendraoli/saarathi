@@ -27,6 +27,9 @@ pub struct Config {
     /// Dispatch search radius (km); expands up to the max if no driver responds.
     pub dispatch_radius_km: f64,
     pub dispatch_max_radius_km: f64,
+    /// When the pool of eligible drivers is at or below this size, broadcast the
+    /// offer to all of them at once (blast radius) instead of one-at-a-time.
+    pub dispatch_broadcast_threshold: usize,
     /// How stale a driver heartbeat may be before we treat them as offline (secs).
     pub presence_ttl_secs: i64,
     /// Lowest fraction of the algorithmic fare a rider may bargain down to.
@@ -63,6 +66,7 @@ impl Config {
             offer_ttl_secs: int_env("DISPATCH_OFFER_TTL_SECS", 15),
             dispatch_radius_km: float_env("DISPATCH_RADIUS_KM", 2.0),
             dispatch_max_radius_km: float_env("DISPATCH_MAX_RADIUS_KM", 8.0),
+            dispatch_broadcast_threshold: int_env("DISPATCH_BROADCAST_THRESHOLD", 3) as usize,
             presence_ttl_secs: int_env("DISPATCH_PRESENCE_TTL_SECS", 60),
             bargain_floor_ratio: dec_env("BARGAIN_FLOOR_RATIO", "0.5"),
             subscription_weekly_price: dec_env("SUBSCRIPTION_WEEKLY_PRICE", "500"),
