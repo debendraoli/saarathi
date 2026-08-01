@@ -42,3 +42,30 @@ services:
       - "8222:8222"   # monitoring
     volumes:
       - ./.data/nats:/data
+
+  # Self-hosted Valhalla routing (OSM-based). On first boot it downloads the
+  # configured OSM extract and builds tiles into ./.data/valhalla (this takes a
+  # while); subsequent boots reuse the tiles. Point the rides service at it with
+  # ROUTING_URL=http://localhost:8002 and ROUTING_ENGINE=valhalla.
+  # Start it explicitly (it's in the "routing" profile so normal `up` skips it):
+  #   docker compose --profile routing up -d valhalla
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    profiles: ["routing"]
+    ports:
+      - "8002:8002"
+    environment:
+      # Nepal (Lumbini) OSM extract — swap for a wider region as coverage grows.
+      tile_urls: "https://download.geofabrik.de/asia/nepal-latest.osm.pbf"
+      server_threads: "2"
+      use_tiles_ignore_pbf: "True"
+      build_elevation: "False"
+      build_admins: "True"
+      build_time_zones: "False"
+    volumes:
+      - ./.data/valhalla:/custom_files
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8002/status || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20

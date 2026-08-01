@@ -11,6 +11,8 @@ pub struct Config {
     pub cors_origins: Vec<String>,
     /// OSRM/Valhalla base URL, e.g. http://localhost:5000. Empty = haversine only.
     pub routing_url: String,
+    /// Which routing engine `routing_url` speaks: "valhalla" (default) or "osrm".
+    pub routing_engine: String,
     /// Multiplier applied to straight-line distance when falling back to
     /// haversine (approximates real road distance in a town like Ghorahi).
     pub road_factor: Decimal,
@@ -61,6 +63,7 @@ impl Config {
                 })
                 .unwrap_or_else(|| vec!["http://localhost:3000".into()]),
             routing_url: opt("ROUTING_URL").unwrap_or_default(),
+            routing_engine: opt("ROUTING_ENGINE").unwrap_or_else(|| "valhalla".into()),
             road_factor: dec_env("ROUTING_ROAD_FACTOR", "1.3"),
             avg_speed_kmh: dec_env("ROUTING_AVG_SPEED_KMH", "22"),
             two_wheeler_per_km: dec_env("FARE_TWO_WHEELER_PER_KM", "20"),

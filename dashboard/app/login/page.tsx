@@ -48,12 +48,12 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="auth-wrap">
-      <div className="card auth-card">
-        <div className="brand" style={{ paddingLeft: 0 }}>
-          <span className="dot" /> Saarathi Ops
+    <div className="min-h-screen grid place-items-center p-6">
+      <div className="card w-full max-w-[380px]">
+        <div className="brand">
+          <span className="logo">सा</span> Saarathi Ops
         </div>
-        <p className="subtle" style={{ marginTop: -8 }}>
+        <p className="subtle" style={{ marginTop: -6, marginBottom: 16 }}>
           Staff sign-in
         </p>
 
