@@ -19,6 +19,7 @@ mod payments;
 mod pricing;
 mod routes;
 mod routing;
+mod rules;
 mod state;
 mod surge;
 mod ws;

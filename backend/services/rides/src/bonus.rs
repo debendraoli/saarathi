@@ -9,7 +9,7 @@
 use crate::error::AppResult;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow)]
@@ -18,19 +18,22 @@ struct DriverCampaign {
     kind: String,
     value: Decimal,
     max_discount: Option<Decimal>,
+    rules: sqlx::types::Json<Vec<crate::rules::CampaignRule>>,
 }
 
 /// Apply the best-matching active driver campaign to a completed trip. Returns
-/// the bonus amount granted (0 if none applied). Runs inside the caller's tx.
+/// the bonus amount granted (0 if none applied). Runs inside the caller's tx;
+/// `pool` is used for the read-only rule-context lookups.
 pub async fn grant_driver_bonus(
     tx: &mut Transaction<'_, Postgres>,
+    pool: &PgPool,
     driver_id: Uuid,
     trip_id: Uuid,
     gross: Decimal,
     vehicle_class: &str,
 ) -> AppResult<Decimal> {
-    let row: Option<DriverCampaign> = sqlx::query_as(
-        "SELECT id, kind::text, value, max_discount \
+    let candidates: Vec<DriverCampaign> = sqlx::query_as(
+        "SELECT id, kind::text, value, max_discount, rules \
          FROM campaigns \
          WHERE audience = 'driver' AND active = true \
            AND (starts_at IS NULL OR starts_at <= now()) \
@@ -38,14 +41,28 @@ pub async fn grant_driver_bonus(
            AND (vehicle_class IS NULL OR vehicle_class = $1) \
            AND min_fare <= $2 \
            AND (usage_limit IS NULL OR used_count < usage_limit) \
-         ORDER BY value DESC LIMIT 1",
+         ORDER BY value DESC",
     )
     .bind(vehicle_class)
     .bind(gross)
-    .fetch_optional(&mut **tx)
+    .fetch_all(&mut **tx)
     .await?;
 
-    let Some(c) = row else {
+    // Highest-value campaign whose dynamic rules pass for this driver.
+    let mut chosen: Option<DriverCampaign> = None;
+    for c in candidates {
+        if c.rules.0.is_empty() {
+            chosen = Some(c);
+            break;
+        }
+        let ctx =
+            crate::rules::load_context(pool, driver_id, "driver", c.id, gross, Some(trip_id)).await;
+        if crate::rules::evaluate(&c.rules.0, &ctx) {
+            chosen = Some(c);
+            break;
+        }
+    }
+    let Some(c) = chosen else {
         return Ok(Decimal::ZERO);
     };
 

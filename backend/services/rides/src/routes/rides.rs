@@ -59,11 +59,12 @@ struct RideRequest {
 
 async fn estimate(
     State(st): State<AppState>,
-    _auth: AuthUser,
+    AuthUser(claims): AuthUser,
     Json(body): Json<RideRequest>,
 ) -> AppResult<Json<Estimate>> {
     let (est, _route) = pricing::estimate(
         &st,
+        claims.sub,
         body.origin,
         body.dest,
         &body.stops,
@@ -88,6 +89,7 @@ async fn create(
 
     let (est, _route) = pricing::estimate(
         &st,
+        claims.sub,
         body.origin,
         body.dest,
         &body.stops,
@@ -361,6 +363,7 @@ async fn update_status(
         if let Some(did) = m.driver_id {
             let _ = crate::bonus::grant_driver_bonus(
                 &mut tx,
+                &st.db,
                 did,
                 id,
                 m.gross_fare,

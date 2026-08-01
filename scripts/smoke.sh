@@ -317,4 +317,19 @@ TSN=$(j "$RIDES/v1/admin/analytics/timeseries?days=7" -H "authorization: Bearer 
 [ "$TSN" -eq 7 ] || { echo "  timeseries wrong length ($TSN)"; exit 1; }
 echo "  analytics: trips=$TT gmv=NPR $GMV completion_rate=$COMPRATE timeseries_days=$TSN"
 
+step "dynamic rule-based campaign (new-customer only)"
+j -X POST "$RIDES/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"code":"NEWBIE20","title":"New customer 20%","audience":"rider","kind":"percent","value":20,"max_discount":30,"rules":[{"type":"new_user","max_prior_rides":0}]}' >/dev/null
+NTOKEN=$(login "+97796$(( RANDOM % 900000 + 100000 ))" | jq -r '.access_token')
+NEWDISC=$(j -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $NTOKEN" \
+  -H 'content-type: application/json' -d "$(echo "$EBODY" | jq '. + {code:"NEWBIE20"}')" | jq -r '.discount_amount')
+awk -v d="$NEWDISC" 'BEGIN{exit !(d+0>0)}' \
+  || { echo "  new-customer discount not applied ($NEWDISC)"; exit 1; }
+VETDISC=$(j -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d "$(echo "$EBODY" | jq '. + {code:"NEWBIE20"}')" | jq -r '.discount_amount')
+awk -v d="$VETDISC" 'BEGIN{exit !(d+0==0)}' \
+  || { echo "  veteran rider should be ineligible ($VETDISC)"; exit 1; }
+echo "  rule engine: new rider disc=NPR $NEWDISC, veteran disc=NPR $VETDISC (ineligible)"
+
 printf '\n✅ SMOKE OK\n'

@@ -250,8 +250,18 @@ export interface Campaign {
   active: boolean;
   usage_limit: number | null;
   used_count: number;
+  rules: CampaignRule[];
   created_at: string;
 }
+
+// Dynamic campaign eligibility rules (ANDed). Mirrors rides::rules::CampaignRule.
+export type CampaignRule =
+  | { type: "new_user"; within_days?: number | null; max_prior_rides?: number | null }
+  | { type: "min_rides"; count: number }
+  | { type: "max_rides"; count: number }
+  | { type: "time_of_day"; start_minute: number; end_minute: number; days_mask?: number }
+  | { type: "min_fare"; amount: number }
+  | { type: "max_per_user"; count: number };
 
 export interface NewCampaign {
   code: string;
@@ -263,6 +273,9 @@ export interface NewCampaign {
   max_discount?: number | null;
   vehicle_class?: string | null;
   usage_limit?: number | null;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  rules?: CampaignRule[];
 }
 
 async function ridesRequest<T>(path: string, init: RequestInit = {}): Promise<T> {

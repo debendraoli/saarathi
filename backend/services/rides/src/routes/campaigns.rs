@@ -37,6 +37,9 @@ struct NewCampaign {
     starts_at: Option<DateTime<Utc>>,
     ends_at: Option<DateTime<Utc>>,
     usage_limit: Option<i32>,
+    /// Dynamic eligibility rules (ANDed). See `crate::rules::CampaignRule`.
+    #[serde(default)]
+    rules: Option<serde_json::Value>,
 }
 
 async fn create(
@@ -57,11 +60,19 @@ async fn create(
     if body.code.trim().is_empty() {
         return Err(AppError::BadRequest("code is required".into()));
     }
+    if body.kind == "percent" && (body.value <= Decimal::ZERO || body.value > Decimal::from(100)) {
+        return Err(AppError::BadRequest(
+            "percent value must be between 0 and 100".into(),
+        ));
+    }
+    // Validate the rule payload up front so bad rules never reach the engine.
+    let rules = body.rules.unwrap_or_else(|| serde_json::json!([]));
+    crate::rules::parse_rules(&rules).map_err(AppError::BadRequest)?;
 
     let campaign: Campaign = sqlx::query_as(&format!(
         "INSERT INTO campaigns (code, title, audience, kind, value, min_fare, max_discount, city, \
-            vehicle_class, starts_at, ends_at, usage_limit, created_by) \
-         VALUES ($1,$2,$3::campaign_audience,$4::discount_kind,$5,$6,$7,$8,$9,$10,$11,$12,$13) \
+            vehicle_class, starts_at, ends_at, usage_limit, rules, created_by) \
+         VALUES ($1,$2,$3::campaign_audience,$4::discount_kind,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) \
          RETURNING {CAMPAIGN_COLS}"
     ))
     .bind(body.code.trim())
@@ -76,6 +87,7 @@ async fn create(
     .bind(body.starts_at)
     .bind(body.ends_at)
     .bind(body.usage_limit)
+    .bind(rules)
     .bind(claims.sub)
     .fetch_one(&st.db)
     .await

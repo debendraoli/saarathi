@@ -14,9 +14,11 @@ use saarathi_core::api::ErrorCode;
 use saarathi_core::legal::VehicleClass;
 use saarathi_core::pricing::{quote_fare, PricingConfig};
 use serde::Serialize;
+use uuid::Uuid;
 
 #[derive(sqlx::FromRow)]
 struct PromoRow {
+    id: Uuid,
     kind: String,
     value: Decimal,
     min_fare: Decimal,
@@ -24,6 +26,7 @@ struct PromoRow {
     vehicle_class: Option<String>,
     usage_limit: Option<i32>,
     used_count: i32,
+    rules: sqlx::types::Json<Vec<crate::rules::CampaignRule>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,6 +72,7 @@ fn class_str(v: VehicleClass) -> &'static str {
 
 pub async fn estimate(
     st: &AppState,
+    user_id: Uuid,
     origin: LatLng,
     dest: LatLng,
     stops: &[LatLng],
@@ -102,7 +106,7 @@ pub async fn estimate(
 
     let (discount_code, discount_amount, note) = match code {
         Some(c) if !c.trim().is_empty() => {
-            match apply_rider_discount(st, c.trim(), gross, vclass).await {
+            match apply_rider_discount(st, user_id, c.trim(), gross, vclass).await {
                 Ok(amount) => (Some(c.trim().to_string()), amount, None),
                 Err(msg) => (None, Decimal::ZERO, Some(msg)),
             }
@@ -143,12 +147,14 @@ pub async fn estimate(
 /// Returns the discount amount, or a human-readable reason it couldn't apply.
 async fn apply_rider_discount(
     st: &AppState,
+    user_id: Uuid,
     code: &str,
     gross: Decimal,
     vclass: VehicleClass,
 ) -> Result<Decimal, String> {
     let row: Option<PromoRow> = sqlx::query_as(
-        "SELECT kind::text, value, min_fare, max_discount, vehicle_class, usage_limit, used_count \
+        "SELECT id, kind::text, value, min_fare, max_discount, vehicle_class, usage_limit, \
+                used_count, rules \
              FROM campaigns \
              WHERE code = $1 AND audience = 'rider' AND active = true \
                AND (starts_at IS NULL OR starts_at <= now()) \
@@ -160,6 +166,7 @@ async fn apply_rider_discount(
     .map_err(|_| "could not validate code".to_string())?;
 
     let Some(PromoRow {
+        id,
         kind,
         value,
         min_fare,
@@ -167,6 +174,7 @@ async fn apply_rider_discount(
         vehicle_class: vclass_filter,
         usage_limit,
         used_count,
+        rules,
     }) = row
     else {
         return Err("invalid or expired code".into());
@@ -185,6 +193,13 @@ async fn apply_rider_discount(
     if let Some(limit) = usage_limit {
         if used_count >= limit {
             return Err("code fully redeemed".into());
+        }
+    }
+    // Dynamic rules (new customer, min rides, time window, per-user limit…).
+    if !rules.0.is_empty() {
+        let ctx = crate::rules::load_context(&st.db, user_id, "rider", id, gross, None).await;
+        if !crate::rules::evaluate(&rules.0, &ctx) {
+            return Err("you're not eligible for this offer".into());
         }
     }
 

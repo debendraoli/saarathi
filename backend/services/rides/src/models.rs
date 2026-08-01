@@ -46,7 +46,7 @@ pub struct Trip {
 
 pub const CAMPAIGN_COLS: &str = "id, code, title, audience::text AS audience, kind::text AS kind, \
     value, min_fare, max_discount, city, vehicle_class, starts_at, ends_at, active, \
-    usage_limit, used_count, created_at";
+    usage_limit, used_count, rules, created_at";
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct Campaign {
@@ -65,5 +65,6 @@ pub struct Campaign {
     pub active: bool,
     pub usage_limit: Option<i32>,
     pub used_count: i32,
+    pub rules: serde_json::Value,
     pub created_at: DateTime<Utc>,
 }

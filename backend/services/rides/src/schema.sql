@@ -65,10 +65,13 @@ CREATE TABLE IF NOT EXISTS campaigns (
     active        boolean           NOT NULL DEFAULT true,
     usage_limit   int,                                -- null = unlimited
     used_count    int               NOT NULL DEFAULT 0,
+    rules         jsonb             NOT NULL DEFAULT '[]',  -- dynamic eligibility rules (ANDed)
     created_by    uuid,
     created_at    timestamptz       NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS campaigns_active_idx ON campaigns (active);
+-- Safe on pre-existing databases created before the rule engine.
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS rules jsonb NOT NULL DEFAULT '[]';
 
 CREATE TABLE IF NOT EXISTS campaign_redemptions (
     id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
