@@ -212,3 +212,80 @@ CREATE TABLE IF NOT EXISTS recent_searches (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS recent_searches_user_idx ON recent_searches (user_id, created_at DESC);
+
+-- ── Fleet partnership program (doc 14) ─────────────────────────────────────
+-- Multi-tenant fleet partners. A partner is an external org that brings + manages
+-- supply; its staff have partner-scoped roles (separate from the platform RBAC).
+DO $$ BEGIN
+    CREATE TYPE partner_type AS ENUM ('fleet', 'corporate', 'agent');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE partner_status AS ENUM ('pending', 'active', 'suspended', 'terminated');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE partner_role AS ENUM
+        ('owner', 'admin', 'manager', 'dispatcher', 'finance', 'support', 'viewer');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE partner_driver_status AS ENUM ('invited', 'active', 'suspended', 'left');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS partners (
+    id               uuid           PRIMARY KEY DEFAULT gen_random_uuid(),
+    name             text           NOT NULL,
+    legal_name       text,
+    type             partner_type   NOT NULL DEFAULT 'fleet',
+    status           partner_status NOT NULL DEFAULT 'active',
+    city             text,
+    contact_phone    text,
+    contact_email    text,
+    pan_vat          text,
+    -- Partner's slice of the platform's ≤10% commission (NOT of the driver's 90%).
+    -- Clamped to the legal commission cap by the engine on write.
+    commission_share numeric        NOT NULL DEFAULT 0,
+    onboarded_by     uuid           REFERENCES users (id),
+    created_at       timestamptz    NOT NULL DEFAULT now(),
+    updated_at       timestamptz    NOT NULL DEFAULT now()
+);
+DROP TRIGGER IF EXISTS partners_updated_at ON partners;
+CREATE TRIGGER partners_updated_at BEFORE UPDATE ON partners
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX IF NOT EXISTS partners_status_idx ON partners (status);
+
+CREATE TABLE IF NOT EXISTS partner_members (
+    id         uuid         PRIMARY KEY DEFAULT gen_random_uuid(),
+    partner_id uuid         NOT NULL REFERENCES partners (id) ON DELETE CASCADE,
+    user_id    uuid         NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    role       partner_role NOT NULL DEFAULT 'viewer',
+    status     user_status  NOT NULL DEFAULT 'active',
+    invited_by uuid         REFERENCES users (id),
+    created_at timestamptz  NOT NULL DEFAULT now(),
+    updated_at timestamptz  NOT NULL DEFAULT now(),
+    UNIQUE (partner_id, user_id)
+);
+DROP TRIGGER IF EXISTS partner_members_updated_at ON partner_members;
+CREATE TRIGGER partner_members_updated_at BEFORE UPDATE ON partner_members
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE INDEX IF NOT EXISTS partner_members_user_idx ON partner_members (user_id);
+CREATE INDEX IF NOT EXISTS partner_members_partner_idx ON partner_members (partner_id);
+
+CREATE TABLE IF NOT EXISTS partner_drivers (
+    id             uuid                  PRIMARY KEY DEFAULT gen_random_uuid(),
+    partner_id     uuid                  NOT NULL REFERENCES partners (id) ON DELETE CASCADE,
+    driver_user_id uuid                  NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    status         partner_driver_status NOT NULL DEFAULT 'active',
+    revenue_share  numeric,              -- optional partner↔driver private split (off-platform record)
+    invited_by     uuid                  REFERENCES users (id),
+    joined_at      timestamptz           NOT NULL DEFAULT now(),
+    left_at        timestamptz
+);
+-- A driver may be in at most one ACTIVE fleet at a time (anti-poaching invariant).
+CREATE UNIQUE INDEX IF NOT EXISTS partner_drivers_one_active_idx
+    ON partner_drivers (driver_user_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS partner_drivers_partner_idx ON partner_drivers (partner_id, status);
+
+-- Partner dimension on the audit trail (partner-staff actions).
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS partner_id uuid;

@@ -48,6 +48,14 @@ impl AppError {
     pub fn rate_limited(code: ErrorCode, msg: impl Into<String>) -> Self {
         AppError::Coded(StatusCode::TOO_MANY_REQUESTS, code, msg.into())
     }
+    /// A 409 with a specific code.
+    pub fn conflict(code: ErrorCode, msg: impl Into<String>) -> Self {
+        AppError::Coded(StatusCode::CONFLICT, code, msg.into())
+    }
+    /// A 403 with a specific code.
+    pub fn forbidden(code: ErrorCode, msg: impl Into<String>) -> Self {
+        AppError::Coded(StatusCode::FORBIDDEN, code, msg.into())
+    }
 }
 
 impl IntoResponse for AppError {

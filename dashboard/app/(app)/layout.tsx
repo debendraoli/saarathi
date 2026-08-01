@@ -30,6 +30,10 @@ const SECTIONS = [
     { href: "/campaigns", label: "Campaigns & Offers" },
     { href: "/surge", label: "Surge Hours" },
   ] },
+  { title: "Partners", items: [
+    { href: "/partners", label: "Fleet Partners" },
+    { href: "/partner", label: "Partner Portal" },
+  ] },
   { title: "Platform", items: [
     { href: "/flags", label: "Feature Flags" },
   ] },
@@ -104,6 +108,8 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/drivers")) return "Driver Verification";
   if (pathname.startsWith("/campaigns")) return "Campaigns & Offers";
   if (pathname.startsWith("/surge")) return "Surge Hours";
+  if (pathname.startsWith("/partners")) return "Fleet Partners";
+  if (pathname.startsWith("/partner")) return "Partner Portal";
   if (pathname.startsWith("/flags")) return "Feature Flags";
   if (pathname.startsWith("/analytics")) return "Analytics";
   if (pathname.startsWith("/live")) return "Live Tracking";

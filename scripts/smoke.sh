@@ -332,4 +332,32 @@ awk -v d="$VETDISC" 'BEGIN{exit !(d+0==0)}' \
   || { echo "  veteran rider should be ineligible ($VETDISC)"; exit 1; }
 echo "  rule engine: new rider disc=NPR $NEWDISC, veteran disc=NPR $VETDISC (ineligible)"
 
+step "fleet partnership (phase 1: tenancy + fleet management)"
+OWNER_PHONE="+97798$(( RANDOM % 900000 + 100000 ))"
+PID=$(j -X POST "$API/v1/admin/partners" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d "{\"name\":\"Ghorahi Moto Fleet\",\"owner_phone\":\"$OWNER_PHONE\",\"commission_share\":0.04}" | jq -r '.id')
+[ -n "$PID" ] && [ "$PID" != "null" ] || { echo "  partner create failed"; exit 1; }
+OWNER_TOKEN=$(login "$OWNER_PHONE" | jq -r '.access_token')
+MYROLE=$(j "$API/v1/partner/memberships" -H "authorization: Bearer $OWNER_TOKEN" \
+  | jq -r --arg p "$PID" '.[] | select(.partner_id==$p) | .role')
+[ "$MYROLE" = "owner" ] || { echo "  owner membership missing ($MYROLE)"; exit 1; }
+MGR_PHONE="+97798$(( RANDOM % 900000 + 100000 ))"
+j -X POST "$API/v1/partner/$PID/members" -H "authorization: Bearer $OWNER_TOKEN" \
+  -H 'content-type: application/json' -d "{\"phone\":\"$MGR_PHONE\",\"role\":\"manager\"}" >/dev/null
+MGR_TOKEN=$(login "$MGR_PHONE" | jq -r '.access_token')
+j -X POST "$API/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" \
+  -H 'content-type: application/json' -d "{\"phone\":\"$DPHONE\"}" >/dev/null
+ROSTER=$(j "$API/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" | jq 'length')
+[ "$ROSTER" -ge 1 ] || { echo "  fleet roster empty"; exit 1; }
+FLEET_TRIPS=$(j "$RIDES/v1/partner/$PID/analytics" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.trips.completed')
+awk -v t="$FLEET_TRIPS" 'BEGIN{exit !(t+0>=1)}' \
+  || { echo "  fleet analytics missing trips ($FLEET_TRIPS)"; exit 1; }
+PID2=$(j -X POST "$API/v1/admin/partners" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d "{\"name\":\"Tulsipur Fleet\",\"owner_phone\":\"+97798$(( RANDOM % 900000 + 100000 ))\"}" | jq -r '.id')
+FORBID=$(curl -sS -o /dev/null -w '%{http_code}' "$API/v1/partner/$PID2/drivers" -H "authorization: Bearer $MGR_TOKEN")
+[ "$FORBID" = "403" ] || { echo "  tenant isolation breach (got $FORBID)"; exit 1; }
+echo "  partner onboarded; owner→manager→driver; fleet completed trips=$FLEET_TRIPS; cross-tenant=$FORBID (isolated)"
+
 printf '\n✅ SMOKE OK\n'

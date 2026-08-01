@@ -20,7 +20,7 @@ The single most important finding shaping everything below:
 ## How to read this dossier
 
 | # | Document | What it answers |
-|---|----------|-----------------|
+| --- | ---------- | ----------------- |
 | 01 | [Market & Opportunity](01-market-opportunity.md) | Is there a market in Dang? Who are the competitors? What's the wedge? |
 | 02 | [Regulatory & Compliance](02-regulatory-compliance.md) | What's legal? What licenses do I need? What does the 2082 standard require? |
 | 03 | [User Flows & Journeys](03-user-flows.md) | How does a rider, driver, and delivery customer actually move through the app? |
@@ -48,7 +48,7 @@ Dang's two sub-metropolitan cities (Ghorahi, Tulsipur) are **not yet served by P
 
 Not a cheaper clone of Pathao/inDrive — a **compliance-native, low-tech-first, hyper-local** platform whose advantages are structural, not features to be copied:
 
-1. **Legally-better driver economics.** ≥90% to the driver (10% cap) vs the ~20–30% global norm — and we make that transparent so drivers *believe* it ([10](10-driver-experience-and-analytics.md)).
+1. **Legally-better driver economics.** ≥90% to the driver (10% cap) vs the ~20–30% global norm — and we make that transparent so drivers _believe_ it ([10](10-driver-experience-and-analytics.md)).
 2. **Offline-tolerant everything.** Fares fall back to a haversine estimate, SOS falls back to SMS, notifications escalate push→SMS, pickups are landmark+call. Built for patchy rural data, which incumbents assume away ([08](08-delivery-system.md), [09](09-notifications-and-referrals.md), [11](11-trust-safety-ratings-sos.md)).
 3. **One fleet, many jobs.** Rides + parcel + food on the same driver/dispatch/wallet/ledger — utilization is survival in a thin market ([08](08-delivery-system.md)).
 4. **Merchant-light onboarding.** WhatsApp-assisted → Lite → App tiers get a tier-3 shop live in a day; national apps won't hand-hold a momo cart ([08 §4](08-delivery-system.md)).
@@ -70,7 +70,7 @@ Not a cheaper clone of Pathao/inDrive — a **compliance-native, low-tech-first,
 ## Founder decisions — status
 
 | Question | Status |
-|----------|--------|
+| ---------- | -------- |
 | **Team/build model** | ✅ **Solo + Claude.** Backend = **Rust microservices**; apps = **Flutter (Android + iOS at launch)** — mobile is the key risk. See [05 §3](05-technical-architecture.md). |
 | **Launch vertical** | ✅ **Rides-first**, delivery as Phase 3 — architecture stays super-app-ready. See [06 §0](06-build-plan.md). |
 | **Admin dashboard** | ✅ **In scope, advanced.** Driver verification workflow, RBAC (Super Admin/Admin/Analyst…), live tracking, live fee config + auto dynamic pricing (legally clamped) — **React/Next.js**. See [05 §5](05-technical-architecture.md). |

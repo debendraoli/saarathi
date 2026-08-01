@@ -88,6 +88,66 @@ pub enum VehicleClass {
     FourWheeler,
 }
 
+// ── Partnership / fleet enums (doc 14) ──────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "partner_type", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum PartnerType {
+    Fleet,
+    Corporate,
+    Agent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "partner_status", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum PartnerStatus {
+    Pending,
+    Active,
+    Suspended,
+    Terminated,
+}
+
+/// Partner-scoped role (independent of the platform `UserRole`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "partner_role", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum PartnerRole {
+    Owner,
+    Admin,
+    Manager,
+    Dispatcher,
+    Finance,
+    Support,
+    Viewer,
+}
+
+impl PartnerRole {
+    /// Manage members (invite / set role / remove).
+    pub fn can_manage_members(self) -> bool {
+        matches!(self, PartnerRole::Owner | PartnerRole::Admin)
+    }
+    /// Add / release / suspend fleet drivers.
+    pub fn can_manage_drivers(self) -> bool {
+        matches!(
+            self,
+            PartnerRole::Owner | PartnerRole::Admin | PartnerRole::Manager
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "partner_driver_status", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // canonical mapping of the PG enum; queries read it via ::text
+pub enum PartnerDriverStatus {
+    Invited,
+    Active,
+    Suspended,
+    Left,
+}
+
 // ── Row structs ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, FromRow)]

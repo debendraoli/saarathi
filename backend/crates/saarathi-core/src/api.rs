@@ -39,4 +39,7 @@ pub enum ErrorCode {
     InvalidCode,
     DuplicateCode,
     PlanInvalid,
+    // Partnership / fleets
+    DriverAlreadyInFleet,
+    PartnerSuspended,
 }

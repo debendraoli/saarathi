@@ -1884,6 +1884,7 @@ dependencies = [
  "hex",
  "jsonwebtoken",
  "rand 0.8.7",
+ "rust_decimal",
  "saarathi-core",
  "serde",
  "serde_json",

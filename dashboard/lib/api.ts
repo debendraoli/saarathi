@@ -212,7 +212,110 @@ export const api = {
     if (!res.ok) throw new Error(await apiError(res));
     return (await res.json()) as DriverDocument;
   },
+
+  // ── Partnership / fleets (platform admin) ──────────────────────────────────
+  adminListPartners: (status?: string) =>
+    request<Partner[]>(`/v1/admin/partners${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  adminCreatePartner: (body: NewPartner) =>
+    request<Partner>("/v1/admin/partners", { method: "POST", body: JSON.stringify(body) }),
+  adminPartnerDetail: (id: string) => request<PartnerDetail>(`/v1/admin/partners/${id}`),
+  adminUpdatePartner: (id: string, body: Partial<{ status: string; commission_share: number; city: string; contact_email: string }>) =>
+    request<Partner>(`/v1/admin/partners/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+
+  // ── Partner portal (member-scoped) ─────────────────────────────────────────
+  partnerMemberships: () => request<Membership[]>("/v1/partner/memberships"),
+  partnerMembers: (pid: string) => request<PartnerMemberRow[]>(`/v1/partner/${pid}/members`),
+  partnerInviteMember: (pid: string, phone: string, role: string) =>
+    request<PartnerMemberRow>(`/v1/partner/${pid}/members`, {
+      method: "POST",
+      body: JSON.stringify({ phone, role }),
+    }),
+  partnerSetMemberRole: (pid: string, uid: string, role: string) =>
+    request<{ ok: boolean }>(`/v1/partner/${pid}/members/${uid}`, {
+      method: "POST",
+      body: JSON.stringify({ role }),
+    }),
+  partnerRemoveMember: (pid: string, uid: string) =>
+    request<{ ok: boolean }>(`/v1/partner/${pid}/members/${uid}`, { method: "DELETE" }),
+  partnerDrivers: (pid: string) => request<FleetDriver[]>(`/v1/partner/${pid}/drivers`),
+  partnerAddDriver: (pid: string, body: AddFleetDriver) =>
+    request<{ driver_user_id: string; status: string }>(`/v1/partner/${pid}/drivers`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  partnerSetDriverStatus: (pid: string, driverUserId: string, status: string) =>
+    request<{ ok: boolean }>(`/v1/partner/${pid}/drivers/${driverUserId}`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    }),
 };
+
+export type PartnerType = "fleet" | "corporate" | "agent";
+export type PartnerStatus = "pending" | "active" | "suspended" | "terminated";
+export type PartnerRole = "owner" | "admin" | "manager" | "dispatcher" | "finance" | "support" | "viewer";
+
+export interface Partner {
+  id: string;
+  name: string;
+  legal_name: string | null;
+  type: PartnerType;
+  status: PartnerStatus;
+  city: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+  pan_vat: string | null;
+  commission_share: string;
+  created_at: string;
+}
+
+export interface PartnerDetail {
+  partner: Partner;
+  member_count: number;
+  driver_count: number;
+}
+
+export interface NewPartner {
+  name: string;
+  owner_phone: string;
+  legal_name?: string | null;
+  partner_type?: PartnerType;
+  city?: string | null;
+  contact_email?: string | null;
+  pan_vat?: string | null;
+  commission_share?: number;
+}
+
+export interface Membership {
+  partner_id: string;
+  name: string;
+  role: PartnerRole;
+  status: PartnerStatus;
+}
+
+export interface PartnerMemberRow {
+  user_id: string;
+  phone: string;
+  full_name: string | null;
+  role: PartnerRole;
+  created_at: string;
+}
+
+export interface FleetDriver {
+  driver_user_id: string;
+  phone: string;
+  full_name: string | null;
+  status: string;
+  kyc_status: string | null;
+  joined_at: string;
+}
+
+export interface AddFleetDriver {
+  phone: string;
+  full_name?: string | null;
+  license_number?: string | null;
+  vehicle_class?: VehicleClass | null;
+  plate_number?: string | null;
+}
 
 export interface OnboardDriverInput {
   phone: string;
@@ -363,7 +466,17 @@ export const rides = {
     ridesRequest<{ days: number; series: TimeseriesPoint[] }>(
       `/v1/admin/analytics/timeseries?days=${days}`,
     ),
+
+  // Fleet analytics (partner-scoped)
+  partnerAnalytics: (pid: string) => ridesRequest<FleetAnalytics>(`/v1/partner/${pid}/analytics`),
 };
+
+export interface FleetAnalytics {
+  active_drivers: number;
+  trips: { total: number; completed: number; cancelled: number };
+  money: { gmv: string; driver_earnings: string; currency: string };
+  leaderboard: { driver_id: string; name: string | null; trips: number; earnings: string }[];
+}
 
 export interface FeatureFlag {
   key: string;
