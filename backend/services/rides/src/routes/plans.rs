@@ -12,6 +12,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use saarathi_core::api::ErrorCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -51,11 +52,12 @@ struct NewPlan {
 
 fn validate(name: &str, min: Decimal, max: Decimal) -> AppResult<()> {
     if name.trim().is_empty() {
-        return Err(AppError::BadRequest("name is required".into()));
+        return Err(AppError::bad(ErrorCode::PlanInvalid, "name is required"));
     }
     if min <= Decimal::ZERO || max < min {
-        return Err(AppError::BadRequest(
-            "require 0 < min_amount ≤ max_amount".into(),
+        return Err(AppError::bad(
+            ErrorCode::PlanInvalid,
+            "require 0 < min_amount ≤ max_amount",
         ));
     }
     Ok(())

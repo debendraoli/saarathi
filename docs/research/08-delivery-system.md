@@ -185,4 +185,49 @@ erDiagram
 
 **Exit criteria:** delivery jobs lift **jobs/active-driver/day** above the rides-only baseline without degrading ride ETAs.
 
-➡️ Related: [09 — Notifications & Referrals](09-notifications-and-referrals.md) · [10 — Driver Experience & Analytics](10-driver-experience-and-analytics.md) · [11 — Trust, Safety, Ratings & SOS](11-trust-safety-ratings-sos.md)
+---
+
+## 9. Package / parcel delivery — deep dive
+
+> **Implementation status (2026-08):** *Planned, not yet built.* The backend is **already parcel-ready** — the trip model carries a `trip_type` enum (`ride | delivery`), and dispatch/realtime/ledger/POD-via-`trip_events` all work. What's missing is the parcel job flow (size tiers, recipient, POD capture, COD-remittance) and the app screens. This section is the design + the out-of-the-box wedge.
+
+### 9.1 How others run parcel/courier in Nepal
+| Player | Model | Gap we exploit |
+|--------|-------|----------------|
+| **Pathao Courier** | On-demand + scheduled bike courier in big cities; merchant-COD focused | Not in Dang; priced/oriented for KTM merchants, not everyday people |
+| **inDrive Courier** | P2P, bargain a price, point-to-point | Thin ops, no local trust, not in Dang |
+| **Aramex / DHL / local cargo** | Inter-city/national parcels, counters, next-day+ | Slow, counter-based, no live tracking, no same-hour |
+| **Nepal Post** | Cheap, national, very slow | No tracking, no reliability |
+| **The real incumbent: "send it on the bus"** | Hand a parcel to a bus/microbus driver; recipient collects at the park | **No tracking, no proof, no insurance, no door-to-door** — this is who we actually beat |
+
+### 9.2 What we do out of the box (the wedge)
+1. **Same-fleet, same-hour, door-to-door parcels** — a two-wheeler already idle between rides delivers a document across Ghorahi in minutes, tracked live, with photo/OTP proof. Nobody local offers this.
+2. **Bus-park backhaul integration** — formalize the "send on the bus" habit: a Saarathi rider does the **first/last mile** to/from the bus park for inter-city parcels, so we ride on existing long-haul capacity instead of fighting it. A parcel Ghorahi→Kathmandu = Saarathi last-mile + partnered bus + Saarathi first-mile at the KTM end (later).
+3. **Return-trip / backhaul matching** — the **Ghorahi↔Tulsipur lane** ([06 §4](06-build-plan.md)) means a driver going one way can carry a parcel the other way instead of deadheading — cheaper fares, better driver income, greener.
+4. **COD collection + digital remittance** — the killer for local shops: a shop sells online, Saarathi delivers the parcel **and collects cash**, then remits it to the shop's wallet (via the driver-wallet/ledger already built). We become the tier-3 shop's fulfilment + payments rail in one.
+5. **Community pickup/drop points** — the [12 §5](12-execution-roadmap.md) kirana-agent network doubles as **parcel lockers-by-trust**: drop at the corner shop, recipient collects — solves "nobody home" cheaply, no locker hardware.
+6. **Proof + insurance as standard** — photo + OTP + recipient name POD, declared value, and a small parcel-protection fee → trust the informal channel can't match.
+
+### 9.3 Parcel flow & fee
+```mermaid
+flowchart LR
+    S[Sender: pickup + drop + size/weight + recipient] --> Q[Quote: distance × parcel rate + size tier]
+    Q --> B[Book -> dispatch nearest driver]
+    B --> P[Pickup - optional package photo + code]
+    P --> T[Live tracking]
+    T --> D[Deliver -> POD: photo + recipient OTP/name]
+    D --> C{COD?}
+    C -->|yes| R[Collect cash -> remit to sender wallet]
+    C -->|no| Done[Settle delivery fee]
+```
+- **Fee = base + distance × parcel-per-km + size/weight tier** (config-driven, same pricing path as rides). Fragile/valuable/express are surcharge flags.
+- **Size tiers:** envelope / small / medium (bike-carriable). Anything bigger → later, four-wheeler.
+- **Legal note:** delivery pricing/commission isn't bound by the 2082 ride caps ([08 §5.2](08-delivery-system.md)); keep it config-driven and confirm with the lawyer.
+
+### 9.4 Data (minimal, on top of `trips`)
+Parcel reuses `trips` with `trip_type='delivery'` plus a small `parcel_details` extension (recipient name/phone-masked, size_tier, declared_value, fragile, cod_amount) and POD in `trip_events`. **No merchant/catalog tables needed** — parcel is the cheapest delivery to ship first ([08 §2.1](08-delivery-system.md)).
+
+### 9.5 Build order
+Parcel is **Phase 3a** — the first, cheapest delivery add-on (point-to-point, no merchants). It validates delivery demand before the heavier food/merchant build. Ship: parcel job type + size tiers + recipient + POD + COD-remittance, reusing dispatch/tracking/ledger.
+
+➡️ Related: [09 — Notifications & Referrals](09-notifications-and-referrals.md) · [10 — Driver Experience & Analytics](10-driver-experience-and-analytics.md) · [11 — Trust, Safety, Ratings & SOS](11-trust-safety-ratings-sos.md) · [12 — Execution Roadmap](12-execution-roadmap.md)

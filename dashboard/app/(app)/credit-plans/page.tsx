@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { auth, rides, type CreditPlan, type NewCreditPlan } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 const EMPTY: NewCreditPlan = { name: "", min_amount: 1000, max_amount: 10000, bonus_percent: 0 };
 

@@ -8,6 +8,7 @@ use crate::token;
 use axum::extract::State;
 use axum::{routing::post, Json, Router};
 use chrono::{Duration, Utc};
+use saarathi_core::api::ErrorCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -31,8 +32,9 @@ async fn request_otp(
 ) -> AppResult<Json<Value>> {
     let phone = body.phone.trim().to_string();
     if !otp::valid_phone(&phone) {
-        return Err(AppError::BadRequest(
-            "invalid phone number (use E.164, e.g. +9779800000000)".into(),
+        return Err(AppError::bad(
+            ErrorCode::PhoneInvalid,
+            "invalid phone number (use E.164, e.g. +9779800000000)",
         ));
     }
 
@@ -45,7 +47,10 @@ async fn request_otp(
             .fetch_one(&st.db)
             .await?;
     if recent >= st.config.otp_rate_max {
-        return Err(AppError::RateLimited);
+        return Err(AppError::rate_limited(
+            ErrorCode::OtpRateLimited,
+            "too many OTP requests",
+        ));
     }
 
     let code = otp::generate_code();
@@ -99,9 +104,13 @@ async fn verify_otp(
     .fetch_optional(&st.db)
     .await?;
 
-    let (otp_id, code_hash, attempts) = row.ok_or(AppError::Unauthorized)?;
+    let (otp_id, code_hash, attempts) = row
+        .ok_or_else(|| AppError::unauthorized(ErrorCode::OtpInvalid, "invalid or expired code"))?;
     if attempts >= 5 {
-        return Err(AppError::RateLimited);
+        return Err(AppError::rate_limited(
+            ErrorCode::OtpRateLimited,
+            "too many attempts",
+        ));
     }
 
     if !otp::verify_code(&body.code, &code_hash) {
@@ -109,7 +118,10 @@ async fn verify_otp(
             .bind(otp_id)
             .execute(&st.db)
             .await?;
-        return Err(AppError::Unauthorized);
+        return Err(AppError::unauthorized(
+            ErrorCode::OtpInvalid,
+            "invalid or expired code",
+        ));
     }
 
     sqlx::query("UPDATE otp_codes SET consumed_at = now() WHERE id = $1")

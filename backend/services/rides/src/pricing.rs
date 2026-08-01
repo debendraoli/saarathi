@@ -10,6 +10,7 @@ use crate::routing::{LatLng, RouteResult};
 use crate::state::AppState;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use saarathi_core::api::ErrorCode;
 use saarathi_core::legal::VehicleClass;
 use saarathi_core::pricing::{quote_fare, PricingConfig};
 use serde::Serialize;
@@ -50,9 +51,10 @@ pub fn parse_vehicle_class(s: &str) -> AppResult<VehicleClass> {
     match s {
         "two_wheeler" => Ok(VehicleClass::TwoWheeler),
         "four_wheeler" => Ok(VehicleClass::FourWheeler),
-        other => Err(AppError::BadRequest(format!(
-            "unknown vehicle class '{other}'"
-        ))),
+        other => Err(AppError::bad(
+            ErrorCode::InvalidVehicleClass,
+            format!("unknown vehicle class '{other}'"),
+        )),
     }
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { rides, type RideRow } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 const TABS = ["all", "requested", "accepted", "in_progress", "completed", "cancelled"];
 

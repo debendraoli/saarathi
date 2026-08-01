@@ -292,5 +292,3 @@ CREATE TABLE IF NOT EXISTS credit_plans (
     updated_at    timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS credit_plans_status_idx ON credit_plans (status);
-
-

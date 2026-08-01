@@ -65,6 +65,14 @@ j -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $RTOKEN" \
   | jq -e '.gross_fare and .final_fare and .distance_km' >/dev/null
 echo "  estimate ok"
 
+step "standardized error envelope (machine codes for i18n)"
+ECODE=$(curl -sS -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"origin":{"lat":28,"lng":82},"dest":{"lat":28.1,"lng":82.1},"vehicle_class":"spaceship"}' \
+  | jq -r '.error.code')
+[ "$ECODE" = "INVALID_VEHICLE_CLASS" ] || { echo "  expected INVALID_VEHICLE_CLASS, got '$ECODE'"; exit 1; }
+echo "  error body → { error: { code: $ECODE, message } }"
+
 step "bounded fare bargaining"
 EBODY='{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler"}'
 EST=$(j -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $RTOKEN" \

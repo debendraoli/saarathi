@@ -12,6 +12,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use saarathi_core::api::ErrorCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -60,7 +61,10 @@ async fn topup(
     Json(body): Json<TopupRequest>,
 ) -> AppResult<Json<Value>> {
     if body.amount <= Decimal::ZERO {
-        return Err(AppError::BadRequest("amount must be positive".into()));
+        return Err(AppError::bad(
+            ErrorCode::AmountInvalid,
+            "amount must be positive",
+        ));
     }
     let reference = st.payments.start_topup(claims.sub, body.amount);
     sqlx::query(

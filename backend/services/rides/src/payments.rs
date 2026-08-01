@@ -8,6 +8,7 @@
 
 use crate::error::{AppError, AppResult};
 use rust_decimal::Decimal;
+use saarathi_core::api::ErrorCode;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
@@ -79,7 +80,10 @@ pub async fn debit_rider(
     .await?;
     let balance = current.map(|b| b.0).unwrap_or(Decimal::ZERO);
     if balance < amount {
-        return Err(AppError::BadRequest("insufficient credits".into()));
+        return Err(AppError::bad(
+            ErrorCode::InsufficientCredits,
+            "insufficient credits",
+        ));
     }
     let (new_balance,): (Decimal,) = sqlx::query_as(
         "UPDATE credit_accounts SET balance = balance - $2, updated_at = now() \
@@ -201,7 +205,10 @@ pub async fn debit_driver(
     .await?;
     let balance = current.map(|b| b.0).unwrap_or(Decimal::ZERO);
     if balance < amount {
-        return Err(AppError::BadRequest("insufficient driver credits".into()));
+        return Err(AppError::bad(
+            ErrorCode::InsufficientDriverCredits,
+            "insufficient driver credits",
+        ));
     }
     let (new_balance,): (Decimal,) = sqlx::query_as(
         "UPDATE credit_accounts SET balance = balance - $2, updated_at = now() \

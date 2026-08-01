@@ -1,0 +1,40 @@
+//! Standard API response codes. Every API error carries a stable, machine-
+//! readable `ErrorCode` so clients can render a **localized** message
+//! (Nepali / English / …) without parsing English text. The `message` field in
+//! the body is only a developer-facing default.
+//!
+//! Wire format for errors: `{ "error": { "code": "INSUFFICIENT_CREDITS", "message": "…" } }`
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ErrorCode {
+    // Generic
+    Validation,
+    Unauthorized,
+    Forbidden,
+    NotFound,
+    RateLimited,
+    Conflict,
+    Internal,
+    // Auth / identity
+    PhoneInvalid,
+    OtpInvalid,
+    OtpRateLimited,
+    DocumentInvalid,
+    // Rides / dispatch
+    InvalidVehicleClass,
+    InvalidStatus,
+    InvalidPaymentMethod,
+    TripUnavailable,
+    OfferExpired,
+    // Money
+    InsufficientCredits,
+    InsufficientDriverCredits,
+    AmountInvalid,
+    // Campaigns / plans
+    InvalidCode,
+    DuplicateCode,
+    PlanInvalid,
+}

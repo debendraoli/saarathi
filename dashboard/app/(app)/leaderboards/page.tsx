@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { rides, type LeaderRow } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 const FILTERS = [
   { role: "driver", by: "earnings", label: "Top earners", unit: "NPR" },

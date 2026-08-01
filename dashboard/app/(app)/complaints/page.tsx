@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { rides, type RideRow } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 export default function ComplaintsPage() {
   const [rows, setRows] = useState<RideRow[]>([]);

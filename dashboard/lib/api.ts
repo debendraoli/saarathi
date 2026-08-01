@@ -117,6 +117,20 @@ async function raw(path: string, init: RequestInit, withAuth: boolean): Promise<
   return fetch(`${API_BASE}${path}`, { ...init, headers });
 }
 
+// Parse the standard error envelope { error: { code, message } } → a display
+// string. Apps should map `code` to a localized message; we fall back to message.
+async function apiError(res: Response): Promise<string> {
+  try {
+    const body = await res.json();
+    const err = body?.error;
+    if (err && typeof err === "object") return err.message ?? err.code ?? `Request failed (${res.status})`;
+    if (typeof err === "string") return err;
+  } catch {
+    /* ignore */
+  }
+  return `Request failed (${res.status})`;
+}
+
 async function request<T>(path: string, init: RequestInit = {}, withAuth = true): Promise<T> {
   let res = await raw(path, init, withAuth);
 
@@ -134,14 +148,7 @@ async function request<T>(path: string, init: RequestInit = {}, withAuth = true)
   }
 
   if (!res.ok) {
-    let message = `Request failed (${res.status})`;
-    try {
-      const body = await res.json();
-      if (body?.error) message = body.error;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(message);
+    throw new Error(await apiError(res));
   }
   return (await res.json()) as T;
 }
@@ -232,14 +239,7 @@ async function ridesRequest<T>(path: string, init: RequestInit = {}): Promise<T>
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const res = await fetch(`${RIDES_BASE}${path}`, { ...init, headers });
   if (!res.ok) {
-    let message = `Request failed (${res.status})`;
-    try {
-      const body = await res.json();
-      if (body?.error) message = body.error;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(message);
+    throw new Error(await apiError(res));
   }
   return (await res.json()) as T;
 }

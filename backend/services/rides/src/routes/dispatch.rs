@@ -11,6 +11,7 @@ use axum::{
     Json, Router,
 };
 use chrono::{DateTime, Utc};
+use saarathi_core::api::ErrorCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -146,7 +147,10 @@ async fn accept_offer(
     .fetch_optional(&mut *tx)
     .await?;
     let Some((offer_id,)) = offer else {
-        return Err(AppError::Conflict("offer expired or not found".into()));
+        return Err(AppError::conflict(
+            ErrorCode::OfferExpired,
+            "offer expired or not found",
+        ));
     };
 
     let trip: Option<Trip> = sqlx::query_as(&format!(
@@ -158,7 +162,10 @@ async fn accept_offer(
     .fetch_optional(&mut *tx)
     .await?;
     let Some(trip) = trip else {
-        return Err(AppError::Conflict("trip is no longer available".into()));
+        return Err(AppError::conflict(
+            ErrorCode::TripUnavailable,
+            "trip is no longer available",
+        ));
     };
 
     sqlx::query("UPDATE trip_offers SET status = 'accepted' WHERE id = $1")
@@ -226,7 +233,9 @@ async fn ops_assign(
     .bind(body.driver_id)
     .fetch_optional(&st.db)
     .await?;
-    let trip = trip.ok_or_else(|| AppError::Conflict("trip is no longer available".into()))?;
+    let trip = trip.ok_or_else(|| {
+        AppError::conflict(ErrorCode::TripUnavailable, "trip is no longer available")
+    })?;
 
     sqlx::query(
         "UPDATE trip_offers SET status = 'expired' WHERE trip_id = $1 AND status = 'offered'",

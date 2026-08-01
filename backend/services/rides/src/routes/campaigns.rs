@@ -11,6 +11,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+use saarathi_core::api::ErrorCode;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -79,9 +80,10 @@ async fn create(
     .fetch_one(&st.db)
     .await
     .map_err(|e| match e {
-        sqlx::Error::Database(db) if db.is_unique_violation() => {
-            AppError::Conflict("a campaign with that code already exists".into())
-        }
+        sqlx::Error::Database(db) if db.is_unique_violation() => AppError::conflict(
+            ErrorCode::DuplicateCode,
+            "a campaign with that code already exists",
+        ),
         other => AppError::Db(other),
     })?;
 

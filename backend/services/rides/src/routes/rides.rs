@@ -12,6 +12,7 @@ use axum::{
     Json, Router,
 };
 use rust_decimal::Decimal;
+use saarathi_core::api::ErrorCode;
 use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
@@ -90,8 +91,9 @@ async fn create(
 
     let method = body.payment_method.as_deref().unwrap_or("cash");
     if method != "cash" && method != "wallet" {
-        return Err(AppError::BadRequest(
-            "payment_method must be 'cash' or 'wallet'".into(),
+        return Err(AppError::bad(
+            ErrorCode::InvalidPaymentMethod,
+            "payment_method must be 'cash' or 'wallet'",
         ));
     }
 
@@ -122,8 +124,9 @@ async fn create(
     if method == "wallet" {
         let balance = crate::payments::rider_balance(&st.db, claims.sub).await?;
         if balance < final_fare {
-            return Err(AppError::BadRequest(
-                "insufficient credits for this trip".into(),
+            return Err(AppError::bad(
+                ErrorCode::InsufficientCredits,
+                "insufficient credits for this trip",
             ));
         }
     }
@@ -223,7 +226,7 @@ async fn accept(
     .bind(claims.sub)
     .fetch_optional(&st.db)
     .await?
-    .ok_or_else(|| AppError::Conflict("trip is no longer available".into()))?;
+    .ok_or_else(|| AppError::conflict(ErrorCode::TripUnavailable, "trip is no longer available"))?;
 
     st.hub.publish(
         id,
@@ -248,7 +251,10 @@ async fn update_status(
 ) -> AppResult<Json<Trip>> {
     const ALLOWED: [&str; 4] = ["arriving", "in_progress", "completed", "cancelled"];
     if !ALLOWED.contains(&body.status.as_str()) {
-        return Err(AppError::BadRequest("invalid status transition".into()));
+        return Err(AppError::bad(
+            ErrorCode::InvalidStatus,
+            "invalid status transition",
+        ));
     }
 
     let mut tx = st.db.begin().await?;

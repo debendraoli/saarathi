@@ -9,6 +9,7 @@ use axum::{
     Json, Router,
 };
 use chrono::NaiveDate;
+use saarathi_core::api::ErrorCode;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -219,9 +220,10 @@ fn parse_kind(s: &str) -> Result<DocumentKind, AppError> {
         "profile_photo" => DocumentKind::ProfilePhoto,
         "vehicle_photo" => DocumentKind::VehiclePhoto,
         other => {
-            return Err(AppError::BadRequest(format!(
-                "unknown document kind '{other}'"
-            )))
+            return Err(AppError::bad(
+                ErrorCode::DocumentInvalid,
+                format!("unknown document kind '{other}'"),
+            ))
         }
     })
 }
