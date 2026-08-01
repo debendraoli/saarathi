@@ -137,6 +137,16 @@ async fn overview(State(st): State<AppState>, _staff: StaffUser) -> AppResult<Js
         0.0
     };
 
+    // Tax posture: VAT is charged on the platform's commission (its taxable
+    // service); TDS is what we've withheld from payouts to remit to the IRD.
+    let vat_liability = (t.commission * st.config.vat_rate).round_dp(2);
+    let tds_withheld: Decimal = sqlx::query_scalar(
+        "SELECT coalesce((SELECT sum(tds_amount) FROM payout_requests), 0) \
+              + coalesce((SELECT sum(tds_amount) FROM partner_payouts), 0)",
+    )
+    .fetch_one(&st.db)
+    .await?;
+
     Ok(Json(json!({
         "trips": {
             "total": t.total,
@@ -152,6 +162,12 @@ async fn overview(State(st): State<AppState>, _staff: StaffUser) -> AppResult<Js
             "commission_earned": t.commission,
             "accident_fund_levied": t.accident_fund,
             "driver_payouts": t.driver_payout,
+            "currency": "NPR",
+        },
+        "tax": {
+            "vat_rate": st.config.vat_rate,
+            "vat_on_commission": vat_liability,
+            "tds_withheld": tds_withheld,
             "currency": "NPR",
         },
         "supply": {

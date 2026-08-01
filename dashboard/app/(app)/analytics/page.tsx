@@ -62,6 +62,12 @@ export default function AnalyticsPage() {
             <Stat label="Driver payouts" value={npr(ov.money.driver_payouts)} />
           </div>
 
+          <h3 style={{ margin: "4px 0" }}>Tax posture</h3>
+          <div className="stat-grid">
+            <Stat label={`VAT on commission (${pct(Number(ov.tax.vat_rate))})`} value={npr(ov.tax.vat_on_commission)} />
+            <Stat label="TDS withheld (payouts)" value={npr(ov.tax.tds_withheld)} />
+          </div>
+
           <h3 style={{ margin: "4px 0" }}>Supply &amp; demand</h3>
           <div className="stat-grid">
             <Stat label="Drivers online" value={ov.supply.drivers_online} />

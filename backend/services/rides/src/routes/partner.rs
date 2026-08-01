@@ -276,6 +276,8 @@ async fn confirm_topup(
 struct PayoutRow {
     id: Uuid,
     amount: Decimal,
+    tds_amount: Decimal,
+    net_amount: Option<Decimal>,
     status: String,
     reference: Option<String>,
     created_at: DateTime<Utc>,
@@ -312,19 +314,29 @@ async fn request_payout(
     }
     let reference = st.payments.start_payout(pid, amount);
     let balance = crate::partner_ledger::append(&mut tx, pid, None, "payout", -amount).await?;
+    // Withhold TDS; the payout settles via the PSP callback (`/v1/psp/payout/callback`).
+    let tds = (amount * st.config.tds_rate).round_dp(2);
+    let net = amount - tds;
     sqlx::query(
-        "INSERT INTO partner_payouts (partner_id, amount, status, reference, processed_at) \
-         VALUES ($1, $2, 'paid', $3, now())",
+        "INSERT INTO partner_payouts (partner_id, amount, tds_amount, net_amount, status, reference) \
+         VALUES ($1, $2, $3, $4, 'processing', $5)",
     )
     .bind(pid)
     .bind(amount)
+    .bind(tds)
+    .bind(net)
     .bind(&reference)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(Json(
-        json!({ "amount": amount, "reference": reference, "balance": balance }),
-    ))
+    Ok(Json(json!({
+        "amount": amount,
+        "tds": tds,
+        "net": net,
+        "reference": reference,
+        "status": "processing",
+        "balance": balance,
+    })))
 }
 
 async fn list_payouts(
@@ -334,7 +346,7 @@ async fn list_payouts(
 ) -> AppResult<Json<Vec<PayoutRow>>> {
     require_member(&st, claims.sub, pid).await?;
     let rows: Vec<PayoutRow> = sqlx::query_as(
-        "SELECT id, amount, status, reference, created_at \
+        "SELECT id, amount, tds_amount, net_amount, status, reference, created_at \
          FROM partner_payouts WHERE partner_id = $1 ORDER BY created_at DESC LIMIT 100",
     )
     .bind(pid)

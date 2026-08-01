@@ -18,7 +18,9 @@ export default function PayoutsPage() {
     <div className="stack">
       <div>
         <h1 className="page-title">Payouts</h1>
-        <p className="subtle">Driver withdrawals of their earnings balance.</p>
+        <p className="subtle">
+          Driver withdrawals. TDS is withheld at source; each payout settles via the PSP callback.
+        </p>
       </div>
       {error && <div className="error">{error}</div>}
       <div className="card" style={{ padding: 0 }}>
@@ -26,9 +28,10 @@ export default function PayoutsPage() {
           <thead>
             <tr>
               <th>Driver</th>
-              <th>Amount</th>
+              <th>Gross</th>
+              <th>TDS</th>
+              <th>Net</th>
               <th>Status</th>
-              <th>Reference</th>
               <th>When</th>
             </tr>
           </thead>
@@ -37,18 +40,19 @@ export default function PayoutsPage() {
               <tr key={p.id}>
                 <td>{p.driver_id.slice(0, 8)}…</td>
                 <td>NPR {p.amount}</td>
+                <td className="subtle">NPR {p.tds_amount}</td>
                 <td>
-                  <span className={`badge ${p.status === "paid" ? "approved" : "under_review"}`}>
-                    {p.status}
-                  </span>
+                  <b>NPR {p.net_amount ?? p.amount}</b>
                 </td>
-                <td className="subtle">{p.reference ?? "—"}</td>
+                <td>
+                  <span className={`badge ${p.status}`}>{p.status}</span>
+                </td>
                 <td className="subtle">{new Date(p.created_at).toLocaleString()}</td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="subtle" style={{ textAlign: "center", padding: 24 }}>
+                <td colSpan={6} className="subtle" style={{ textAlign: "center", padding: 24 }}>
                   No payouts yet.
                 </td>
               </tr>

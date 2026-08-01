@@ -197,10 +197,22 @@ awk -v a="$CREDITS1" -v b="$CREDITS0" 'BEGIN{exit !(a<b)}' \
   || { echo "  rider credits were not charged"; exit 1; }
 awk -v w="$WALLET" 'BEGIN{exit !(w>0)}' \
   || { echo "  driver earnings not credited"; exit 1; }
-PAID=$(j -X POST "$RIDES/v1/payouts" -H "authorization: Bearer $DTOKEN" \
-  -H 'content-type: application/json' -d '{}' | jq -r '.amount')
+POUT=$(j -X POST "$RIDES/v1/payouts" -H "authorization: Bearer $DTOKEN" \
+  -H 'content-type: application/json' -d '{}')
+PREF=$(echo "$POUT" | jq -r '.reference')
+PSTATUS=$(echo "$POUT" | jq -r '.status')
+PNET=$(echo "$POUT" | jq -r '.net'); PTDS=$(echo "$POUT" | jq -r '.tds')
+[ "$PSTATUS" = "processing" ] || { echo "  payout should start processing (got $PSTATUS)"; exit 1; }
+awk -v n="$PNET" -v t="$PTDS" 'BEGIN{exit !(t+0>0 && n+0>0)}' \
+  || { echo "  TDS not withheld (net=$PNET tds=$PTDS)"; exit 1; }
+# PSP settles the payout via its signed callback.
+j -X POST "$RIDES/v1/psp/payout/callback" -H 'content-type: application/json' \
+  -d "{\"reference\":\"$PREF\",\"outcome\":\"paid\"}" >/dev/null
+PSTATE=$(j "$RIDES/v1/payouts" -H "authorization: Bearer $DTOKEN" \
+  | jq -r --arg r "$PREF" '.[] | select(.reference==$r) | .status')
+[ "$PSTATE" = "paid" ] || { echo "  payout not settled (got $PSTATE)"; exit 1; }
 WALLET2=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
-echo "  driver withdrew NPR $PAID; balance now NPR $WALLET2"
+echo "  driver payout: net NPR $PNET (TDS $PTDS) processing→$PSTATE; wallet NPR $WALLET2"
 
 step "live tracking + safety + ratings + notifications + analytics"
 j -X POST "$RIDES/v1/rides/$TID/location" -H "authorization: Bearer $DTOKEN" \
@@ -410,9 +422,12 @@ SPENT=$(j "$RIDES/v1/partner/$PID/ledger" -H "authorization: Bearer $OWNER_TOKEN
   | jq '[.[] | select(.kind=="promo_spend")] | length')
 [ "$SPENT" -ge 1 ] || { echo "  fleet bonus not debited from wallet"; exit 1; }
 
-PAYOUT=$(j -X POST "$RIDES/v1/partner/$PID/payouts" -H "authorization: Bearer $OWNER_TOKEN" \
-  -H 'content-type: application/json' -d '{}' | jq -r '.amount')
-echo "  revenue-share=NPR $SHARE; wallet topup → fleet bonus used=$FUSED (debited) → payout NPR $PAYOUT"
+PPOUT=$(j -X POST "$RIDES/v1/partner/$PID/payouts" -H "authorization: Bearer $OWNER_TOKEN" \
+  -H 'content-type: application/json' -d '{}')
+PPREF=$(echo "$PPOUT" | jq -r '.reference'); PPNET=$(echo "$PPOUT" | jq -r '.net')
+j -X POST "$RIDES/v1/psp/payout/callback" -H 'content-type: application/json' \
+  -d "{\"reference\":\"$PPREF\",\"outcome\":\"paid\"}" >/dev/null
+echo "  revenue-share=NPR $SHARE; wallet topup → fleet bonus used=$FUSED (debited) → payout net NPR $PPNET (settled)"
 
 step "fleet partnership (phase 3: corporate rider tab + ledger integrity)"
 # Owner puts a rider on the company tab with a monthly cap.

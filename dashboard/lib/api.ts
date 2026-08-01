@@ -616,6 +616,12 @@ export interface AnalyticsOverview {
     driver_payouts: string;
     currency: string;
   };
+  tax: {
+    vat_rate: string;
+    vat_on_commission: string;
+    tds_withheld: string;
+    currency: string;
+  };
   supply: { drivers_total: number; drivers_approved: number; drivers_online: number };
   demand: { users_total: number; riders: number; signups_7d: number };
 }
@@ -730,6 +736,8 @@ export interface Payout {
   id: string;
   driver_id: string;
   amount: string;
+  tds_amount: string;
+  net_amount: string | null;
   status: string;
   reference: string | null;
   created_at: string;

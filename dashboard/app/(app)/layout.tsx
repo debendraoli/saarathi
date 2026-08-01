@@ -4,40 +4,100 @@ import { auth, type User } from "@/lib/api";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  BarChart3,
+  Briefcase,
+  Building2,
+  CreditCard,
+  Flag,
+  LogOut,
+  MessageSquare,
+  Navigation,
+  Receipt,
+  Route,
+  ShieldCheck,
+  Siren,
+  Tag,
+  ToggleRight,
+  Trophy,
+  UserPlus,
+  Wallet,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 
-const SECTIONS = [
-  { title: "Operations", items: [
-    { href: "/live", label: "Live Tracking" },
-    { href: "/rides", label: "Rides History" },
-    { href: "/sos", label: "SOS Console" },
-    { href: "/reports", label: "Reports" },
-    { href: "/complaints", label: "Complaints" },
-  ] },
-  { title: "Insights", items: [
-    { href: "/analytics", label: "Analytics" },
-    { href: "/leaderboards", label: "Leaderboards" },
-  ] },
-  { title: "Compliance", items: [
-    { href: "/drivers/new", label: "On-site KYC" },
-    { href: "/drivers", label: "Driver Verification" },
-  ] },
-  { title: "Finance", items: [
-    { href: "/ledger", label: "Ledger" },
-    { href: "/payouts", label: "Payouts" },
-    { href: "/credit-plans", label: "Credit Plans" },
-  ] },
-  { title: "Growth", items: [
-    { href: "/campaigns", label: "Campaigns & Offers" },
-    { href: "/surge", label: "Surge Hours" },
-  ] },
-  { title: "Partners", items: [
-    { href: "/partners", label: "Fleet Partners" },
-    { href: "/partner", label: "Partner Portal" },
-  ] },
-  { title: "Platform", items: [
-    { href: "/flags", label: "Feature Flags" },
-  ] },
+type NavItem = { href: string; label: string; icon: LucideIcon };
+type NavGroup = { title: string; items: NavItem[] };
+
+const NAV: NavGroup[] = [
+  {
+    title: "Overview",
+    items: [
+      { href: "/analytics", label: "Analytics", icon: BarChart3 },
+      { href: "/live", label: "Live Ops", icon: Navigation },
+      { href: "/leaderboards", label: "Leaderboards", icon: Trophy },
+    ],
+  },
+  {
+    title: "Trips & Safety",
+    items: [
+      { href: "/rides", label: "Rides", icon: Route },
+      { href: "/sos", label: "SOS Console", icon: Siren },
+      { href: "/reports", label: "Reports", icon: Flag },
+      { href: "/complaints", label: "Complaints", icon: MessageSquare },
+    ],
+  },
+  {
+    title: "Drivers",
+    items: [
+      { href: "/drivers", label: "Verification", icon: ShieldCheck },
+      { href: "/drivers/new", label: "On-site KYC", icon: UserPlus },
+    ],
+  },
+  {
+    title: "Fleet Partners",
+    items: [
+      { href: "/partners", label: "Partners", icon: Building2 },
+      { href: "/partner", label: "Partner Portal", icon: Briefcase },
+    ],
+  },
+  {
+    title: "Growth",
+    items: [
+      { href: "/campaigns", label: "Campaigns", icon: Tag },
+      { href: "/surge", label: "Surge Hours", icon: Zap },
+    ],
+  },
+  {
+    title: "Finance",
+    items: [
+      { href: "/ledger", label: "Ledger", icon: Receipt },
+      { href: "/payouts", label: "Payouts", icon: Wallet },
+      { href: "/credit-plans", label: "Credit Plans", icon: CreditCard },
+    ],
+  },
+  {
+    title: "Platform",
+    items: [{ href: "/flags", label: "Feature Flags", icon: ToggleRight }],
+  },
 ];
+
+const ALL_ITEMS = NAV.flatMap((g) => g.items);
+
+/** The single best-matching nav href (longest prefix), so overlapping routes
+ *  like /partner vs /partners and /drivers vs /drivers/new never both light up. */
+function activeHref(pathname: string): string | null {
+  let best: string | null = null;
+  for (const { href } of ALL_ITEMS) {
+    if (
+      (pathname === href || pathname.startsWith(`${href}/`)) &&
+      (!best || href.length > best.length)
+    ) {
+      best = href;
+    }
+  }
+  return best;
+}
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -56,6 +116,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (!ready) return null;
 
+  const active = activeHref(pathname);
+  const title = ALL_ITEMS.find((i) => i.href === active)?.label ?? "";
+
   function logout() {
     auth.clear();
     router.replace("/login");
@@ -65,35 +128,37 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="dot" /> Saarathi Ops
+          <span className="logo">सा</span> Saarathi Ops
         </div>
-        {SECTIONS.map((section) => (
-          <div key={section.title}>
-            <div className="nav-section">{section.title}</div>
-            {section.items.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`nav-item ${pathname.startsWith(item.href) ? "active" : ""}`}
-              >
-                {item.label}
-              </Link>
-            ))}
+        {NAV.map((group) => (
+          <div key={group.title}>
+            <div className="nav-section">{group.title}</div>
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`nav-item ${active === item.href ? "active" : ""}`}
+                >
+                  <Icon />
+                  {item.label}
+                </Link>
+              );
+            })}
           </div>
         ))}
-        <div className="nav-section">Coming soon</div>
-        <span className="nav-item" style={{ opacity: 0.5 }}>Pricing Config</span>
       </aside>
 
       <div className="main">
         <div className="topbar">
-          <div className="subtle">{titleFor(pathname)}</div>
+          <div className="title">{title}</div>
           <div className="row">
-            <span className="subtle">
+            <span className="subtle text-[13px]">
               {user?.full_name ?? user?.phone} · <b>{user?.role}</b>
             </span>
             <button className="btn ghost" onClick={logout}>
-              Sign out
+              <LogOut size={15} /> Sign out
             </button>
           </div>
         </div>
@@ -101,25 +166,4 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
     </div>
   );
-}
-
-function titleFor(pathname: string): string {
-  if (pathname.startsWith("/drivers/new")) return "On-site Driver KYC";
-  if (pathname.startsWith("/drivers")) return "Driver Verification";
-  if (pathname.startsWith("/campaigns")) return "Campaigns & Offers";
-  if (pathname.startsWith("/surge")) return "Surge Hours";
-  if (pathname.startsWith("/partners")) return "Fleet Partners";
-  if (pathname.startsWith("/partner")) return "Partner Portal";
-  if (pathname.startsWith("/flags")) return "Feature Flags";
-  if (pathname.startsWith("/analytics")) return "Analytics";
-  if (pathname.startsWith("/live")) return "Live Tracking";
-  if (pathname.startsWith("/sos")) return "SOS Console";
-  if (pathname.startsWith("/reports")) return "Reports";
-  if (pathname.startsWith("/ledger")) return "Ledger";
-  if (pathname.startsWith("/payouts")) return "Payouts";
-  if (pathname.startsWith("/credit-plans")) return "Credit Plans";
-  if (pathname.startsWith("/rides")) return "Rides History";
-  if (pathname.startsWith("/complaints")) return "Complaints";
-  if (pathname.startsWith("/leaderboards")) return "Leaderboards";
-  return "";
 }

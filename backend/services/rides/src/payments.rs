@@ -156,6 +156,27 @@ pub async fn log_driver_payout(
     .await
 }
 
+/// Reverse a failed driver payout: log the wallet re-credit.
+pub async fn log_driver_refund(
+    tx: &mut Transaction<'_, Postgres>,
+    driver_id: Uuid,
+    amount: Decimal,
+    balance_after: Decimal,
+    reference: &str,
+) -> AppResult<()> {
+    log_txn(
+        tx,
+        driver_id,
+        "driver",
+        "refund",
+        amount,
+        balance_after,
+        Some(reference),
+        None,
+    )
+    .await
+}
+
 pub async fn rider_balance(pool: &sqlx::PgPool, user_id: Uuid) -> AppResult<Decimal> {
     let bal: Option<(Decimal,)> =
         sqlx::query_as("SELECT balance FROM credit_accounts WHERE user_id = $1 AND kind = 'rider'")

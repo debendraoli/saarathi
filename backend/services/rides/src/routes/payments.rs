@@ -23,6 +23,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/credits/topup", post(topup))
         .route("/v1/credits/topup/confirm", post(confirm_topup))
         .route("/v1/payouts", get(list_payouts).post(request_payout))
+        .route("/v1/psp/payout/callback", post(payout_callback))
         .route("/v1/admin/payouts", get(admin_payouts))
 }
 
@@ -174,22 +175,116 @@ async fn request_payout(
     .fetch_one(&mut *tx)
     .await?;
 
-    // Mock provider settles instantly; a real PSP would go 'processing' → webhook 'paid'.
+    // Withhold TDS; the driver nets `net`, the platform remits `tds` to the IRD.
+    let tds = (amount * st.config.tds_rate).round_dp(2);
+    let net = amount - tds;
+    // Real-PSP lifecycle: the payout starts 'processing' and is settled (or
+    // reversed) by the provider's signed callback — see `payout_callback`.
     sqlx::query(
-        "INSERT INTO payout_requests (driver_id, amount, status, reference, processed_at) \
-         VALUES ($1, $2, 'paid', $3, now())",
+        "INSERT INTO payout_requests (driver_id, amount, tds_amount, net_amount, status, reference) \
+         VALUES ($1, $2, $3, $4, 'processing', $5)",
     )
     .bind(claims.sub)
     .bind(amount)
+    .bind(tds)
+    .bind(net)
     .bind(&reference)
     .execute(&mut *tx)
     .await?;
     payments::log_driver_payout(&mut tx, claims.sub, amount, new_balance, &reference).await?;
 
     tx.commit().await?;
-    Ok(Json(
-        json!({ "amount": amount, "reference": reference, "balance": new_balance }),
-    ))
+    Ok(Json(json!({
+        "amount": amount,
+        "tds": tds,
+        "net": net,
+        "reference": reference,
+        "status": "processing",
+        "balance": new_balance,
+    })))
+}
+
+#[derive(Deserialize)]
+struct PayoutCallback {
+    reference: String,
+    /// 'paid' settles it; anything else fails it and reverses the wallet debit.
+    outcome: String,
+}
+
+/// PSP payout webhook (mock). In production, verify the provider's signature
+/// before trusting this. Settles a driver **or** partner payout by reference; on
+/// failure it reverses the wallet debit so no money is lost.
+async fn payout_callback(
+    State(st): State<AppState>,
+    Json(body): Json<PayoutCallback>,
+) -> AppResult<Json<Value>> {
+    let paid = body.outcome == "paid";
+    let mut tx = st.db.begin().await?;
+
+    // Driver payout?
+    let driver: Option<(Uuid, Decimal, String)> = sqlx::query_as(
+        "SELECT driver_id, amount, status FROM payout_requests WHERE reference = $1 FOR UPDATE",
+    )
+    .bind(&body.reference)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some((driver_id, amount, status)) = driver {
+        if status != "processing" {
+            return Ok(Json(json!({ "settled": true, "idempotent": true })));
+        }
+        if paid {
+            sqlx::query("UPDATE payout_requests SET status = 'paid', processed_at = now() WHERE reference = $1")
+                .bind(&body.reference)
+                .execute(&mut *tx)
+                .await?;
+        } else {
+            sqlx::query("UPDATE payout_requests SET status = 'failed', processed_at = now() WHERE reference = $1")
+                .bind(&body.reference)
+                .execute(&mut *tx)
+                .await?;
+            let (bal,): (Decimal,) = sqlx::query_as(
+                "UPDATE driver_wallets SET balance = balance + $2, updated_at = now() \
+                 WHERE driver_id = $1 RETURNING balance",
+            )
+            .bind(driver_id)
+            .bind(amount)
+            .fetch_one(&mut *tx)
+            .await?;
+            payments::log_driver_refund(&mut tx, driver_id, amount, bal, &body.reference).await?;
+        }
+        tx.commit().await?;
+        return Ok(Json(json!({ "settled": true, "outcome": body.outcome })));
+    }
+
+    // Partner payout?
+    let partner: Option<(Uuid, Decimal, String)> = sqlx::query_as(
+        "SELECT partner_id, amount, status FROM partner_payouts WHERE reference = $1 FOR UPDATE",
+    )
+    .bind(&body.reference)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some((partner_id, amount, status)) = partner {
+        if status != "processing" {
+            return Ok(Json(json!({ "settled": true, "idempotent": true })));
+        }
+        if paid {
+            sqlx::query("UPDATE partner_payouts SET status = 'paid', processed_at = now() WHERE reference = $1")
+                .bind(&body.reference)
+                .execute(&mut *tx)
+                .await?;
+        } else {
+            sqlx::query("UPDATE partner_payouts SET status = 'failed', processed_at = now() WHERE reference = $1")
+                .bind(&body.reference)
+                .execute(&mut *tx)
+                .await?;
+            crate::partner_ledger::append(&mut tx, partner_id, None, "payout_reversal", amount)
+                .await?;
+        }
+        tx.commit().await?;
+        return Ok(Json(json!({ "settled": true, "outcome": body.outcome })));
+    }
+
+    Err(AppError::NotFound)
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -197,6 +292,8 @@ struct Payout {
     id: Uuid,
     driver_id: Uuid,
     amount: Decimal,
+    tds_amount: Decimal,
+    net_amount: Option<Decimal>,
     status: String,
     reference: Option<String>,
     created_at: DateTime<Utc>,
@@ -207,7 +304,7 @@ async fn list_payouts(
     AuthUser(claims): AuthUser,
 ) -> AppResult<Json<Vec<Payout>>> {
     let rows: Vec<Payout> = sqlx::query_as(
-        "SELECT id, driver_id, amount, status, reference, created_at \
+        "SELECT id, driver_id, amount, tds_amount, net_amount, status, reference, created_at \
          FROM payout_requests WHERE driver_id = $1 ORDER BY created_at DESC LIMIT 100",
     )
     .bind(claims.sub)
@@ -221,7 +318,7 @@ async fn admin_payouts(
     _staff: StaffUser,
 ) -> AppResult<Json<Vec<Payout>>> {
     let rows: Vec<Payout> = sqlx::query_as(
-        "SELECT id, driver_id, amount, status, reference, created_at \
+        "SELECT id, driver_id, amount, tds_amount, net_amount, status, reference, created_at \
          FROM payout_requests ORDER BY created_at DESC LIMIT 200",
     )
     .fetch_all(&st.db)

@@ -185,6 +185,9 @@ CREATE TABLE IF NOT EXISTS payout_requests (
     processed_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS payout_requests_driver_idx ON payout_requests (driver_id, created_at DESC);
+-- TDS withholding: the recipient nets `net_amount`; `tds_amount` is remitted.
+ALTER TABLE payout_requests ADD COLUMN IF NOT EXISTS tds_amount numeric NOT NULL DEFAULT 0;
+ALTER TABLE payout_requests ADD COLUMN IF NOT EXISTS net_amount numeric;
 
 -- Two-sided ratings (rider↔driver), tag-based (one per rater per trip).
 CREATE TABLE IF NOT EXISTS ratings (
@@ -391,12 +394,14 @@ CREATE TABLE IF NOT EXISTS partner_payouts (
     id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     partner_id   uuid        NOT NULL,
     amount       numeric     NOT NULL,
-    status       text        NOT NULL DEFAULT 'paid',   -- processing | paid | failed
+    status       text        NOT NULL DEFAULT 'processing',   -- processing | paid | failed
     reference    text,
     created_at   timestamptz NOT NULL DEFAULT now(),
     processed_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS partner_payouts_partner_idx ON partner_payouts (partner_id, created_at DESC);
+ALTER TABLE partner_payouts ADD COLUMN IF NOT EXISTS tds_amount numeric NOT NULL DEFAULT 0;
+ALTER TABLE partner_payouts ADD COLUMN IF NOT EXISTS net_amount numeric;
 
 -- Partner top-up intents share the PSP hand-off shape.
 CREATE TABLE IF NOT EXISTS partner_topup_intents (
