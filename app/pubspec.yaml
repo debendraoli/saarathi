@@ -1,0 +1,51 @@
+name: saarathi
+description: Saarathi — compliance-native rides + delivery super app for Dang, Nepal.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+# One app, two modes (rider / driver). Nepal-first: offline-tolerant, cash-first,
+# OSM/Valhalla maps (no Google), English + नेपाली. See ../docs/research/03-user-flows.md.
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # State + navigation
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.6.2
+
+  # Networking + secure token storage
+  dio: ^5.7.0
+  flutter_secure_storage: ^9.2.2
+  web_socket_channel: ^3.0.1
+
+  # Maps (self-hosted OSM/Valhalla tiles) + location
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  geolocator: ^13.0.2
+
+  # Platform integration
+  app_links: ^6.3.2
+  shared_preferences: ^2.3.3
+  package_info_plus: ^8.1.1
+  url_launcher: ^6.3.1
+
+  # UI niceties
+  google_fonts: ^6.2.1
+  intl: any
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  generate: true
+  assets:
+    - assets/images/

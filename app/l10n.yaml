@@ -1,0 +1,8 @@
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppL10n
+# Newer Flutter removed the synthetic `flutter_gen` package; generate real
+# sources under lib/l10n and import them as package:saarathi/l10n/...
+synthetic-package: false
+nullable-getter: false

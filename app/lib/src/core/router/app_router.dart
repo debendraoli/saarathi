@@ -1,0 +1,84 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../features/auth/application/auth_controller.dart';
+import '../../features/auth/domain/models.dart';
+import '../../features/auth/presentation/otp_screen.dart';
+import '../../features/auth/presentation/phone_screen.dart';
+import '../../features/home/presentation/home_shell.dart';
+import '../../features/onboarding/presentation/intro_screen.dart';
+import '../../features/onboarding/presentation/splash_screen.dart';
+import '../../features/ride/domain/models.dart';
+import '../../features/ride/presentation/confirm_ride_screen.dart';
+import '../../features/ride/presentation/trip_screen.dart';
+import '../../features/ride/presentation/where_to_screen.dart';
+import '../prefs.dart';
+
+class Routes {
+  static const splash = '/splash';
+  static const intro = '/intro';
+  static const login = '/login';
+  static const otp = '/login/otp';
+  static const home = '/home';
+  static const whereTo = '/ride/where-to';
+  static const confirm = '/ride/confirm';
+  static const trip = '/ride/trip'; // /ride/trip/:id
+}
+
+/// Bridges Riverpod state changes to go_router's redirect re-evaluation.
+class _RouterRefresh extends ChangeNotifier {
+  _RouterRefresh(Ref ref) {
+    ref.listen(authControllerProvider, (_, __) => notifyListeners());
+    ref.listen(onboardingControllerProvider, (_, __) => notifyListeners());
+  }
+}
+
+final goRouterProvider = Provider<GoRouter>((ref) {
+  final refresh = _RouterRefresh(ref);
+
+  return GoRouter(
+    initialLocation: Routes.splash,
+    refreshListenable: refresh,
+    redirect: (context, state) {
+      final auth = ref.read(authControllerProvider);
+      final onboarded = ref.read(onboardingControllerProvider);
+      final loc = state.matchedLocation;
+
+      if (auth.status == AuthStatus.unknown) {
+        return loc == Routes.splash ? null : Routes.splash;
+      }
+      if (!onboarded) {
+        return loc == Routes.intro ? null : Routes.intro;
+      }
+      final loggedOut = auth.status == AuthStatus.unauthenticated;
+      final atAuth = loc == Routes.login || loc == Routes.otp;
+      if (loggedOut) return atAuth ? null : Routes.login;
+
+      // Authenticated: keep them out of the pre-auth funnel.
+      if (loc == Routes.splash || loc == Routes.intro || atAuth) {
+        return Routes.home;
+      }
+      return null;
+    },
+    routes: [
+      GoRoute(path: Routes.splash, builder: (_, __) => const SplashScreen()),
+      GoRoute(path: Routes.intro, builder: (_, __) => const IntroScreen()),
+      GoRoute(path: Routes.login, builder: (_, __) => const PhoneScreen()),
+      GoRoute(
+        path: Routes.otp,
+        builder: (_, state) => OtpScreen(phone: state.extra as String? ?? ''),
+      ),
+      GoRoute(path: Routes.home, builder: (_, __) => const HomeShell()),
+      GoRoute(path: Routes.whereTo, builder: (_, __) => const WhereToScreen()),
+      GoRoute(
+        path: Routes.confirm,
+        builder: (_, state) => ConfirmRideScreen(draft: state.extra as RideDraft),
+      ),
+      GoRoute(
+        path: '${Routes.trip}/:id',
+        builder: (_, state) => TripScreen(tripId: state.pathParameters['id']!),
+      ),
+    ],
+  );
+});

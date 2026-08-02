@@ -6,6 +6,7 @@
 
 BACKEND   := backend
 DASHBOARD := dashboard
+APP       := app
 COMPOSE   := docker compose
 
 .DEFAULT_GOAL := help
@@ -14,6 +15,7 @@ COMPOSE   := docker compose
         valhalla valhalla-logs valhalla-rebuild \
         build test lint fmt check \
         dashboard dashboard-install dashboard-build \
+        app app-create app-get app-l10n app-build app-clean \
         dev smoke
 
 help: ## Show this help
@@ -92,6 +94,26 @@ dashboard: env ## Start the dashboard dev server (http://localhost:3000)
 
 dashboard-build: ## Production build of the dashboard
 	cd $(DASHBOARD) && npm run build
+
+# ── Mobile app (Flutter) ──────────────────────────────────────────────
+
+app-create: ## Generate native runner folders (first-time only)
+	cd $(APP) && flutter create --org com.saarathi --project-name saarathi --platforms=android,ios,web .
+
+app-get: ## Fetch app packages
+	cd $(APP) && flutter pub get
+
+app-l10n: ## Regenerate localization (en/ne) from ARB files
+	cd $(APP) && flutter gen-l10n
+
+app: ## Run the app (device/emulator); points at the gateway on the host
+	cd $(APP) && flutter run --dart-define=SAARATHI_API_BASE=http://localhost:8080
+
+app-build: ## Release Android APK
+	cd $(APP) && flutter build apk --release
+
+app-clean: ## Clean the app build
+	cd $(APP) && flutter clean
 
 # ── Combined ─────────────────────────────────────────────────────────────────
 
