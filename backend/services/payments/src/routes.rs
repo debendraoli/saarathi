@@ -1,10 +1,11 @@
-//! Payment endpoints: rider credit top-up (+ confirm webhook), balance, and
-//! driver payouts/withdrawals. Customer pays the platform; the platform settles.
+//! Payment operations (standalone transactions — no trip tx): rider credit
+//! top-up (+ confirm webhook), balance, and driver payouts/withdrawals + the PSP
+//! payout callback. Trip-completion settlement stays in `rides` (atomic).
 
 use crate::auth::{AuthUser, StaffUser};
 use crate::error::{AppError, AppResult};
-use crate::payments;
 use crate::state::AppState;
+use crate::wallet;
 use axum::extract::State;
 use axum::{
     routing::{get, post},
@@ -38,7 +39,7 @@ struct CreditTxn {
 }
 
 async fn balance(State(st): State<AppState>, AuthUser(claims): AuthUser) -> AppResult<Json<Value>> {
-    let bal = payments::rider_balance(&st.db, claims.sub).await?;
+    let bal = wallet::rider_balance(&st.db, claims.sub).await?;
     let txns: Vec<CreditTxn> = sqlx::query_as(
         "SELECT txn_type, amount, balance_after, reference, created_at \
          FROM credit_transactions WHERE user_id = $1 AND kind = 'rider' \
@@ -78,7 +79,6 @@ async fn topup(
     .bind(st.payments.name())
     .execute(&st.db)
     .await?;
-    // A real PSP returns a checkout URL/deeplink here.
     Ok(Json(json!({
         "reference": reference,
         "amount": body.amount,
@@ -111,19 +111,10 @@ async fn confirm_topup(
         return Ok(Json(json!({ "confirmed": true, "idempotent": true })));
     }
 
-    // Credit the right account (rider prepaid balance or driver credit balance).
     let balance = if kind == roles::DRIVER {
-        payments::credit_driver(&mut tx, user_id, amount, "topup", Some(&body.reference)).await?
+        wallet::credit_driver(&mut tx, user_id, amount, "topup", Some(&body.reference)).await?
     } else {
-        payments::credit_rider(
-            &mut tx,
-            user_id,
-            amount,
-            "topup",
-            Some(&body.reference),
-            None,
-        )
-        .await?
+        wallet::credit_rider(&mut tx, user_id, amount, "topup", Some(&body.reference)).await?
     };
     sqlx::query(
         "UPDATE topup_intents SET status = 'confirmed', confirmed_at = now() WHERE reference = $1",
@@ -152,12 +143,12 @@ async fn request_payout(
     }
     let mut tx = st.db.begin().await?;
 
-    let wallet: Option<(Decimal,)> =
+    let wallet_row: Option<(Decimal,)> =
         sqlx::query_as("SELECT balance FROM driver_wallets WHERE driver_id = $1 FOR UPDATE")
             .bind(claims.sub)
             .fetch_optional(&mut *tx)
             .await?;
-    let available = wallet.map(|w| w.0).unwrap_or(Decimal::ZERO);
+    let available = wallet_row.map(|w| w.0).unwrap_or(Decimal::ZERO);
     let amount = body.amount.unwrap_or(available);
 
     if amount <= Decimal::ZERO || amount > available {
@@ -176,11 +167,8 @@ async fn request_payout(
     .fetch_one(&mut *tx)
     .await?;
 
-    // Withhold TDS; the driver nets `net`, the platform remits `tds` to the IRD.
-    let tds = (amount * st.config.tds_rate).round_dp(2);
+    let tds = (amount * st.tds_rate).round_dp(2);
     let net = amount - tds;
-    // Real-PSP lifecycle: the payout starts 'processing' and is settled (or
-    // reversed) by the provider's signed callback — see `payout_callback`.
     sqlx::query(
         "INSERT INTO payout_requests (driver_id, amount, tds_amount, net_amount, status, reference) \
          VALUES ($1, $2, $3, $4, 'processing', $5)",
@@ -192,7 +180,7 @@ async fn request_payout(
     .bind(&reference)
     .execute(&mut *tx)
     .await?;
-    payments::log_driver_payout(&mut tx, claims.sub, amount, new_balance, &reference).await?;
+    wallet::log_driver_payout(&mut tx, claims.sub, amount, new_balance, &reference).await?;
 
     tx.commit().await?;
     Ok(Json(json!({
@@ -251,7 +239,7 @@ async fn payout_callback(
             .bind(amount)
             .fetch_one(&mut *tx)
             .await?;
-            payments::log_driver_refund(&mut tx, driver_id, amount, bal, &body.reference).await?;
+            wallet::log_driver_refund(&mut tx, driver_id, amount, bal, &body.reference).await?;
         }
         tx.commit().await?;
         return Ok(Json(json!({ "settled": true, "outcome": body.outcome })));
@@ -278,7 +266,7 @@ async fn payout_callback(
                 .bind(&body.reference)
                 .execute(&mut *tx)
                 .await?;
-            crate::partner_ledger::append(&mut tx, partner_id, None, "payout_reversal", amount)
+            wallet::partner_ledger_append(&mut tx, partner_id, None, "payout_reversal", amount)
                 .await?;
         }
         tx.commit().await?;

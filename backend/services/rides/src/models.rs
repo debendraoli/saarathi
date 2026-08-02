@@ -43,28 +43,3 @@ pub struct Trip {
     pub completed_at: Option<DateTime<Utc>>,
     pub cancelled_at: Option<DateTime<Utc>>,
 }
-
-pub const CAMPAIGN_COLS: &str = "id, code, title, audience::text AS audience, kind::text AS kind, \
-    value, min_fare, max_discount, city, vehicle_class, starts_at, ends_at, active, \
-    usage_limit, used_count, rules, created_at";
-
-#[derive(Debug, Serialize, FromRow)]
-pub struct Campaign {
-    pub id: Uuid,
-    pub code: String,
-    pub title: String,
-    pub audience: String,
-    pub kind: String,
-    pub value: Decimal,
-    pub min_fare: Decimal,
-    pub max_discount: Option<Decimal>,
-    pub city: Option<String>,
-    pub vehicle_class: Option<String>,
-    pub starts_at: Option<DateTime<Utc>>,
-    pub ends_at: Option<DateTime<Utc>>,
-    pub active: bool,
-    pub usage_limit: Option<i32>,
-    pub used_count: i32,
-    pub rules: serde_json::Value,
-    pub created_at: DateTime<Utc>,
-}

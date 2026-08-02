@@ -5,6 +5,9 @@ members = [
     "services/auth",
     "services/rides",
     "services/notify",
+    "services/routing",
+    "services/payments",
+    "services/campaigns",
 ]
 
 [workspace.package]

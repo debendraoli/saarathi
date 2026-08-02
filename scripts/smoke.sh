@@ -15,6 +15,9 @@ set -euo pipefail
 API="${API:-http://localhost:8081}"
 RIDES="${RIDES:-http://localhost:8082}"
 NOTIFY="${NOTIFY:-http://localhost:8083}"
+ROUTING="${ROUTING:-http://localhost:8084}"
+PAYMENTS="${PAYMENTS:-http://localhost:8085}"
+CAMPAIGNS="${CAMPAIGNS:-http://localhost:8086}"
 ADMIN_PHONE="${SEED_DEV_ADMIN_PHONE:-+9779800000000}"
 
 command -v jq >/dev/null || { echo "jq is required"; exit 1; }
@@ -25,6 +28,9 @@ step "health checks"
 j "$API/health"   | jq -e '.status=="ok"' >/dev/null && echo "  auth ok"
 j "$RIDES/health" | jq -e '.status=="ok"' >/dev/null && echo "  rides ok"
 j "$NOTIFY/health" | jq -e '.status=="ok"' >/dev/null && echo "  notify ok"
+j "$ROUTING/health" | jq -e '.status=="ok"' >/dev/null && echo "  routing ok"
+j "$PAYMENTS/health" | jq -e '.status=="ok"' >/dev/null && echo "  payments ok"
+j "$CAMPAIGNS/health" | jq -e '.status=="ok"' >/dev/null && echo "  campaigns ok"
 
 login() { # phone [as_driver] -> token pair JSON on stdout
   local phone="$1" as_driver="${2:-false}" code
@@ -127,7 +133,7 @@ INQUEUE=$(j "$API/v1/admin/drivers?status=queue" -H "authorization: Bearer $ADMI
 echo "  onboarded $OPHONE on-site + license doc; in review queue"
 
 step "driver bonus campaign"
-j -X POST "$RIDES/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
+j -X POST "$CAMPAIGNS/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"code":"DRIVE5","title":"Driver quest","audience":"driver","kind":"flat","value":5}' >/dev/null
 echo "  driver bonus campaign DRIVE5 created (granted on completion below)"
@@ -145,11 +151,11 @@ RECENT=$(j "$API/v1/me/recent-searches" -H "authorization: Bearer $RTOKEN" | jq 
 echo "  theme=$THEME  saved_places=$PLACES  recent_searches=$RECENT"
 
 step "rider tops up prepaid credits"
-REF=$(j -X POST "$RIDES/v1/credits/topup" -H "authorization: Bearer $RTOKEN" \
+REF=$(j -X POST "$PAYMENTS/v1/credits/topup" -H "authorization: Bearer $RTOKEN" \
   -H 'content-type: application/json' -d '{"amount":500}' | jq -r '.reference')
-j -X POST "$RIDES/v1/credits/topup/confirm" -H "authorization: Bearer $RTOKEN" \
+j -X POST "$PAYMENTS/v1/credits/topup/confirm" -H "authorization: Bearer $RTOKEN" \
   -H 'content-type: application/json' -d "{\"reference\":\"$REF\"}" >/dev/null
-CREDITS0=$(j "$RIDES/v1/credits" -H "authorization: Bearer $RTOKEN" | jq -r '.balance')
+CREDITS0=$(j "$PAYMENTS/v1/credits" -H "authorization: Bearer $RTOKEN" | jq -r '.balance')
 echo "  credits after top-up: NPR $CREDITS0"
 
 step "create multi-stop trip → accept → complete"
@@ -193,13 +199,13 @@ WALLET=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balan
 echo "  entries=$LEDGER_COUNT  chain_intact=$CHAIN  driver_wallet=NPR $WALLET"
 
 step "payment settlement + driver payout"
-CREDITS1=$(j "$RIDES/v1/credits" -H "authorization: Bearer $RTOKEN" | jq -r '.balance')
+CREDITS1=$(j "$PAYMENTS/v1/credits" -H "authorization: Bearer $RTOKEN" | jq -r '.balance')
 echo "  rider credits after ride: NPR $CREDITS1 (was $CREDITS0)"
 awk -v a="$CREDITS1" -v b="$CREDITS0" 'BEGIN{exit !(a<b)}' \
   || { echo "  rider credits were not charged"; exit 1; }
 awk -v w="$WALLET" 'BEGIN{exit !(w>0)}' \
   || { echo "  driver earnings not credited"; exit 1; }
-POUT=$(j -X POST "$RIDES/v1/payouts" -H "authorization: Bearer $DTOKEN" \
+POUT=$(j -X POST "$PAYMENTS/v1/payouts" -H "authorization: Bearer $DTOKEN" \
   -H 'content-type: application/json' -d '{}')
 PREF=$(echo "$POUT" | jq -r '.reference')
 PSTATUS=$(echo "$POUT" | jq -r '.status')
@@ -208,9 +214,9 @@ PNET=$(echo "$POUT" | jq -r '.net'); PTDS=$(echo "$POUT" | jq -r '.tds')
 awk -v n="$PNET" -v t="$PTDS" 'BEGIN{exit !(t+0>0 && n+0>0)}' \
   || { echo "  TDS not withheld (net=$PNET tds=$PTDS)"; exit 1; }
 # PSP settles the payout via its signed callback.
-j -X POST "$RIDES/v1/psp/payout/callback" -H 'content-type: application/json' \
+j -X POST "$PAYMENTS/v1/psp/payout/callback" -H 'content-type: application/json' \
   -d "{\"reference\":\"$PREF\",\"outcome\":\"paid\"}" >/dev/null
-PSTATE=$(j "$RIDES/v1/payouts" -H "authorization: Bearer $DTOKEN" \
+PSTATE=$(j "$PAYMENTS/v1/payouts" -H "authorization: Bearer $DTOKEN" \
   | jq -r --arg r "$PREF" '.[] | select(.reference==$r) | .status')
 [ "$PSTATE" = "paid" ] || { echo "  payout not settled (got $PSTATE)"; exit 1; }
 WALLET2=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
@@ -262,7 +268,7 @@ echo "  rider history: $HIST trip(s) — can re-request from any"
 step "driver credits + subscription pass (0% commission)"
 DREF=$(j -X POST "$RIDES/v1/driver/credits/topup" -H "authorization: Bearer $DTOKEN" \
   -H 'content-type: application/json' -d '{"amount":1000}' | jq -r '.reference')
-j -X POST "$RIDES/v1/credits/topup/confirm" -H 'content-type: application/json' \
+j -X POST "$PAYMENTS/v1/credits/topup/confirm" -H 'content-type: application/json' \
   -d "{\"reference\":\"$DREF\"}" >/dev/null
 DC0=$(j "$RIDES/v1/driver/credits" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
 j -X POST "$RIDES/v1/driver/subscription" -H "authorization: Bearer $DTOKEN" >/dev/null
@@ -294,7 +300,7 @@ awk -v c="$COMM" 'BEGIN{exit !(c+0==0)}' \
   || { echo "  subscription commission not 0 ($COMM)"; exit 1; }
 echo "  pass trip commission = NPR $COMM (driver kept 100% minus fund)"
 
-DUSED=$(j "$RIDES/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
+DUSED=$(j "$CAMPAIGNS/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
   | jq -r '.[] | select(.code=="DRIVE5") | .used_count')
 awk -v u="$DUSED" 'BEGIN{exit !(u+0>=1)}' \
   || { echo "  driver bonus not granted on completion ($DUSED)"; exit 1; }
@@ -338,7 +344,7 @@ TSN=$(j "$RIDES/v1/admin/analytics/timeseries?days=7" -H "authorization: Bearer 
 echo "  analytics: trips=$TT gmv=NPR $GMV completion_rate=$COMPRATE timeseries_days=$TSN"
 
 step "dynamic rule-based campaign (new-customer only)"
-j -X POST "$RIDES/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
+j -X POST "$CAMPAIGNS/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"code":"NEWBIE20","title":"New customer 20%","audience":"rider","kind":"percent","value":20,"max_discount":30,"rules":[{"type":"new_user","max_prior_rides":0}]}' >/dev/null
 NTOKEN=$(login "+97796$(( RANDOM % 900000 + 100000 ))" | jq -r '.access_token')
@@ -433,7 +439,7 @@ SPENT=$(j "$RIDES/v1/partner/$PID/ledger" -H "authorization: Bearer $OWNER_TOKEN
 PPOUT=$(j -X POST "$RIDES/v1/partner/$PID/payouts" -H "authorization: Bearer $OWNER_TOKEN" \
   -H 'content-type: application/json' -d '{}')
 PPREF=$(echo "$PPOUT" | jq -r '.reference'); PPNET=$(echo "$PPOUT" | jq -r '.net')
-j -X POST "$RIDES/v1/psp/payout/callback" -H 'content-type: application/json' \
+j -X POST "$PAYMENTS/v1/psp/payout/callback" -H 'content-type: application/json' \
   -d "{\"reference\":\"$PPREF\",\"outcome\":\"paid\"}" >/dev/null
 echo "  revenue-share=NPR $SHARE; wallet topup → fleet bonus used=$FUSED (debited) → payout net NPR $PPNET (settled)"
 
@@ -461,7 +467,7 @@ done
 CHARGED=$(j "$RIDES/v1/partner/$PID/ledger" -H "authorization: Bearer $OWNER_TOKEN" \
   | jq '[.[] | select(.kind=="ride_charge")] | length')
 [ "$CHARGED" -ge 1 ] || { echo "  corporate ride not charged to company wallet"; exit 1; }
-RIDER_CREDITS=$(j "$RIDES/v1/credits" -H "authorization: Bearer $CRTOKEN" | jq -r '.balance')
+RIDER_CREDITS=$(j "$PAYMENTS/v1/credits" -H "authorization: Bearer $CRTOKEN" | jq -r '.balance')
 awk -v b="$RIDER_CREDITS" 'BEGIN{exit !(b+0==0)}' \
   || { echo "  corporate rider charged personally ($RIDER_CREDITS)"; exit 1; }
 BAL1=$(j "$RIDES/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.balance')

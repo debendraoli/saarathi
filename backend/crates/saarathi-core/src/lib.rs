@@ -7,11 +7,14 @@
 //! See `../../../AGENTS.md` for the golden rules these modules implement.
 
 pub mod api;
+pub mod campaigns;
 pub mod domain;
 pub mod events;
 pub mod ledger;
 pub mod legal;
 pub mod money;
+pub mod payments;
 pub mod pricing;
+pub mod routing;
 
 pub use money::Money;

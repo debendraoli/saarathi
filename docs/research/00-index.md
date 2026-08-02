@@ -35,6 +35,7 @@ The single most important finding shaping everything below:
 | 12 | [Detailed Execution Build Plan](12-execution-roadmap.md) | Engineering roadmap: what's built, the epic backlog, sequencing, and out-of-the-box bets. |
 | 13 | [Revenue, Credits & Bargaining](13-revenue-and-monetization.md) | Making money under the 10% cap: prepaid credits, subscription passes, and bounded fare bargaining. |
 | 14 | [Partnership / Fleet Program](14-partnership-fleet-program.md) | Multi-tenant fleet partners (à la Yango/inDrive): partner RBAC, fleet driver management, fleet campaigns, and legal revenue-share. |
+| 15 | [Service Decomposition](15-service-decomposition.md) | Can payments be its own service? What splits cleanly (routing, campaigns, payment-ops) vs. what must stay atomic (trip settlement/ledger), and the outbox path if we ever split it. |
 
 ---
 

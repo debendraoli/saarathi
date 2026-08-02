@@ -1,0 +1,91 @@
+//! Shared routing primitives used by the routing service **and** its clients.
+//!
+//! Only fare distance/duration — no POIs, no turn-by-turn. The wire types here
+//! are what `saarathi-routing` accepts/returns and what `rides` sends; the
+//! haversine fallback keeps fares working when the router is unreachable.
+
+use rust_decimal::prelude::*;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct LatLng {
+    pub lat: f64,
+    pub lng: f64,
+}
+
+/// Vehicle profile → routing costing model. Two-wheelers can use lanes/paths
+/// cars can't, so motorbike distances differ from car distances.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteProfile {
+    Motorcycle,
+    Auto,
+}
+
+impl RouteProfile {
+    /// Stable wire value (also the Valhalla costing name).
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            RouteProfile::Motorcycle => "motorcycle",
+            RouteProfile::Auto => "auto",
+        }
+    }
+
+    pub fn from_wire(s: &str) -> Self {
+        match s {
+            "auto" | "car" | "four_wheeler" => RouteProfile::Auto,
+            _ => RouteProfile::Motorcycle,
+        }
+    }
+}
+
+/// A request to measure an ordered path (origin, waypoints…, destination).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouteRequest {
+    pub points: Vec<LatLng>,
+    /// Wire value of [`RouteProfile`] — "motorcycle" | "auto".
+    pub profile: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouteResult {
+    pub distance_km: Decimal,
+    pub duration_secs: i32,
+    /// Which method produced this: "valhalla" | "osrm" | "haversine" | "none".
+    pub source: String,
+}
+
+/// Haversine sum over the legs — the offline-safe fallback. `road_factor`
+/// approximates real road distance from straight-line; `avg_speed_kmh` estimates
+/// duration.
+pub fn haversine_path(points: &[LatLng], road_factor: f64, avg_speed_kmh: f64) -> RouteResult {
+    if points.len() < 2 {
+        return RouteResult {
+            distance_km: Decimal::ZERO,
+            duration_secs: 0,
+            source: "none".into(),
+        };
+    }
+    let mut road = 0.0;
+    for leg in points.windows(2) {
+        road += haversine_km(leg[0], leg[1]) * road_factor;
+    }
+    let secs = if avg_speed_kmh > 0.0 {
+        (road / avg_speed_kmh * 3600.0).round() as i32
+    } else {
+        0
+    };
+    RouteResult {
+        distance_km: Decimal::from_f64(road).unwrap_or_default().round_dp(3),
+        duration_secs: secs,
+        source: "haversine".into(),
+    }
+}
+
+fn haversine_km(a: LatLng, b: LatLng) -> f64 {
+    const R: f64 = 6371.0;
+    let (lat1, lat2) = (a.lat.to_radians(), b.lat.to_radians());
+    let dlat = (b.lat - a.lat).to_radians();
+    let dlng = (b.lng - a.lng).to_radians();
+    let h = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlng / 2.0).sin().powi(2);
+    2.0 * R * h.sqrt().asin()
+}

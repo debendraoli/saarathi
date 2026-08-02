@@ -64,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
         router,
         hub: Hub::new(),
         redis,
-        payments: Arc::new(payments::MockProvider),
+        payments: Arc::new(saarathi_core::payments::MockProvider),
         nats,
     };
 

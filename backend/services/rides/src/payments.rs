@@ -1,68 +1,14 @@
-//! Payments & wallet accounting (E3).
-//!
-//! Customers pay the platform directly (prepaid **credits**); the platform
-//! deducts commission + fund via the ledger and pays the driver's net into
-//! their wallet, which the driver can **withdraw**. Real PSP integration
-//! (eSewa/Khalti/Fonepay/ConnectIPS) drops in behind [`PaymentProvider`]; the
-//! `MockProvider` here lets the whole flow run and be tested end-to-end.
+//! Payments & wallet accounting (E3) — the **settlement** helpers used inside
+//! the atomic trip transaction (and driver subscription/credit flows). Standalone
+//! payment *operations* (top-ups, payouts, PSP callbacks) live in the separate
+//! `saarathi-payments` service. The `PaymentProvider` hand-off is shared via
+//! `saarathi_core::payments`.
 
 use crate::error::{AppError, AppResult};
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
-
-/// A payment-service-provider hand-off. Real providers return a checkout URL /
-/// token and confirm asynchronously via a signed webhook.
-pub trait PaymentProvider: Send + Sync {
-    fn name(&self) -> &'static str;
-    /// Begin a top-up; returns an opaque reference the client uses to pay.
-    fn start_topup(&self, user_id: Uuid, amount: Decimal) -> String;
-    /// Begin a payout to a driver; returns a provider reference.
-    fn start_payout(&self, driver_id: Uuid, amount: Decimal) -> String;
-}
-
-/// Dev/test provider — references are UUIDs and payouts settle instantly.
-pub struct MockProvider;
-
-impl PaymentProvider for MockProvider {
-    fn name(&self) -> &'static str {
-        "mock"
-    }
-    fn start_topup(&self, _user_id: Uuid, _amount: Decimal) -> String {
-        Uuid::new_v4().to_string()
-    }
-    fn start_payout(&self, _driver_id: Uuid, _amount: Decimal) -> String {
-        Uuid::new_v4().to_string()
-    }
-}
-
-/// Credit a rider's prepaid balance (top-up / bonus / refund). Returns the new balance.
-pub async fn credit_rider(
-    tx: &mut Transaction<'_, Postgres>,
-    user_id: Uuid,
-    amount: Decimal,
-    txn_type: &str,
-    reference: Option<&str>,
-    trip_id: Option<Uuid>,
-) -> AppResult<Decimal> {
-    let (balance,): (Decimal,) = sqlx::query_as(
-        "INSERT INTO credit_accounts (user_id, kind, balance, updated_at) \
-         VALUES ($1, 'rider', $2, now()) \
-         ON CONFLICT (user_id, kind) DO UPDATE SET balance = credit_accounts.balance + $2, updated_at = now() \
-         RETURNING balance",
-    )
-    .bind(user_id)
-    .bind(amount)
-    .fetch_one(&mut **tx)
-    .await?;
-
-    log_txn(
-        tx, user_id, "rider", txn_type, amount, balance, reference, trip_id,
-    )
-    .await?;
-    Ok(balance)
-}
 
 /// Debit a rider's prepaid balance for a ride payment. Fails if insufficient.
 pub async fn debit_rider(
@@ -135,48 +81,7 @@ async fn log_txn(
     Ok(())
 }
 
-/// Record a driver payout: log the transaction against the driver's kind.
-pub async fn log_driver_payout(
-    tx: &mut Transaction<'_, Postgres>,
-    driver_id: Uuid,
-    amount: Decimal,
-    balance_after: Decimal,
-    reference: &str,
-) -> AppResult<()> {
-    log_txn(
-        tx,
-        driver_id,
-        "driver",
-        "payout",
-        -amount,
-        balance_after,
-        Some(reference),
-        None,
-    )
-    .await
-}
-
-/// Reverse a failed driver payout: log the wallet re-credit.
-pub async fn log_driver_refund(
-    tx: &mut Transaction<'_, Postgres>,
-    driver_id: Uuid,
-    amount: Decimal,
-    balance_after: Decimal,
-    reference: &str,
-) -> AppResult<()> {
-    log_txn(
-        tx,
-        driver_id,
-        "driver",
-        "refund",
-        amount,
-        balance_after,
-        Some(reference),
-        None,
-    )
-    .await
-}
-
+/// Current prepaid balance for a rider (read-only).
 pub async fn rider_balance(pool: &sqlx::PgPool, user_id: Uuid) -> AppResult<Decimal> {
     let bal: Option<(Decimal,)> =
         sqlx::query_as("SELECT balance FROM credit_accounts WHERE user_id = $1 AND kind = 'rider'")

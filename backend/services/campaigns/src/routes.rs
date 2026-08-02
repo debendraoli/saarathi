@@ -1,8 +1,10 @@
-//! Campaign (discount / bonus) management — staff-created, applied at estimate.
+//! Campaign (discount / bonus) **management** — staff CRUD + rider preview.
+//! Rides evaluates these at estimate/bonus time (reads the same `campaigns`
+//! table); this service owns creation/validation. Shared Postgres DB with rides,
+//! which owns the campaign schema.
 
 use crate::auth::{AuthUser, StaffUser};
 use crate::error::{AppError, AppResult};
-use crate::models::{Campaign, CAMPAIGN_COLS};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
@@ -13,8 +15,33 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
 use saarathi_core::domain::roles;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+const CAMPAIGN_COLS: &str = "id, code, title, audience::text AS audience, kind::text AS kind, \
+    value, min_fare, max_discount, city, vehicle_class, starts_at, ends_at, active, \
+    usage_limit, used_count, rules, created_at";
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+struct Campaign {
+    id: Uuid,
+    code: String,
+    title: String,
+    audience: String,
+    kind: String,
+    value: Decimal,
+    min_fare: Decimal,
+    max_discount: Option<Decimal>,
+    city: Option<String>,
+    vehicle_class: Option<String>,
+    starts_at: Option<DateTime<Utc>>,
+    ends_at: Option<DateTime<Utc>>,
+    active: bool,
+    usage_limit: Option<i32>,
+    used_count: i32,
+    rules: serde_json::Value,
+    created_at: DateTime<Utc>,
+}
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -38,7 +65,7 @@ struct NewCampaign {
     starts_at: Option<DateTime<Utc>>,
     ends_at: Option<DateTime<Utc>>,
     usage_limit: Option<i32>,
-    /// Dynamic eligibility rules (ANDed). See `crate::rules::CampaignRule`.
+    /// Dynamic eligibility rules (ANDed). See `saarathi_core::campaigns::CampaignRule`.
     #[serde(default)]
     rules: Option<serde_json::Value>,
 }
@@ -68,7 +95,7 @@ async fn create(
     }
     // Validate the rule payload up front so bad rules never reach the engine.
     let rules = body.rules.unwrap_or_else(|| serde_json::json!([]));
-    crate::rules::parse_rules(&rules).map_err(AppError::BadRequest)?;
+    saarathi_core::campaigns::parse_rules(&rules).map_err(AppError::BadRequest)?;
 
     let campaign: Campaign = sqlx::query_as(&format!(
         "INSERT INTO campaigns (code, title, audience, kind, value, min_fare, max_discount, city, \
