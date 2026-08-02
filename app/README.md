@@ -45,13 +45,33 @@ response and shown on the verify screen (no SMS gateway needed).
 
 ```
 lib/src/
-  core/        config · theme · network (dio) · storage · router
+  core/        config · theme · network (dio) · storage · router · location
   features/
     onboarding/  splash + intro tutorial + language
-    auth/        phone → OTP → session (rider or driver)
-    home/        role-aware shell + rider/driver mode switch
-    ride/        where-to → estimate → confirm → live tracking (map + WS)
-    driver/      go online → incoming job offer
+    auth/        phone → OTP → session · profile edit
+    home/        role-aware shell · rider/driver mode · trip history
+    ride/        where-to → estimate → confirm → live tracking · rating · SOS
+    driver/      KYC register + document upload · go online → offers → progress
+    delivery/    send a parcel (trackable delivery trip)
   shared/      reusable widgets
   l10n/        app_en.arb · app_ne.arb
 ```
+
+## Native config (add after `flutter create`)
+
+The generated runners need these to actually run:
+
+- **Android** (`android/app/src/main/AndroidManifest.xml`): permissions
+  `INTERNET`, `ACCESS_FINE_LOCATION`, `CAMERA`; for dev against a plaintext
+  gateway add `android:usesCleartextTraffic="true"` on `<application>`; add a
+  deep-link `<intent-filter>` for scheme `saarathi`.
+- **iOS** (`ios/Runner/Info.plist`): `NSLocationWhenInUseUsageDescription`,
+  `NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription`; a
+  `CFBundleURLTypes` entry for scheme `saarathi`; for localhost dev, an
+  `NSAppTransportSecurity` exception.
+
+## Not yet built (next passes)
+
+Food/grocery verticals · masked call + WebRTC voice/video · QR-sticker scan ·
+push notifications · saved places · notifications inbox · offline cache/reconcile.
+

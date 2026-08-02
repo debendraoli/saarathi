@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
+import '../../auth/application/auth_controller.dart';
 import '../application/ride_controller.dart';
 import '../application/trip_ws.dart';
 import '../data/ride_repository.dart';
@@ -93,6 +94,20 @@ class _StatusSheet extends ConsumerWidget {
     }
   }
 
+  /// The driver's next forward transition + its button label, or null.
+  (String, String)? _driverNext(AppL10n l) {
+    switch (trip.status) {
+      case TripStatus.accepted:
+        return ('arriving', l.driverArrived);
+      case TripStatus.arriving:
+        return ('in_progress', l.startTrip);
+      case TripStatus.inProgress:
+        return ('completed', l.completeTrip);
+      default:
+        return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
@@ -102,6 +117,9 @@ class _StatusSheet extends ConsumerWidget {
     final done = trip.status == TripStatus.completed ||
         trip.status == TripStatus.cancelled ||
         trip.status == TripStatus.noDriver;
+    final myId = ref.watch(authControllerProvider).user?.id;
+    final iAmDriver = myId != null && myId == trip.driverId;
+    final driverNext = iAmDriver ? _driverNext(l) : null;
 
     return Card(
       margin: const EdgeInsets.all(12),
@@ -145,7 +163,7 @@ class _StatusSheet extends ConsumerWidget {
                   ),
               ],
             ),
-            if (!done && !searching) ...[
+            if (!done && !searching && !iAmDriver) ...[
               const SizedBox(height: 14),
               Row(
                 children: [
@@ -165,6 +183,18 @@ class _StatusSheet extends ConsumerWidget {
                     ),
                   ),
                 ],
+              ),
+            ],
+            if (driverNext != null) ...[
+              const SizedBox(height: 14),
+              FilledButton(
+                onPressed: () async {
+                  await ref
+                      .read(rideRepositoryProvider)
+                      .updateStatus(trip.id, driverNext.$1);
+                  ref.invalidate(tripStreamProvider(trip.id));
+                },
+                child: Text(driverNext.$2),
               ),
             ],
             if (searching) ...[

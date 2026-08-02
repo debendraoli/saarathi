@@ -41,6 +41,10 @@ class RideRepository {
   Future<void> cancel(String id) =>
       _api.post('/v1/rides/$id/status', body: {'status': 'cancelled'});
 
+  /// Driver advances the trip: arriving → in_progress → completed.
+  Future<void> updateStatus(String id, String status) =>
+      _api.post('/v1/rides/$id/status', body: {'status': status});
+
   Future<void> rate(String id, int stars, {String? comment}) => _api.post(
         '/v1/rides/$id/rate',
         body: {'stars': stars, if (comment != null && comment.isNotEmpty) 'comment': comment},
