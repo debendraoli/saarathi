@@ -44,6 +44,12 @@ pub struct Config {
     pub tds_rate: Decimal,
     /// VAT rate applied to the platform's commission (reporting / liability).
     pub vat_rate: Decimal,
+    /// Parcel delivery pricing (config-driven; not bound by the ride per-km caps).
+    pub delivery_base_fare: Decimal,
+    pub delivery_per_km: Decimal,
+    pub delivery_tier_small: Decimal,
+    pub delivery_tier_medium: Decimal,
+    pub delivery_fragile_surcharge: Decimal,
 }
 
 impl Config {
@@ -81,6 +87,11 @@ impl Config {
             subscription_weekly_days: int_env("SUBSCRIPTION_WEEKLY_DAYS", 7),
             tds_rate: dec_env("PAYOUT_TDS_RATE", "0.015"),
             vat_rate: dec_env("VAT_RATE", "0.13"),
+            delivery_base_fare: dec_env("DELIVERY_BASE_FARE", "30"),
+            delivery_per_km: dec_env("DELIVERY_PER_KM", "15"),
+            delivery_tier_small: dec_env("DELIVERY_TIER_SMALL_SURCHARGE", "10"),
+            delivery_tier_medium: dec_env("DELIVERY_TIER_MEDIUM_SURCHARGE", "25"),
+            delivery_fragile_surcharge: dec_env("DELIVERY_FRAGILE_SURCHARGE", "20"),
         })
     }
 }

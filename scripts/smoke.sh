@@ -265,6 +265,60 @@ HIST=$(j "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" | jq 'length')
 [ "$HIST" -ge 1 ] || { echo "  no history"; exit 1; }
 echo "  rider history: $HIST trip(s) — can re-request from any"
 
+step "parcel delivery (quote + POD/OTP + COD remittance)"
+# Sender (rider) quotes then books a fragile 'small' parcel with NPR 200 COD.
+DQUOTE=$(j -X POST "$RIDES/v1/delivery/estimate" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"size_tier":"small","fragile":true}')
+DFEE_Q=$(echo "$DQUOTE" | jq -r '.delivery_fee')
+awk -v f="$DFEE_Q" 'BEGIN{exit !(f+0>0)}' || { echo "  delivery quote failed ($DFEE_Q)"; exit 1; }
+PBOOK=$(j -X POST "$RIDES/v1/delivery/parcels" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"size_tier":"small","fragile":true,"recipient_name":"Sita","recipient_phone":"+9779812345678","cod_amount":200}')
+PT=$(echo "$PBOOK" | jq -r '.trip.id')
+POTP=$(echo "$PBOOK" | jq -r '.delivery_otp')
+PFEE=$(echo "$PBOOK" | jq -r '.delivery_fee')
+[ -n "$PT" ] && [ "$PT" != "null" ] || { echo "  parcel booking failed"; exit 1; }
+# Driver opts into delivery jobs and takes the offer.
+j -X POST "$RIDES/v1/driver/heartbeat" -H "authorization: Bearer $DTOKEN" \
+  -H 'content-type: application/json' -d '{"lat":28.0336,"lng":82.4836,"job_types":["ride","delivery"]}' >/dev/null
+POF=""
+for _ in $(seq 1 15); do
+  POF=$(j "$RIDES/v1/driver/offers" -H "authorization: Bearer $DTOKEN" \
+    | jq -r --arg t "$PT" '.[] | select(.trip_id==$t) | .trip_id' | head -n1)
+  [ -n "$POF" ] && break; sleep 1
+done
+[ -n "$POF" ] || { echo "  no delivery offer"; exit 1; }
+j -X POST "$RIDES/v1/rides/$PT/offer/accept" -H "authorization: Bearer $DTOKEN" >/dev/null
+for s in arriving in_progress; do
+  j -X POST "$RIDES/v1/rides/$PT/status" -H "authorization: Bearer $DTOKEN" \
+    -H 'content-type: application/json' -d "{\"status\":\"$s\"}" >/dev/null
+done
+# A delivery cannot be completed via the plain status endpoint (POD required).
+NOPOD=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$RIDES/v1/rides/$PT/status" \
+  -H "authorization: Bearer $DTOKEN" -H 'content-type: application/json' -d '{"status":"completed"}')
+[ "$NOPOD" = "400" ] || { echo "  delivery completed without POD (got $NOPOD)"; exit 1; }
+# Wrong OTP is rejected.
+BADOTP=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$RIDES/v1/delivery/parcels/$PT/deliver" \
+  -H "authorization: Bearer $DTOKEN" -H 'content-type: application/json' \
+  -d "{\"photo_key\":\"pod/$PT.jpg\",\"otp\":\"0000-wrong\"}")
+[ "$BADOTP" = "400" ] || { echo "  wrong OTP should be rejected (got $BADOTP)"; exit 1; }
+# Sender credits before COD remittance.
+CB0=$(j "$PAYMENTS/v1/credits" -H "authorization: Bearer $RTOKEN" | jq -r '.balance')
+# Driver delivers with the recipient's OTP + proof photo → settle fee + remit COD.
+DLV=$(j -X POST "$RIDES/v1/delivery/parcels/$PT/deliver" -H "authorization: Bearer $DTOKEN" \
+  -H 'content-type: application/json' -d "{\"photo_key\":\"pod/$PT.jpg\",\"otp\":\"$POTP\",\"recipient\":\"Sita\"}")
+echo "$DLV" | jq -e '.delivered==true and .cod_remitted==true' >/dev/null \
+  || { echo "  delivery POD failed: $DLV"; exit 1; }
+CB1=$(j "$PAYMENTS/v1/credits" -H "authorization: Bearer $RTOKEN" | jq -r '.balance')
+awk -v a="$CB1" -v b="$CB0" 'BEGIN{d=a-b; exit !(d>199.99 && d<200.01)}' \
+  || { echo "  COD not remitted to sender ($CB0 -> $CB1)"; exit 1; }
+# The delivery emitted a shared-ledger entry like a ride.
+DLED=$(j "$RIDES/v1/admin/ledger" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq --arg t "$PT" '[.[] | select(.trip_id==$t)] | length')
+[ "$DLED" -ge 1 ] || { echo "  delivery not in ledger"; exit 1; }
+echo "  parcel delivered: quote/fee NPR $PFEE, COD 200 remitted ($CB0 -> $CB1), ledgered"
+
 step "driver credits + subscription pass (0% commission)"
 DREF=$(j -X POST "$RIDES/v1/driver/credits/topup" -H "authorization: Bearer $DTOKEN" \
   -H 'content-type: application/json' -d '{"amount":1000}' | jq -r '.reference')

@@ -93,11 +93,8 @@ pub fn quote_fare(
     let base = Money::from_decimal(billable_distance_km * effective_per_km_rate);
     let fare = Money::from_decimal(base.amount() * effective_surge).round_paisa();
 
-    // 5. Commission is clamped to the legal max; the fund is a fixed 1%.
-    let commission_rate = clamp(config.commission_rate, Decimal::ZERO, MAX_COMMISSION_RATE);
-    let commission = fare.scale(commission_rate).round_paisa();
-    let accident_fund = fare.scale(ACCIDENT_FUND_RATE).round_paisa();
-    let driver_payout = (fare - commission - accident_fund).round_paisa();
+    // 5. Split into commission / fund / driver payout (single source of truth).
+    let (commission, accident_fund, driver_payout) = split_fare(fare, config.commission_rate);
 
     FareQuote {
         billable_distance_km,
@@ -108,6 +105,18 @@ pub fn quote_fare(
         accident_fund,
         driver_payout,
     }
+}
+
+/// Split a fare into `(commission, accident_fund, driver_payout)` using the legal
+/// rates. Commission is clamped to the ≤10% ceiling; the accident fund is a fixed
+/// 1%; the driver gets the rest. Shared by ride fares and delivery fees so the
+/// ledger split is identical everywhere.
+pub fn split_fare(fare: Money, commission_rate: Decimal) -> (Money, Money, Money) {
+    let commission_rate = clamp(commission_rate, Decimal::ZERO, MAX_COMMISSION_RATE);
+    let commission = fare.scale(commission_rate).round_paisa();
+    let accident_fund = fare.scale(ACCIDENT_FUND_RATE).round_paisa();
+    let driver_payout = (fare - commission - accident_fund).round_paisa();
+    (commission, accident_fund, driver_payout)
 }
 
 #[cfg(test)]

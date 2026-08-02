@@ -22,6 +22,7 @@ use uuid::Uuid;
 struct TripMoney {
     rider_id: Uuid,
     driver_id: Option<Uuid>,
+    trip_type: String,
     status: String,
     gross_fare: Decimal,
     commission: Decimal,
@@ -291,8 +292,8 @@ async fn update_status(
 
     let mut tx = st.db.begin().await?;
     let row: Option<TripMoney> = sqlx::query_as(
-        "SELECT rider_id, driver_id, status::text AS status, gross_fare, commission, \
-                accident_fund, driver_payout, final_fare, payment_method \
+        "SELECT rider_id, driver_id, trip_type::text AS trip_type, status::text AS status, \
+                gross_fare, commission, accident_fund, driver_payout, final_fare, payment_method \
          FROM trips WHERE id = $1 FOR UPDATE",
     )
     .bind(id)
@@ -301,6 +302,13 @@ async fn update_status(
     let m = row.ok_or(AppError::NotFound)?;
     if m.rider_id != claims.sub && m.driver_id != Some(claims.sub) {
         return Err(AppError::Forbidden);
+    }
+    // Deliveries settle through the proof-of-delivery endpoint (OTP + POD + COD),
+    // never the plain status endpoint — that guarantees proof before payment.
+    if m.trip_type == "delivery" && body.status == "completed" {
+        return Err(AppError::BadRequest(
+            "complete a delivery via its proof-of-delivery endpoint".into(),
+        ));
     }
 
     let ts_col = match body.status.as_str() {
@@ -331,74 +339,23 @@ async fn update_status(
 
     // On first completion, append the immutable ledger entry + settle the wallet.
     if body.status == "completed" && m.status != "completed" {
-        let payment_method = m.payment_method.clone();
-        // A driver on an active subscription pass pays 0% commission (keeps 100%,
-        // minus the legally-mandatory 1% accident fund).
-        let (commission, driver_payout) = match m.driver_id {
-            Some(did) if crate::payments::has_active_pass(&mut tx, did).await? => {
-                (Decimal::ZERO, m.gross_fare - m.accident_fund)
-            }
-            _ => (m.commission, m.driver_payout),
-        };
-        sqlx::query("UPDATE trips SET commission = $2, driver_payout = $3 WHERE id = $1")
-            .bind(id)
-            .bind(commission)
-            .bind(driver_payout)
-            .execute(&mut *tx)
-            .await?;
-        crate::ledger::append(
+        crate::settle::on_completion(
+            &st,
             &mut tx,
-            crate::ledger::NewEntry {
-                trip_id: id,
+            id,
+            &crate::settle::Completion {
+                rider_id: m.rider_id,
                 driver_id: m.driver_id,
-                gross: m.gross_fare,
-                commission,
+                gross_fare: m.gross_fare,
+                commission: m.commission,
                 accident_fund: m.accident_fund,
-                driver_payout,
+                driver_payout: m.driver_payout,
+                final_fare: m.final_fare,
                 payment_method: m.payment_method.clone(),
+                vehicle_class: trip.vehicle_class.clone(),
             },
         )
         .await?;
-        // Settle the fare: wallet from rider credits, corporate from the company
-        // wallet; cash is collected in-vehicle. The driver split is unaffected.
-        match payment_method.as_str() {
-            "wallet" => {
-                crate::payments::debit_rider(
-                    &mut tx,
-                    m.rider_id,
-                    m.final_fare,
-                    "payment",
-                    Some(id),
-                )
-                .await?;
-            }
-            "corporate" => {
-                crate::partner_ledger::charge_corporate_ride(&mut tx, m.rider_id, id, m.final_fare)
-                    .await?;
-            }
-            _ => {}
-        }
-        // Driver-side campaign incentive (platform-funded, into the earnings wallet).
-        if let Some(did) = m.driver_id {
-            let _ = crate::bonus::grant_driver_bonus(
-                &mut tx,
-                &st.db,
-                did,
-                id,
-                m.gross_fare,
-                &trip.vehicle_class,
-            )
-            .await?;
-            // Fleet revenue-share: carve the partner's cut from the platform's commission.
-            let _ = crate::partner_ledger::accrue_commission_share(
-                &mut tx,
-                did,
-                id,
-                m.gross_fare,
-                commission,
-            )
-            .await?;
-        }
     }
 
     tx.commit().await?;

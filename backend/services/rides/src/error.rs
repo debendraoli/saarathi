@@ -98,3 +98,16 @@ impl IntoResponse for AppError {
 }
 
 pub type AppResult<T> = Result<T, AppError>;
+
+impl From<saarathi_core::wallet::WalletError> for AppError {
+    fn from(e: saarathi_core::wallet::WalletError) -> Self {
+        use saarathi_core::wallet::WalletError;
+        match e {
+            WalletError::Db(db) => AppError::Db(db),
+            other => {
+                let code = other.code().unwrap_or(ErrorCode::Validation);
+                AppError::bad(code, other.to_string())
+            }
+        }
+    }
+}

@@ -25,6 +25,9 @@ enum Engine {
 #[derive(Clone)]
 struct AppState {
     inner: Arc<Inner>,
+    /// Redis route cache (identical origin/dest pairs recur). `None` = no cache.
+    cache: Option<redis::aio::ConnectionManager>,
+    cache_ttl_secs: u64,
 }
 
 struct Inner {
@@ -71,8 +74,29 @@ async fn main() -> anyhow::Result<()> {
             .expect("http client"),
     };
     let port: u16 = env_or("ROUTING_PORT", "8084").parse()?;
+
+    // Optional Redis cache: real engine results only, keyed by profile+points.
+    let cache = match redis::Client::open(env_or("REDIS_URL", "redis://localhost:6379")) {
+        Ok(client) => match redis::aio::ConnectionManager::new(client).await {
+            Ok(cm) => Some(cm),
+            Err(e) => {
+                tracing::warn!(error = %e, "route cache unavailable; running without it");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "invalid REDIS_URL; running without route cache");
+            None
+        }
+    };
+    let cache_ttl_secs: u64 = env_or("ROUTE_CACHE_TTL_SECS", "3600")
+        .parse()
+        .unwrap_or(3600);
+
     let state = AppState {
         inner: Arc::new(inner),
+        cache,
+        cache_ttl_secs,
     };
 
     // Routing has no user data and is called service-to-service; allow any origin.
@@ -112,13 +136,42 @@ async fn route(
     }
     let profile = RouteProfile::from_wire(&req.profile);
     let inner = &st.inner;
+
+    // Cache lookup (real engine results only — never the offline fallback).
+    let key = cache_key(&req.points, profile);
+    if let Some(mut cm) = st.cache.clone() {
+        let cached: Option<String> = redis::cmd("GET")
+            .arg(&key)
+            .query_async(&mut cm)
+            .await
+            .ok()
+            .flatten();
+        if let Some(mut r) = cached.and_then(|j| serde_json::from_str::<RouteResult>(&j).ok()) {
+            r.source = format!("{}+cache", r.source);
+            return Ok(Json(r));
+        }
+    }
+
     if !inner.url.is_empty() {
         let engine_result = match inner.engine {
             Engine::Valhalla => inner.valhalla(&req.points, profile).await,
             Engine::Osrm => inner.osrm_path(&req.points).await,
         };
         match engine_result {
-            Ok(r) => return Ok(Json(r)),
+            Ok(r) => {
+                if let Some(mut cm) = st.cache.clone() {
+                    if let Ok(json) = serde_json::to_string(&r) {
+                        let _ = redis::cmd("SET")
+                            .arg(&key)
+                            .arg(json)
+                            .arg("EX")
+                            .arg(st.cache_ttl_secs)
+                            .query_async::<()>(&mut cm)
+                            .await;
+                    }
+                }
+                return Ok(Json(r));
+            }
             Err(e) => {
                 tracing::warn!(error = %e, "routing engine failed; using haversine fallback")
             }
@@ -129,6 +182,16 @@ async fn route(
         inner.road_factor,
         inner.avg_speed_kmh,
     )))
+}
+
+/// Deterministic cache key: profile + coords rounded to ~1m so identical
+/// origin/dest pairs hit the same entry.
+fn cache_key(points: &[LatLng], profile: RouteProfile) -> String {
+    let mut s = format!("route:v1:{}", profile.as_wire());
+    for p in points {
+        s.push_str(&format!(":{:.5},{:.5}", p.lat, p.lng));
+    }
+    s
 }
 
 // ── Valhalla wire types (only the fields we need) ────────────────────────────

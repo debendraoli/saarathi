@@ -13,8 +13,10 @@ pub mod events;
 pub mod ledger;
 pub mod legal;
 pub mod money;
+pub mod partner_ledger;
 pub mod payments;
 pub mod pricing;
 pub mod routing;
+pub mod wallet;
 
 pub use money::Money;

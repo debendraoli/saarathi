@@ -94,6 +94,25 @@ CREATE TABLE IF NOT EXISTS trip_events (
 );
 CREATE INDEX IF NOT EXISTS trip_events_trip_idx ON trip_events (trip_id, created_at DESC);
 
+-- Parcel delivery (Phase 3a): a delivery is a trip with trip_type='delivery'
+-- plus this extension. No merchant/catalog tables — parcel is point-to-point.
+CREATE TABLE IF NOT EXISTS parcel_details (
+    trip_id         uuid        PRIMARY KEY REFERENCES trips (id) ON DELETE CASCADE,
+    size_tier       text        NOT NULL,                 -- envelope | small | medium
+    recipient_name  text        NOT NULL,
+    recipient_phone text        NOT NULL,
+    declared_value  numeric     NOT NULL DEFAULT 0,
+    fragile         boolean     NOT NULL DEFAULT false,
+    cod_amount      numeric     NOT NULL DEFAULT 0,        -- cash collected from recipient, remitted to sender
+    cod_remitted    boolean     NOT NULL DEFAULT false,
+    pickup_note     text,
+    delivery_otp    text        NOT NULL,                  -- recipient confirms this at hand-off
+    pod_photo_key   text,                                  -- object-storage key of the proof photo
+    pod_recipient   text,                                  -- who actually received it
+    delivered_at    timestamptz,
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+
 -- Payment method on the trip (drives the ledger + wallet settlement).
 ALTER TABLE trips ADD COLUMN IF NOT EXISTS payment_method text NOT NULL DEFAULT 'cash';
 -- Cancellation: riders/drivers can cancel with a reason (feeds the complaints tab).

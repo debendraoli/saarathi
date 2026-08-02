@@ -114,7 +114,15 @@ async fn confirm_topup(
     let balance = if kind == roles::DRIVER {
         wallet::credit_driver(&mut tx, user_id, amount, "topup", Some(&body.reference)).await?
     } else {
-        wallet::credit_rider(&mut tx, user_id, amount, "topup", Some(&body.reference)).await?
+        wallet::credit_rider(
+            &mut tx,
+            user_id,
+            amount,
+            "topup",
+            Some(&body.reference),
+            None,
+        )
+        .await?
     };
     sqlx::query(
         "UPDATE topup_intents SET status = 'confirmed', confirmed_at = now() WHERE reference = $1",

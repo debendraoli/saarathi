@@ -1,6 +1,7 @@
 //! Router assembly + CORS.
 
 pub mod analytics;
+pub mod delivery;
 pub mod dispatch;
 pub mod feedback;
 pub mod flags;
@@ -54,6 +55,7 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/v1/ws", get(ws::ws_handler))
         .merge(rides::routes())
+        .merge(delivery::routes())
         .merge(ledger::routes())
         .merge(dispatch::routes())
         .merge(flags::routes())
