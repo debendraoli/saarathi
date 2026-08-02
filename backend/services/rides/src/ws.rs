@@ -61,11 +61,11 @@ async fn is_participant(st: &AppState, trip: Uuid, uid: Uuid) -> anyhow::Result<
 
 async fn socket_loop(socket: WebSocket, st: AppState, uid: Uuid, trip: Uuid) {
     let (mut sink, mut stream) = socket.split();
-    let mut rx = st.hub.subscribe(trip);
+    let mut rx = st.hub.subscribe(trip).await;
 
     // Forward broadcast messages to this client.
     let send_task = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
+        while let Some(msg) = rx.recv().await {
             if sink.send(Message::Text(msg.into())).await.is_err() {
                 break;
             }

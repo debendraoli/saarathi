@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
         db: pool,
         config: Arc::new(config),
         router,
-        hub: Hub::new(),
+        hub: Hub::new(nats.clone()),
         redis,
         payments: Arc::new(saarathi_core::payments::MockProvider),
         nats,
