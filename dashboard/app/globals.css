@@ -296,3 +296,223 @@ a {
     border: 1px solid color-mix(in srgb, var(--color-red) 30%, transparent);
   }
 }
+
+/* ── Added: toolbars, modals, charts, KPIs, health, webcam ─────────────────── */
+@layer components {
+  /* Consistent control height so buttons line up with inputs in a row. */
+  .btn {
+    min-height: 40px;
+  }
+
+  /* Page header with actions on the right. */
+  .toolbar {
+    @apply flex flex-wrap items-center justify-between gap-3;
+  }
+  .toolbar-actions {
+    @apply flex flex-wrap items-center gap-2.5;
+  }
+
+  .icon-btn {
+    @apply grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg transition-colors;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    color: var(--color-muted);
+  }
+  .icon-btn:hover:not(:disabled) {
+    background: var(--color-elevated);
+    color: var(--color-text);
+    border-color: var(--color-faint);
+  }
+  .icon-btn:disabled {
+    @apply cursor-not-allowed opacity-40;
+  }
+
+  .btn.danger-solid {
+    background: var(--color-red);
+    color: #fff;
+    border-color: transparent;
+  }
+  .btn.danger-solid:hover {
+    filter: brightness(1.06);
+  }
+
+  /* Search box. */
+  .search {
+    @apply relative flex items-center;
+  }
+  .search-icon {
+    @apply pointer-events-none absolute left-3;
+    color: var(--color-faint);
+  }
+  .search-input {
+    @apply rounded-lg py-2 pl-9 pr-3 text-[13.5px] outline-none transition-shadow;
+    background: var(--color-bg);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    min-width: 220px;
+    min-height: 40px;
+  }
+  .search-input:focus {
+    border-color: var(--color-brand);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 22%, transparent);
+  }
+
+  /* Segmented tabs. */
+  .segmented {
+    @apply inline-flex rounded-lg p-1;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+  }
+  .seg {
+    @apply cursor-pointer rounded-md px-3 py-1.5 text-[12.5px] font-medium transition-colors;
+    color: var(--color-muted);
+    background: transparent;
+    border: none;
+  }
+  .seg:hover {
+    color: var(--color-text);
+  }
+  .seg.active {
+    background: var(--color-elevated);
+    color: var(--color-text);
+  }
+
+  .pagination {
+    @apply mt-3.5 flex items-center justify-between;
+  }
+
+  /* Modal. */
+  .modal-backdrop {
+    @apply fixed inset-0 z-50 flex items-center justify-center p-4;
+    background: rgba(4, 6, 10, 0.66);
+    backdrop-filter: blur(3px);
+  }
+  .modal {
+    @apply w-full max-w-[460px] rounded-2xl;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    box-shadow: 0 24px 64px -24px rgba(0, 0, 0, 0.8);
+  }
+  .modal.wide {
+    @apply max-w-[760px];
+  }
+  .modal-head {
+    @apply flex items-center justify-between px-5 py-4;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .modal-head h3 {
+    @apply text-[15px] font-semibold;
+  }
+  .modal-body {
+    @apply px-5 py-4;
+  }
+  .modal-foot {
+    @apply flex items-center justify-end gap-2.5 px-5 py-4;
+    border-top: 1px solid var(--color-border);
+  }
+
+  /* Charts. */
+  .chart-legend {
+    @apply mb-1 flex flex-wrap gap-4;
+  }
+  .chart-legend-item {
+    @apply flex items-center gap-1.5 text-[12px];
+    color: var(--color-muted);
+  }
+  .chart-legend-item i {
+    @apply inline-block h-2.5 w-2.5 rounded-sm;
+  }
+  .grid-line {
+    stroke: color-mix(in srgb, var(--color-border) 70%, transparent);
+    stroke-width: 1;
+  }
+  .axis-label {
+    fill: var(--color-faint);
+    font-size: 10.5px;
+  }
+  .chart-empty {
+    @apply grid place-items-center rounded-lg text-[13px];
+    color: var(--color-faint);
+    background: var(--color-surface-2);
+  }
+
+  .donut {
+    @apply relative grid place-items-center;
+  }
+  .donut-center {
+    @apply absolute grid place-items-center text-center;
+  }
+  .donut-value {
+    @apply text-[20px] font-bold;
+  }
+
+  /* KPI tile. */
+  .kpi {
+    @apply rounded-xl p-4;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+  }
+  .kpi-top {
+    @apply flex items-center justify-between;
+  }
+  .kpi-label {
+    @apply text-[12.5px];
+    color: var(--color-muted);
+  }
+  .kpi-icon {
+    color: var(--color-brand);
+    opacity: 0.9;
+  }
+  .kpi-value {
+    @apply mt-1 text-[23px] font-bold tracking-tight;
+  }
+  .kpi-foot {
+    @apply mt-1.5 flex items-center justify-between;
+    min-height: 20px;
+  }
+
+  /* Document row (driver detail / KYC). */
+  .doc-row {
+    @apply flex items-center justify-between rounded-lg px-3.5 py-2.5;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+  }
+  .doc-row + .doc-row {
+    @apply mt-2;
+  }
+
+  /* Services health. */
+  .health-grid {
+    @apply grid gap-3.5;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  }
+  .health-card {
+    @apply flex items-center justify-between rounded-xl p-4;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+  }
+  .status-dot {
+    @apply inline-block h-2.5 w-2.5 shrink-0 rounded-full;
+    background: var(--color-faint);
+  }
+  .status-dot.up {
+    background: var(--color-green);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-green) 22%, transparent);
+  }
+  .status-dot.down {
+    background: var(--color-red);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-red) 22%, transparent);
+  }
+
+  /* Webcam capture. */
+  .webcam {
+    @apply flex flex-col;
+  }
+  .webcam-view {
+    @apply w-full rounded-xl;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    background: #000;
+  }
+}
+

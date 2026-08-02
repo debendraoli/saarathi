@@ -1,8 +1,9 @@
 "use client";
 
+import { Pagination, SearchInput, Segmented, usePaged } from "@/components/Toolbar";
 import { api, type DriverListItem } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const TABS = [
   { key: "queue", label: "Review queue" },
@@ -14,6 +15,7 @@ export default function DriversPage() {
   const router = useRouter();
   const [tab, setTab] = useState("queue");
   const [rows, setRows] = useState<DriverListItem[]>([]);
+  const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -31,6 +33,18 @@ export default function DriversPage() {
     };
   }, [tab]);
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((d) =>
+      [d.full_name, d.phone, d.license_number]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q)),
+    );
+  }, [rows, query]);
+
+  const { page, setPage, pageCount, total, slice } = usePaged(filtered, 12);
+
   return (
     <div className="stack">
       <div>
@@ -38,16 +52,18 @@ export default function DriversPage() {
         <p className="subtle">Review KYC submissions and approve or reject drivers.</p>
       </div>
 
-      <div className="row">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            className={`btn ${tab === t.key ? "primary" : "ghost"}`}
-            onClick={() => setTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="toolbar">
+        <Segmented
+          options={TABS}
+          value={tab}
+          onChange={(k) => {
+            setTab(k);
+            setPage(0);
+          }}
+        />
+        <div className="toolbar-actions">
+          <SearchInput value={query} onChange={setQuery} placeholder="Name, phone, license…" />
+        </div>
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -64,7 +80,7 @@ export default function DriversPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((d) => (
+            {slice.map((d) => (
               <tr key={d.id} onClick={() => router.push(`/drivers/${d.id}`)}>
                 <td>{d.full_name ?? "—"}</td>
                 <td>{d.phone}</td>
@@ -75,7 +91,7 @@ export default function DriversPage() {
                 <td className="subtle">{fmtDate(d.created_at)}</td>
               </tr>
             ))}
-            {!loading && rows.length === 0 && (
+            {!loading && filtered.length === 0 && (
               <tr>
                 <td colSpan={5} className="subtle" style={{ textAlign: "center", padding: 32 }}>
                   Nothing here.
@@ -85,6 +101,8 @@ export default function DriversPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} pageCount={pageCount} total={total} onPage={setPage} />
     </div>
   );
 }

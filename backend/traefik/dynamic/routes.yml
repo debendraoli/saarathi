@@ -64,7 +64,49 @@ http:
       middlewares: ["cors", "ratelimit"]
       rule: PathPrefix(`/v1/partner`) || PathPrefix(`/v1/admin/partners`)
 
+    # Health aggregation for the ops dashboard: /status/<svc> → that service's
+    # /health (routing included for visibility, though its API stays internal).
+    health-auth:
+      entryPoints: ["web"]
+      service: auth
+      middlewares: ["cors", "health-rewrite"]
+      rule: Path(`/status/auth`)
+    health-rides:
+      entryPoints: ["web"]
+      service: rides
+      middlewares: ["cors", "health-rewrite"]
+      rule: Path(`/status/rides`)
+    health-notify:
+      entryPoints: ["web"]
+      service: notify
+      middlewares: ["cors", "health-rewrite"]
+      rule: Path(`/status/notify`)
+    health-routing:
+      entryPoints: ["web"]
+      service: routing
+      middlewares: ["cors", "health-rewrite"]
+      rule: Path(`/status/routing`)
+    health-payments:
+      entryPoints: ["web"]
+      service: payments
+      middlewares: ["cors", "health-rewrite"]
+      rule: Path(`/status/payments`)
+    health-campaigns:
+      entryPoints: ["web"]
+      service: campaigns
+      middlewares: ["cors", "health-rewrite"]
+      rule: Path(`/status/campaigns`)
+    health-partners:
+      entryPoints: ["web"]
+      service: partners
+      middlewares: ["cors", "health-rewrite"]
+      rule: Path(`/status/partners`)
+
   middlewares:
+    # Rewrite /status/<svc> to /health before forwarding to the service.
+    health-rewrite:
+      replacePath:
+        path: /health
     # CORS lives here now, not in each service. Allow the dashboard origin.
     cors:
       headers:
@@ -106,3 +148,9 @@ http:
       loadBalancer:
         servers:
           - url: http://host.docker.internal:8087
+    # Referenced only by the /status/routing health router — routing's API
+    # (/v1/route) is never exposed publicly.
+    routing:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8084

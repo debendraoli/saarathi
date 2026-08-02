@@ -62,6 +62,8 @@ pub enum KycStatus {
 #[serde(rename_all = "snake_case")]
 pub enum DocumentKind {
     Citizenship,
+    CitizenshipFront,
+    CitizenshipBack,
     License,
     Bluebook,
     VehicleFitness,

@@ -414,6 +414,8 @@ async fn upload_driver_document(
 fn parse_document_kind(s: &str) -> Result<DocumentKind, AppError> {
     Ok(match s {
         "citizenship" => DocumentKind::Citizenship,
+        "citizenship_front" => DocumentKind::CitizenshipFront,
+        "citizenship_back" => DocumentKind::CitizenshipBack,
         "license" => DocumentKind::License,
         "bluebook" => DocumentKind::Bluebook,
         "vehicle_fitness" => DocumentKind::VehicleFitness,

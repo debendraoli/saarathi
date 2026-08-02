@@ -1,5 +1,7 @@
 "use client";
 
+import { BarChart, Donut, Kpi } from "@/components/Charts";
+import { ConfirmModal } from "@/components/Modal";
 import {
     api,
     rides,
@@ -12,6 +14,7 @@ import {
     type PartnerMemberRow,
     type PartnerWallet,
 } from "@/lib/api";
+import { Banknote, Car, TrendingUp, Wallet } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 const MEMBER_ROLES = ["admin", "manager", "dispatcher", "finance", "support", "viewer"];
@@ -37,6 +40,8 @@ export default function PartnerPortalPage() {
   const [topupAmt, setTopupAmt] = useState(5000);
   const [campCode, setCampCode] = useState("");
   const [campValue, setCampValue] = useState(10);
+  const [confirm, setConfirm] = useState<null | "topup" | "payout">(null);
+  const [busy, setBusy] = useState(false);
 
   const active = memberships.find((m) => m.partner_id === pid);
   const canManageMembers = active?.role === "owner" || active?.role === "admin";
@@ -143,22 +148,30 @@ export default function PartnerPortalPage() {
 
   async function topup() {
     if (!pid) return;
+    setBusy(true);
     try {
       const { reference } = await rides.partnerTopup(pid, Number(topupAmt));
       await rides.partnerConfirmTopup(pid, reference); // mock PSP callback
       await loadFleet(pid);
+      setConfirm(null);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   }
 
   async function payout() {
     if (!pid) return;
+    setBusy(true);
     try {
       await rides.partnerRequestPayout(pid);
       await loadFleet(pid);
+      setConfirm(null);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -211,12 +224,79 @@ export default function PartnerPortalPage() {
       </div>
 
       {stats && (
-        <div className="stat-grid">
-          <Stat label="Active drivers" value={stats.active_drivers} />
-          <Stat label="Completed trips" value={stats.trips.completed} />
-          <Stat label="Fleet GMV" value={`NPR ${Number(stats.money.gmv).toLocaleString()}`} />
-          <Stat label="Driver earnings" value={`NPR ${Number(stats.money.driver_earnings).toLocaleString()}`} />
-        </div>
+        <>
+          <div className="stat-grid">
+            <Kpi
+              label="Active drivers"
+              value={String(stats.active_drivers)}
+              hint={`${stats.trips.completed} trips completed`}
+              icon={<Car size={16} />}
+            />
+            <Kpi
+              label="Fleet GMV"
+              value={`NPR ${Number(stats.money.gmv).toLocaleString()}`}
+              hint="gross value of fleet trips"
+              icon={<Banknote size={16} />}
+            />
+            <Kpi
+              label="Driver earnings"
+              value={`NPR ${Number(stats.money.driver_earnings).toLocaleString()}`}
+              hint="paid to your drivers"
+              icon={<TrendingUp size={16} />}
+            />
+            {wallet && (
+              <Kpi
+                label="Wallet balance"
+                value={`NPR ${Number(wallet.balance).toLocaleString()}`}
+                hint={`NPR ${Number(wallet.lifetime_share).toLocaleString()} lifetime share`}
+                spark={ledger
+                  .slice(0, 12)
+                  .map((l) => Number(l.balance_after))
+                  .reverse()}
+                sparkColor="var(--color-green)"
+                icon={<Wallet size={16} />}
+              />
+            )}
+          </div>
+
+          <div className="grid-2">
+            <div className="card">
+              <h3 style={{ marginTop: 0 }}>Trip outcomes</h3>
+              <div className="row" style={{ gap: 20, justifyContent: "center" }}>
+                <Donut
+                  centerLabel={`${stats.trips.total}`}
+                  centerSub="trips"
+                  segments={[
+                    { label: "Completed", value: stats.trips.completed, color: "var(--color-green)" },
+                    { label: "Cancelled", value: stats.trips.cancelled, color: "var(--color-red)" },
+                  ]}
+                />
+                <div className="stack" style={{ gap: 8 }}>
+                  <Legend color="var(--color-green)" label="Completed" value={stats.trips.completed} />
+                  <Legend color="var(--color-red)" label="Cancelled" value={stats.trips.cancelled} />
+                </div>
+              </div>
+            </div>
+
+            <div className="card">
+              <h3 style={{ marginTop: 0 }}>Top drivers by earnings</h3>
+              {stats.leaderboard.length > 0 ? (
+                <BarChart
+                  data={stats.leaderboard.slice(0, 6).map((d) => ({
+                    label: (d.name ?? d.driver_id).slice(0, 8),
+                    value: Number(d.earnings),
+                  }))}
+                  color="var(--color-brand)"
+                  fmt={(v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)))}
+                />
+              ) : (
+                <div className="chart-empty" style={{ height: 190 }}>
+                  No completed trips yet
+                </div>
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       {wallet && (
@@ -236,10 +316,10 @@ export default function PartnerPortalPage() {
           {canManageMoney && (
             <div className="row" style={{ marginBottom: 12, flexWrap: "wrap" }}>
               <input className="input" style={{ maxWidth: 160 }} type="number" value={topupAmt} onChange={(e) => setTopupAmt(Number(e.target.value))} />
-              <button className="btn primary" onClick={topup}>
+              <button className="btn primary" onClick={() => setConfirm("topup")}>
                 Top up wallet
               </button>
-              <button className="btn ghost" onClick={payout}>
+              <button className="btn ghost" onClick={() => setConfirm("payout")}>
                 Withdraw balance
               </button>
             </div>
@@ -468,6 +548,29 @@ export default function PartnerPortalPage() {
           </tbody>
         </table>
       </div>
+
+      <ConfirmModal
+        open={confirm === "topup"}
+        onClose={() => setConfirm(null)}
+        onConfirm={topup}
+        title="Top up wallet"
+        message={`Add NPR ${Number(topupAmt).toLocaleString()} to your fleet wallet? This simulates a payment-gateway top-up.`}
+        confirmLabel="Top up"
+        busy={busy}
+      />
+      <ConfirmModal
+        open={confirm === "payout"}
+        onClose={() => setConfirm(null)}
+        onConfirm={payout}
+        title="Withdraw balance"
+        message={
+          wallet
+            ? `Withdraw the full wallet balance of NPR ${Number(wallet.balance).toLocaleString()} to your registered bank account?`
+            : "Withdraw the full wallet balance to your registered bank account?"
+        }
+        confirmLabel="Withdraw"
+        busy={busy}
+      />
     </div>
   );
 }
@@ -477,6 +580,16 @@ function Stat({ label, value }: { label: string; value: string | number }) {
     <div className="stat">
       <div className="label">{label}</div>
       <div className="value">{value}</div>
+    </div>
+  );
+}
+
+function Legend({ color, label, value }: { color: string; label: string; value: number }) {
+  return (
+    <div className="row" style={{ gap: 8 }}>
+      <span className="status-dot" style={{ background: color }} />
+      <span className="subtle text-[12.5px]">{label}</span>
+      <b className="text-[13px]">{value}</b>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import {
     Building2,
     CreditCard,
     Flag,
+    HeartPulse,
     LogOut,
     MessageSquare,
     Navigation,
@@ -78,7 +79,10 @@ const NAV: NavGroup[] = [
   },
   {
     title: "Platform",
-    items: [{ href: "/flags", label: "Feature Flags", icon: ToggleRight }],
+    items: [
+      { href: "/flags", label: "Feature Flags", icon: ToggleRight },
+      { href: "/health", label: "Services", icon: HeartPulse },
+    ],
   },
 ];
 

@@ -1,19 +1,42 @@
 "use client";
 
+import { Modal } from "@/components/Modal";
+import { WebcamCapture } from "@/components/Webcam";
 import { api, type Driver, type OnboardDriverInput, type VehicleClass } from "@/lib/api";
+import { Camera, Check } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
 const DOC_KINDS = [
+  "profile_photo",
+  "citizenship_front",
+  "citizenship_back",
   "citizenship",
   "license",
   "bluebook",
   "vehicle_fitness",
   "insurance",
   "tax_clearance",
-  "profile_photo",
   "vehicle_photo",
 ];
+
+const KIND_LABELS: Record<string, string> = {
+  profile_photo: "Profile photo (driver / rider)",
+  citizenship_front: "Citizenship — front",
+  citizenship_back: "Citizenship — back",
+  citizenship: "Citizenship (single page)",
+  license: "Driving license",
+  bluebook: "Vehicle bluebook",
+  vehicle_fitness: "Vehicle fitness",
+  insurance: "Insurance",
+  tax_clearance: "Tax clearance",
+  vehicle_photo: "Vehicle photo",
+};
+
+// Kinds that make sense to capture live on a webcam during a walk-in.
+const CAMERA_FACING: Record<string, "user" | "environment"> = {
+  profile_photo: "user",
+};
 
 export default function OnboardDriverPage() {
   const [phone, setPhone] = useState("+977");
@@ -33,6 +56,7 @@ export default function OnboardDriverPage() {
   const [docFile, setDocFile] = useState<File | null>(null);
   const [uploaded, setUploaded] = useState<string[]>([]);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [camOpen, setCamOpen] = useState(false);
 
   async function onboard() {
     setBusy(true);
@@ -55,17 +79,27 @@ export default function OnboardDriverPage() {
 
   async function upload() {
     if (!driver || !docFile) return;
+    await uploadFile(docFile);
+    setDocFile(null);
+  }
+
+  async function uploadFile(file: File) {
+    if (!driver) return;
     setUploadBusy(true);
     setError(null);
     try {
-      const doc = await api.uploadDriverDocument(driver.id, docKind, docFile);
-      setUploaded((u) => [...u, doc.kind]);
-      setDocFile(null);
+      const doc = await api.uploadDriverDocument(driver.id, docKind, file);
+      setUploaded((u) => [...u.filter((k) => k !== doc.kind), doc.kind]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setUploadBusy(false);
     }
+  }
+
+  async function onCapture(file: File) {
+    setCamOpen(false);
+    await uploadFile(file);
   }
 
   return (
@@ -135,37 +169,68 @@ export default function OnboardDriverPage() {
 
       {driver && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>2. Upload documents</h3>
+          <h3 style={{ marginTop: 0 }}>2. Documents &amp; photos</h3>
+          <p className="subtle" style={{ marginTop: 0 }}>
+            Capture a live photo with the webcam or upload a file. Citizenship needs both the front
+            and back page.
+          </p>
           <div className="grid-2">
             <div className="field">
               <label>Document type</label>
               <select className="input" value={docKind} onChange={(e) => setDocKind(e.target.value)}>
                 {DOC_KINDS.map((k) => (
                   <option key={k} value={k}>
-                    {k}
+                    {KIND_LABELS[k] ?? k}
+                    {uploaded.includes(k) ? " ✓" : ""}
                   </option>
                 ))}
               </select>
             </div>
             <div className="field">
-              <label>File</label>
+              <label>Upload a file</label>
               <input
                 className="input"
                 type="file"
+                accept="image/*,application/pdf"
                 onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
               />
             </div>
           </div>
-          <button className="btn primary" disabled={uploadBusy || !docFile} onClick={upload}>
-            {uploadBusy ? "Uploading…" : "Upload document"}
-          </button>
+          <div className="row" style={{ flexWrap: "wrap" }}>
+            <button className="btn primary" disabled={uploadBusy || !docFile} onClick={upload}>
+              {uploadBusy ? "Uploading…" : "Upload file"}
+            </button>
+            <button className="btn ghost" disabled={uploadBusy} onClick={() => setCamOpen(true)}>
+              <Camera size={15} /> Capture with camera
+            </button>
+          </div>
           {uploaded.length > 0 && (
-            <p className="subtle" style={{ marginTop: 12 }}>
-              Uploaded: {uploaded.join(", ")}
-            </p>
+            <div className="stack" style={{ gap: 6, marginTop: 14 }}>
+              {uploaded.map((k) => (
+                <div key={k} className="row" style={{ gap: 8 }}>
+                  <Check size={15} color="var(--color-green)" />
+                  <span className="text-[13px]">{KIND_LABELS[k] ?? k}</span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
+
+      <Modal
+        open={camOpen}
+        onClose={() => setCamOpen(false)}
+        title={`Capture · ${KIND_LABELS[docKind] ?? docKind}`}
+      >
+        {camOpen && (
+          <WebcamCapture
+            key={docKind}
+            onCapture={onCapture}
+            filenameBase={docKind}
+            facingMode={CAMERA_FACING[docKind] ?? "environment"}
+          />
+        )}
+      </Modal>
     </div>
   );
 }

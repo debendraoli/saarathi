@@ -31,6 +31,8 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- Fold-in of the old 0002 migration (safe if the type predates 'vehicle_photo').
 ALTER TYPE document_kind ADD VALUE IF NOT EXISTS 'vehicle_photo';
+ALTER TYPE document_kind ADD VALUE IF NOT EXISTS 'citizenship_front';
+ALTER TYPE document_kind ADD VALUE IF NOT EXISTS 'citizenship_back';
 
 DO $$ BEGIN
     CREATE TYPE document_status AS ENUM ('submitted', 'approved', 'rejected');
