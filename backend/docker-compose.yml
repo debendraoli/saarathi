@@ -274,6 +274,18 @@ services:
   # ROUTING_URL=http://localhost:8002 and ROUTING_ENGINE=valhalla.
   # Start it explicitly (it's in the "routing" profile so normal `up` skips it):
   #   docker compose --profile routing up -d valhalla
+  #
+  # Valhalla feature plugins enabled below (all built into the engine/image):
+  #   • OpenStreetMapSpeeds default-speeds  → realistic speeds on untagged rural
+  #     roads (the biggest quality win for Nepal's sparsely-tagged network).
+  #   • Map-matching (/trace_route, /trace_attributes) → snap driver GPS traces
+  #     onto the graph to derive frequently-used roads + observed speeds.
+  #   • Live/predicted traffic archive (traffic.tar) → feed those observed speeds
+  #     back so ETAs learn from real trips.
+  #   • Tar-packed tiles → near-instant reboot AND horizontal scaling without k8s:
+  #     build the tileset once, then run N read-only Valhalla replicas behind a
+  #     load balancer off the same prebuilt tar (routes are read-only + cached in
+  #     Redis by the rides service, so this scales cleanly).
   valhalla:
     image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
     profiles: ["routing"]
@@ -282,11 +294,23 @@ services:
     environment:
       # Nepal (Lumbini) OSM extract — swap for a wider region as coverage grows.
       tile_urls: "https://download.geofabrik.de/asia/nepal-latest.osm.pbf"
-      server_threads: "2"
+      # Build + serve concurrency. Raise on a bigger host for more parallel trips.
+      server_threads: "4"
       use_tiles_ignore_pbf: "True"
-      build_elevation: "False"
+      # Pack tiles into a tarball: instant graph load + shareable read-only tiles.
+      build_tar: "True"
+      # OpenStreetMapSpeeds plugin: fill speeds where rural OSM lacks maxspeed.
+      use_default_speeds_config: "True"
+      # Admin + timezone DBs: border/country rules + TIME-DEPENDENT routing
+      # (hour-of-day), the prerequisite for predicted/historical traffic.
       build_admins: "True"
-      build_time_zones: "False"
+      build_time_zones: "True"
+      # Elevation off: motorcycle/auto costing ignores grade (saves build + disk).
+      # Flip to "True" if we add bicycle / on-foot delivery costing.
+      build_elevation: "False"
+      # Live/predicted traffic archive slot; populate from observed trip speeds.
+      # Set to "" to disable. Map-matching needs no flag (built in).
+      traffic_name: "traffic.tar"
     volumes:
       - ./.data/valhalla:/custom_files
     healthcheck:
