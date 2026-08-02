@@ -3,8 +3,6 @@
 pub mod admin_routes;
 pub mod auth_routes;
 pub mod driver_routes;
-pub mod partner_admin_routes;
-pub mod partner_portal_routes;
 pub mod rider_routes;
 
 use crate::state::AppState;
@@ -48,8 +46,6 @@ pub fn router(state: AppState) -> Router {
         .merge(rider_routes::routes())
         .merge(driver_routes::routes())
         .merge(admin_routes::routes())
-        .merge(partner_admin_routes::routes())
-        .merge(partner_portal_routes::routes())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

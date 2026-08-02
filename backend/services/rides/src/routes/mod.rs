@@ -8,7 +8,6 @@ pub mod flags;
 pub mod insights;
 pub mod ledger;
 pub mod metrics;
-pub mod partner;
 pub mod plans;
 pub mod rides;
 pub mod safety;
@@ -61,7 +60,6 @@ pub fn router(state: AppState) -> Router {
         .merge(flags::routes())
         .merge(surge::routes())
         .merge(metrics::routes())
-        .merge(partner::routes())
         .merge(tracking::routes())
         .merge(safety::routes())
         .merge(feedback::routes())

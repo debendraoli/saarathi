@@ -5,7 +5,6 @@
 
 use crate::error::AppResult;
 use rust_decimal::Decimal;
-use saarathi_core::ledger::{chain_hash, GENESIS_HASH};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 /// Append one signed movement to the partner chain and move the wallet, atomically.
@@ -18,15 +17,6 @@ pub async fn append(
     amount: Decimal,
 ) -> AppResult<Decimal> {
     Ok(saarathi_core::partner_ledger::append(tx, partner_id, trip_id, kind, amount).await?)
-}
-
-pub async fn balance(pool: &PgPool, partner_id: Uuid) -> AppResult<Decimal> {
-    let b: Option<(Decimal,)> =
-        sqlx::query_as("SELECT balance FROM partner_wallets WHERE partner_id = $1")
-            .bind(partner_id)
-            .fetch_optional(pool)
-            .await?;
-    Ok(b.map(|x| x.0).unwrap_or(Decimal::ZERO))
 }
 
 /// If the trip's driver belongs to an active fleet, accrue that partner's
@@ -87,7 +77,7 @@ pub async fn corporate_precheck(
             "you are not on an active corporate tab".into(),
         ));
     };
-    if balance(pool, partner_id).await? < amount {
+    if saarathi_core::partner_ledger::balance(pool, partner_id).await? < amount {
         return Err(AppError::Coded(
             axum::http::StatusCode::BAD_REQUEST,
             ErrorCode::CorporateTabUnavailable,
@@ -134,48 +124,4 @@ pub async fn charge_corporate_ride(
     };
     let bal = append(tx, partner_id, Some(trip_id), "ride_charge", -amount).await?;
     Ok(Some(bal))
-}
-
-#[derive(sqlx::FromRow)]
-struct ChainRow {
-    seq: i64,
-    partner_id: Uuid,
-    trip_id: Option<Uuid>,
-    kind: String,
-    amount: Decimal,
-    balance_after: Decimal,
-    prev_hash: String,
-    entry_hash: String,
-    created_at_unix: i64,
-}
-
-/// Recompute the whole partner chain and confirm every link + hash is intact.
-pub async fn verify_chain(pool: &PgPool) -> AppResult<bool> {
-    let rows: Vec<ChainRow> = sqlx::query_as(
-        "SELECT seq, partner_id, trip_id, kind, amount, balance_after, prev_hash, entry_hash, \
-                extract(epoch FROM created_at)::bigint AS created_at_unix \
-         FROM partner_ledger ORDER BY seq",
-    )
-    .fetch_all(pool)
-    .await?;
-    let mut expected_prev = GENESIS_HASH.to_string();
-    for r in &rows {
-        if r.prev_hash != expected_prev {
-            return Ok(false);
-        }
-        let payload = format!(
-            "{}|{}|{}|{}|{}|{}",
-            r.partner_id,
-            r.trip_id.map(|t| t.to_string()).unwrap_or_default(),
-            r.kind,
-            r.amount.round_dp(2),
-            r.balance_after.round_dp(2),
-            r.created_at_unix,
-        );
-        if chain_hash(r.seq, &r.prev_hash, &payload) != r.entry_hash {
-            return Ok(false);
-        }
-        expected_prev = r.entry_hash.clone();
-    }
-    Ok(true)
 }

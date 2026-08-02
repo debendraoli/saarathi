@@ -1,9 +1,10 @@
-//! Partner-scoped fleet money + analytics + campaigns. Membership is resolved
-//! from the shared DB (`partner_members`) — a caller may only touch a fleet they
-//! belong to, and money/campaign actions require the right partner role.
+//! Fleet money (wallet, topup, payouts), the revenue-share ledger view + verify,
+//! analytics dashboards, and partner-funded campaigns. Reads/writes the shared
+//! partner money tables; the hash-chain writer is `saarathi_core::partner_ledger`.
 
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
+use crate::rbac::{can_manage_campaigns, can_manage_money, member_role, require_member};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
@@ -13,7 +14,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
-use saarathi_core::domain::partner_roles as pr;
+use saarathi_core::partner_ledger;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -43,34 +44,6 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-/// The caller's active partner role, or 403 if not an active member of an active
-/// partner.
-async fn member_role(st: &AppState, user_id: Uuid, partner_id: Uuid) -> AppResult<String> {
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT pm.role::text FROM partner_members pm JOIN partners p ON p.id = pm.partner_id \
-         WHERE pm.partner_id = $1 AND pm.user_id = $2 AND pm.status = 'active' AND p.status = 'active'",
-    )
-    .bind(partner_id)
-    .bind(user_id)
-    .fetch_optional(&st.db)
-    .await?;
-    row.map(|r| r.0).ok_or(AppError::Forbidden)
-}
-
-async fn require_member(st: &AppState, user_id: Uuid, partner_id: Uuid) -> AppResult<()> {
-    member_role(st, user_id, partner_id).await.map(|_| ())
-}
-
-/// Money actions: owner / admin / finance only.
-fn can_manage_money(role: &str) -> bool {
-    matches!(role, pr::OWNER | pr::ADMIN | pr::FINANCE)
-}
-
-/// Campaign actions: owner / admin / manager only.
-fn can_manage_campaigns(role: &str) -> bool {
-    matches!(role, pr::OWNER | pr::ADMIN | pr::MANAGER)
-}
-
 #[derive(sqlx::FromRow)]
 struct FleetAgg {
     total: i64,
@@ -85,7 +58,7 @@ async fn analytics(
     AuthUser(claims): AuthUser,
     Path(pid): Path<Uuid>,
 ) -> AppResult<Json<Value>> {
-    require_member(&st, claims.sub, pid).await?;
+    require_member(&st.db, claims.sub, pid).await?;
 
     let active_drivers: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM partner_drivers WHERE partner_id = $1 AND status = 'active'",
@@ -94,7 +67,6 @@ async fn analytics(
     .fetch_one(&st.db)
     .await?;
 
-    // Trips flown by drivers currently in this fleet.
     let agg: FleetAgg = sqlx::query_as(
         "SELECT count(*) AS total, \
                 count(*) FILTER (WHERE status = 'completed') AS completed, \
@@ -109,7 +81,6 @@ async fn analytics(
     .fetch_one(&st.db)
     .await?;
 
-    // Per-driver leaderboard (top earners in the fleet).
     let leaders: Vec<(Uuid, Option<String>, i64, Decimal)> = sqlx::query_as(
         "SELECT t.driver_id, u.full_name, \
                 count(*) FILTER (WHERE t.status = 'completed') AS trips, \
@@ -154,8 +125,8 @@ async fn wallet(
     AuthUser(claims): AuthUser,
     Path(pid): Path<Uuid>,
 ) -> AppResult<Json<Value>> {
-    require_member(&st, claims.sub, pid).await?;
-    let bal = crate::partner_ledger::balance(&st.db, pid).await?;
+    require_member(&st.db, claims.sub, pid).await?;
+    let bal = partner_ledger::balance(&st.db, pid).await?;
     let earned: Decimal = sqlx::query_scalar(
         "SELECT coalesce(sum(amount), 0) FROM partner_ledger WHERE partner_id = $1 AND kind = 'commission_share'",
     )
@@ -174,7 +145,7 @@ async fn ledger(
     AuthUser(claims): AuthUser,
     Path(pid): Path<Uuid>,
 ) -> AppResult<Json<Vec<LedgerRow>>> {
-    require_member(&st, claims.sub, pid).await?;
+    require_member(&st.db, claims.sub, pid).await?;
     let rows: Vec<LedgerRow> = sqlx::query_as(
         "SELECT kind, amount, balance_after, trip_id, created_at \
          FROM partner_ledger WHERE partner_id = $1 ORDER BY seq DESC LIMIT 100",
@@ -191,8 +162,8 @@ async fn verify_ledger(
     AuthUser(claims): AuthUser,
     Path(pid): Path<Uuid>,
 ) -> AppResult<Json<Value>> {
-    require_member(&st, claims.sub, pid).await?;
-    let intact = crate::partner_ledger::verify_chain(&st.db).await?;
+    require_member(&st.db, claims.sub, pid).await?;
+    let intact = partner_ledger::verify_chain(&st.db).await?;
     Ok(Json(json!({ "chain_intact": intact })))
 }
 
@@ -207,7 +178,7 @@ async fn topup(
     Path(pid): Path<Uuid>,
     Json(body): Json<TopupBody>,
 ) -> AppResult<Json<Value>> {
-    let role = member_role(&st, claims.sub, pid).await?;
+    let role = member_role(&st.db, claims.sub, pid).await?;
     if !can_manage_money(&role) {
         return Err(AppError::Forbidden);
     }
@@ -247,7 +218,7 @@ async fn confirm_topup(
     Path(pid): Path<Uuid>,
     Json(body): Json<ConfirmBody>,
 ) -> AppResult<Json<Value>> {
-    require_member(&st, claims.sub, pid).await?;
+    require_member(&st.db, claims.sub, pid).await?;
     let mut tx = st.db.begin().await?;
     let intent: Option<(Uuid, Decimal, String)> = sqlx::query_as(
         "SELECT partner_id, amount, status FROM partner_topup_intents WHERE reference = $1 FOR UPDATE",
@@ -262,7 +233,7 @@ async fn confirm_topup(
     if status == "confirmed" {
         return Ok(Json(json!({ "confirmed": true, "idempotent": true })));
     }
-    let balance = crate::partner_ledger::append(&mut tx, pid, None, "topup", amount).await?;
+    let balance = partner_ledger::append(&mut tx, pid, None, "topup", amount).await?;
     sqlx::query(
         "UPDATE partner_topup_intents SET status = 'confirmed', confirmed_at = now() WHERE reference = $1",
     )
@@ -295,7 +266,7 @@ async fn request_payout(
     Path(pid): Path<Uuid>,
     Json(body): Json<PayoutBody>,
 ) -> AppResult<Json<Value>> {
-    let role = member_role(&st, claims.sub, pid).await?;
+    let role = member_role(&st.db, claims.sub, pid).await?;
     if !can_manage_money(&role) {
         return Err(AppError::Forbidden);
     }
@@ -314,9 +285,8 @@ async fn request_payout(
         ));
     }
     let reference = st.payments.start_payout(pid, amount);
-    let balance = crate::partner_ledger::append(&mut tx, pid, None, "payout", -amount).await?;
-    // Withhold TDS; the payout settles via the PSP callback (`/v1/psp/payout/callback`).
-    let tds = (amount * st.config.tds_rate).round_dp(2);
+    let balance = partner_ledger::append(&mut tx, pid, None, "payout", -amount).await?;
+    let tds = (amount * st.tds_rate).round_dp(2);
     let net = amount - tds;
     sqlx::query(
         "INSERT INTO partner_payouts (partner_id, amount, tds_amount, net_amount, status, reference) \
@@ -345,7 +315,7 @@ async fn list_payouts(
     AuthUser(claims): AuthUser,
     Path(pid): Path<Uuid>,
 ) -> AppResult<Json<Vec<PayoutRow>>> {
-    require_member(&st, claims.sub, pid).await?;
+    require_member(&st.db, claims.sub, pid).await?;
     let rows: Vec<PayoutRow> = sqlx::query_as(
         "SELECT id, amount, tds_amount, net_amount, status, reference, created_at \
          FROM partner_payouts WHERE partner_id = $1 ORDER BY created_at DESC LIMIT 100",
@@ -379,7 +349,7 @@ async fn list_campaigns(
     AuthUser(claims): AuthUser,
     Path(pid): Path<Uuid>,
 ) -> AppResult<Json<Vec<FleetCampaign>>> {
-    require_member(&st, claims.sub, pid).await?;
+    require_member(&st.db, claims.sub, pid).await?;
     let rows: Vec<FleetCampaign> = sqlx::query_as(&format!(
         "SELECT {FLEET_CAMPAIGN_COLS} FROM campaigns WHERE partner_id = $1 ORDER BY created_at DESC"
     ))
@@ -400,16 +370,15 @@ struct NewFleetCampaign {
     min_fare: Option<Decimal>,
 }
 
-/// Create a partner-funded driver-bonus campaign for this fleet. The bonus is
-/// drawn from the fleet wallet (Phase 2: driver-side only; rider corporate tabs
-/// are Phase 3).
+/// Create a partner-funded driver-bonus campaign; the bonus is drawn from the
+/// fleet wallet (rides evaluates + deducts it at trip completion).
 async fn create_campaign(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(pid): Path<Uuid>,
     Json(body): Json<NewFleetCampaign>,
 ) -> AppResult<Json<FleetCampaign>> {
-    let role = member_role(&st, claims.sub, pid).await?;
+    let role = member_role(&st.db, claims.sub, pid).await?;
     if !can_manage_campaigns(&role) {
         return Err(AppError::Forbidden);
     }
@@ -451,7 +420,7 @@ async fn deactivate_campaign(
     AuthUser(claims): AuthUser,
     Path((pid, id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<Value>> {
-    let role = member_role(&st, claims.sub, pid).await?;
+    let role = member_role(&st.db, claims.sub, pid).await?;
     if !can_manage_campaigns(&role) {
         return Err(AppError::Forbidden);
     }

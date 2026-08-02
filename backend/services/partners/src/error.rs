@@ -1,6 +1,4 @@
-//! Uniform API error type that renders to a JSON body:
-//! `{ "error": { "code": <ErrorCode>, "message": <string> } }` — clients
-//! localize by code (see `saarathi_core::api::ErrorCode`).
+//! Uniform API error type: `{ "error": { "code", "message" } }`.
 
 use axum::{
     http::StatusCode,
@@ -12,7 +10,6 @@ use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    /// An error with an explicit status + machine-readable code.
     #[error("{2}")]
     Coded(StatusCode, ErrorCode, String),
     #[error("{0}")]
@@ -23,40 +20,32 @@ pub enum AppError {
     Forbidden,
     #[error("not found")]
     NotFound,
-    #[allow(dead_code)] // constructed via AppError::rate_limited(code, …)
-    #[error("too many requests")]
-    RateLimited,
-    #[allow(dead_code)] // reserved for 409 responses (e.g. duplicate registration)
-    #[error("{0}")]
-    Conflict(String),
     #[error(transparent)]
     Db(#[from] sqlx::Error),
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
 }
 
 impl AppError {
-    /// A 400 with a specific code.
     pub fn bad(code: ErrorCode, msg: impl Into<String>) -> Self {
         AppError::Coded(StatusCode::BAD_REQUEST, code, msg.into())
     }
-    /// A 401 with a specific code (e.g. an invalid OTP).
-    pub fn unauthorized(code: ErrorCode, msg: impl Into<String>) -> Self {
-        AppError::Coded(StatusCode::UNAUTHORIZED, code, msg.into())
-    }
-    /// A 429 with a specific code.
-    pub fn rate_limited(code: ErrorCode, msg: impl Into<String>) -> Self {
-        AppError::Coded(StatusCode::TOO_MANY_REQUESTS, code, msg.into())
-    }
-    /// A 409 with a specific code.
-    #[allow(dead_code)]
     pub fn conflict(code: ErrorCode, msg: impl Into<String>) -> Self {
         AppError::Coded(StatusCode::CONFLICT, code, msg.into())
     }
-    /// A 403 with a specific code.
-    #[allow(dead_code)]
     pub fn forbidden(code: ErrorCode, msg: impl Into<String>) -> Self {
         AppError::Coded(StatusCode::FORBIDDEN, code, msg.into())
+    }
+}
+
+impl From<saarathi_core::wallet::WalletError> for AppError {
+    fn from(e: saarathi_core::wallet::WalletError) -> Self {
+        use saarathi_core::wallet::WalletError;
+        match e {
+            WalletError::Db(db) => AppError::Db(db),
+            other => {
+                let code = other.code().unwrap_or(ErrorCode::Validation);
+                AppError::bad(code, other.to_string())
+            }
+        }
     }
 }
 
@@ -80,22 +69,8 @@ impl IntoResponse for AppError {
                 ErrorCode::NotFound,
                 "not found".into(),
             ),
-            AppError::RateLimited => (
-                StatusCode::TOO_MANY_REQUESTS,
-                ErrorCode::RateLimited,
-                "too many requests".into(),
-            ),
-            AppError::Conflict(m) => (StatusCode::CONFLICT, ErrorCode::Conflict, m),
             AppError::Db(e) => {
                 tracing::error!(error = ?e, "database error");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    ErrorCode::Internal,
-                    "internal error".into(),
-                )
-            }
-            AppError::Other(e) => {
-                tracing::error!(error = ?e, "internal error");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     ErrorCode::Internal,

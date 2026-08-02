@@ -1,18 +1,23 @@
-//! Partner-scoped portal: a partner's own staff manage their members and fleet
-//! drivers. Every route resolves the caller's membership for the path
-//! `partner_id` and checks their `partner_role` — hard tenant isolation.
+//! Partner-scoped portal: a partner's own staff manage members, fleet drivers,
+//! and corporate riders. Every route resolves the caller's membership for the
+//! path `partner_id` and checks their partner role — hard tenant isolation.
 
 use crate::audit;
+use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
-use crate::models::{PartnerRole, PartnerStatus, VehicleClass};
-use crate::state::{AppState, AuthUser};
+use crate::rbac::{
+    can_manage_drivers, can_manage_members, member_role, require_member, valid_partner_role,
+};
+use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
     routing::{get, post},
     Json, Router,
 };
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
+use saarathi_core::domain::partner_roles as pr;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
@@ -43,36 +48,12 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-/// Resolve the caller's active membership + confirm the partner is active.
-async fn require_member(
-    db: &sqlx::PgPool,
-    user_id: Uuid,
-    partner_id: Uuid,
-) -> AppResult<PartnerRole> {
-    let row: Option<(PartnerRole, PartnerStatus)> = sqlx::query_as(
-        "SELECT pm.role, p.status FROM partner_members pm JOIN partners p ON p.id = pm.partner_id \
-         WHERE pm.partner_id = $1 AND pm.user_id = $2 AND pm.status = 'active'",
-    )
-    .bind(partner_id)
-    .bind(user_id)
-    .fetch_optional(db)
-    .await?;
-    let (role, status) = row.ok_or(AppError::Forbidden)?;
-    if !matches!(status, PartnerStatus::Active) {
-        return Err(AppError::forbidden(
-            ErrorCode::PartnerSuspended,
-            "partner is not active",
-        ));
-    }
-    Ok(role)
-}
-
 #[derive(Serialize, sqlx::FromRow)]
 struct Membership {
     partner_id: Uuid,
     name: String,
-    role: PartnerRole,
-    status: PartnerStatus,
+    role: String,
+    status: String,
 }
 
 async fn memberships(
@@ -80,7 +61,7 @@ async fn memberships(
     AuthUser(claims): AuthUser,
 ) -> AppResult<Json<Vec<Membership>>> {
     let rows: Vec<Membership> = sqlx::query_as(
-        "SELECT p.id AS partner_id, p.name, pm.role, p.status \
+        "SELECT p.id AS partner_id, p.name, pm.role::text AS role, p.status::text AS status \
          FROM partner_members pm JOIN partners p ON p.id = pm.partner_id \
          WHERE pm.user_id = $1 AND pm.status = 'active' ORDER BY p.created_at",
     )
@@ -95,7 +76,7 @@ struct MemberRow {
     user_id: Uuid,
     phone: String,
     full_name: Option<String>,
-    role: PartnerRole,
+    role: String,
     created_at: DateTime<Utc>,
 }
 
@@ -106,7 +87,7 @@ async fn list_members(
 ) -> AppResult<Json<Vec<MemberRow>>> {
     require_member(&st.db, claims.sub, pid).await?;
     let rows: Vec<MemberRow> = sqlx::query_as(
-        "SELECT pm.user_id, u.phone, u.full_name, pm.role, pm.created_at \
+        "SELECT pm.user_id, u.phone, u.full_name, pm.role::text AS role, pm.created_at \
          FROM partner_members pm JOIN users u ON u.id = pm.user_id \
          WHERE pm.partner_id = $1 AND pm.status = 'active' ORDER BY pm.created_at",
     )
@@ -122,25 +103,18 @@ struct InviteMember {
     role: String,
 }
 
-fn valid_role(s: &str) -> bool {
-    matches!(
-        s,
-        "owner" | "admin" | "manager" | "dispatcher" | "finance" | "support" | "viewer"
-    )
-}
-
 async fn invite_member(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(pid): Path<Uuid>,
     Json(body): Json<InviteMember>,
 ) -> AppResult<Json<MemberRow>> {
-    let my_role = require_member(&st.db, claims.sub, pid).await?;
-    if !my_role.can_manage_members() {
+    let my_role = member_role(&st.db, claims.sub, pid).await?;
+    if !can_manage_members(&my_role) {
         return Err(AppError::Forbidden);
     }
     let phone = body.phone.trim();
-    if phone.is_empty() || !valid_role(&body.role) {
+    if phone.is_empty() || !valid_partner_role(&body.role) {
         return Err(AppError::BadRequest(
             "phone and a valid role are required".into(),
         ));
@@ -161,7 +135,7 @@ async fn invite_member(
          RETURNING user_id, \
              (SELECT phone FROM users WHERE id = partner_members.user_id) AS phone, \
              (SELECT full_name FROM users WHERE id = partner_members.user_id) AS full_name, \
-             role, created_at",
+             role::text AS role, created_at",
     )
     .bind(pid)
     .bind(user_id)
@@ -169,7 +143,7 @@ async fn invite_member(
     .bind(claims.sub)
     .fetch_one(&mut *tx)
     .await?;
-    audit_partner(&mut tx, claims.sub, pid, "partner.member.invite", user_id).await?;
+    audit::partner(&mut tx, claims.sub, pid, "partner.member.invite", user_id).await?;
     tx.commit().await?;
     Ok(Json(member))
 }
@@ -185,12 +159,12 @@ async fn set_member_role(
     Path((pid, uid)): Path<(Uuid, Uuid)>,
     Json(body): Json<SetRole>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let my_role = require_member(&st.db, claims.sub, pid).await?;
-    if !my_role.can_manage_members() || !valid_role(&body.role) {
+    let my_role = member_role(&st.db, claims.sub, pid).await?;
+    if !can_manage_members(&my_role) || !valid_partner_role(&body.role) {
         return Err(AppError::Forbidden);
     }
     // Don't allow demoting the last owner.
-    if body.role != "owner" {
+    if body.role != pr::OWNER {
         guard_last_owner(&st.db, pid, uid).await?;
     }
     let res = sqlx::query(
@@ -222,8 +196,8 @@ async fn remove_member(
     AuthUser(claims): AuthUser,
     Path((pid, uid)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let my_role = require_member(&st.db, claims.sub, pid).await?;
-    if !my_role.can_manage_members() {
+    let my_role = member_role(&st.db, claims.sub, pid).await?;
+    if !can_manage_members(&my_role) {
         return Err(AppError::Forbidden);
     }
     guard_last_owner(&st.db, pid, uid).await?;
@@ -243,14 +217,14 @@ async fn remove_member(
 
 /// Block an action that would leave the partner with no active owner.
 async fn guard_last_owner(db: &sqlx::PgPool, pid: Uuid, target: Uuid) -> AppResult<()> {
-    let target_is_owner: Option<(PartnerRole,)> = sqlx::query_as(
-        "SELECT role FROM partner_members WHERE partner_id = $1 AND user_id = $2 AND status = 'active'",
+    let target_role: Option<(String,)> = sqlx::query_as(
+        "SELECT role::text FROM partner_members WHERE partner_id = $1 AND user_id = $2 AND status = 'active'",
     )
     .bind(pid)
     .bind(target)
     .fetch_optional(db)
     .await?;
-    if matches!(target_is_owner, Some((PartnerRole::Owner,))) {
+    if matches!(&target_role, Some((r,)) if r == pr::OWNER) {
         let owners: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM partner_members WHERE partner_id = $1 AND role = 'owner' AND status = 'active'",
         )
@@ -302,7 +276,7 @@ struct AddDriver {
     phone: String,
     full_name: Option<String>,
     license_number: Option<String>,
-    vehicle_class: Option<VehicleClass>,
+    vehicle_class: Option<String>,
     plate_number: Option<String>,
 }
 
@@ -312,13 +286,20 @@ async fn add_driver(
     Path(pid): Path<Uuid>,
     Json(body): Json<AddDriver>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let my_role = require_member(&st.db, claims.sub, pid).await?;
-    if !my_role.can_manage_drivers() {
+    let my_role = member_role(&st.db, claims.sub, pid).await?;
+    if !can_manage_drivers(&my_role) {
         return Err(AppError::Forbidden);
     }
     let phone = body.phone.trim();
     if phone.is_empty() {
         return Err(AppError::BadRequest("phone is required".into()));
+    }
+    if let Some(c) = &body.vehicle_class {
+        if !matches!(c.as_str(), "two_wheeler" | "four_wheeler") {
+            return Err(AppError::BadRequest(
+                "vehicle_class must be 'two_wheeler' or 'four_wheeler'".into(),
+            ));
+        }
     }
 
     let mut tx = st.db.begin().await?;
@@ -335,7 +316,7 @@ async fn add_driver(
     .fetch_one(&mut *tx)
     .await?;
 
-    // Ensure a driver profile exists (KYC starts pending; staff can approve later).
+    // Ensure a driver profile exists (KYC starts pending; staff approve later).
     let driver_id: Uuid = sqlx::query_scalar(
         "INSERT INTO drivers (user_id, license_number, kyc_status) VALUES ($1, $2, 'pending') \
          ON CONFLICT (user_id) DO UPDATE SET \
@@ -348,10 +329,12 @@ async fn add_driver(
     .await?;
 
     // Optional vehicle capture.
-    if let (Some(class), Some(plate)) = (body.vehicle_class, body.plate_number.as_deref()) {
+    if let (Some(class), Some(plate)) =
+        (body.vehicle_class.as_deref(), body.plate_number.as_deref())
+    {
         if !plate.trim().is_empty() {
             sqlx::query(
-                "INSERT INTO vehicles (driver_id, class, plate_number) VALUES ($1, $2, $3)",
+                "INSERT INTO vehicles (driver_id, class, plate_number) VALUES ($1, $2::vehicle_class, $3)",
             )
             .bind(driver_id)
             .bind(class)
@@ -380,7 +363,7 @@ async fn add_driver(
     }
     linked?;
 
-    audit_partner(&mut tx, claims.sub, pid, "partner.driver.add", user_id).await?;
+    audit::partner(&mut tx, claims.sub, pid, "partner.driver.add", user_id).await?;
     tx.commit().await?;
     Ok(Json(
         json!({ "driver_user_id": user_id, "status": "active" }),
@@ -398,8 +381,8 @@ async fn set_driver_status(
     Path((pid, driver_user_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<SetDriverStatus>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let my_role = require_member(&st.db, claims.sub, pid).await?;
-    if !my_role.can_manage_drivers() {
+    let my_role = member_role(&st.db, claims.sub, pid).await?;
+    if !can_manage_drivers(&my_role) {
         return Err(AppError::Forbidden);
     }
     if !matches!(body.status.as_str(), "active" | "suspended" | "left") {
@@ -436,7 +419,7 @@ struct FleetRider {
     phone: String,
     full_name: Option<String>,
     status: String,
-    monthly_cap: Option<rust_decimal::Decimal>,
+    monthly_cap: Option<Decimal>,
     joined_at: DateTime<Utc>,
 }
 
@@ -461,7 +444,7 @@ async fn list_riders(
 struct AddRider {
     phone: String,
     full_name: Option<String>,
-    monthly_cap: Option<rust_decimal::Decimal>,
+    monthly_cap: Option<Decimal>,
 }
 
 async fn add_rider(
@@ -470,8 +453,8 @@ async fn add_rider(
     Path(pid): Path<Uuid>,
     Json(body): Json<AddRider>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let my_role = require_member(&st.db, claims.sub, pid).await?;
-    if !my_role.can_manage_drivers() {
+    let my_role = member_role(&st.db, claims.sub, pid).await?;
+    if !can_manage_drivers(&my_role) {
         return Err(AppError::Forbidden);
     }
     let phone = body.phone.trim();
@@ -507,7 +490,7 @@ async fn add_rider(
         }
     }
     linked?;
-    audit_partner(&mut tx, claims.sub, pid, "partner.rider.add", user_id).await?;
+    audit::partner(&mut tx, claims.sub, pid, "partner.rider.add", user_id).await?;
     tx.commit().await?;
     Ok(Json(
         json!({ "rider_user_id": user_id, "status": "active" }),
@@ -525,8 +508,8 @@ async fn set_rider_status(
     Path((pid, rider_user_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<SetRiderStatus>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let my_role = require_member(&st.db, claims.sub, pid).await?;
-    if !my_role.can_manage_drivers() {
+    let my_role = member_role(&st.db, claims.sub, pid).await?;
+    if !can_manage_drivers(&my_role) {
         return Err(AppError::Forbidden);
     }
     if !matches!(body.status.as_str(), "active" | "suspended" | "left") {
@@ -541,37 +524,9 @@ async fn set_rider_status(
     .bind(rider_user_id)
     .bind(&body.status)
     .execute(&st.db)
-    .await
-    .map_err(|e| match e {
-        sqlx::Error::Database(db) if db.is_unique_violation() => AppError::conflict(
-            ErrorCode::Conflict,
-            "this rider is already on a corporate tab",
-        ),
-        other => AppError::Db(other),
-    })?;
+    .await?;
     if res.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
     Ok(Json(json!({ "ok": true, "status": body.status })))
-}
-
-/// Partner-scoped audit entry (records the acting partner on the row).
-async fn audit_partner(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    actor: Uuid,
-    partner_id: Uuid,
-    action: &str,
-    entity_id: Uuid,
-) -> AppResult<()> {
-    sqlx::query(
-        "INSERT INTO audit_log (actor_user_id, action, entity_type, entity_id, partner_id) \
-         VALUES ($1, $2, 'partner', $3, $4)",
-    )
-    .bind(actor)
-    .bind(action)
-    .bind(entity_id)
-    .bind(partner_id)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
 }

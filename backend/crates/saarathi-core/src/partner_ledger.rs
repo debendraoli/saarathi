@@ -5,8 +5,62 @@
 use crate::ledger::{chain_hash, GENESIS_HASH};
 use crate::wallet::WalletError;
 use rust_decimal::Decimal;
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
+
+/// Current partner wallet balance (read-only). Zero if the partner has no wallet yet.
+pub async fn balance(pool: &PgPool, partner_id: Uuid) -> Result<Decimal, WalletError> {
+    let b: Option<(Decimal,)> =
+        sqlx::query_as("SELECT balance FROM partner_wallets WHERE partner_id = $1")
+            .bind(partner_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(b.map(|x| x.0).unwrap_or(Decimal::ZERO))
+}
+
+#[derive(sqlx::FromRow)]
+struct ChainRow {
+    seq: i64,
+    partner_id: Uuid,
+    trip_id: Option<Uuid>,
+    kind: String,
+    amount: Decimal,
+    balance_after: Decimal,
+    prev_hash: String,
+    entry_hash: String,
+    created_at_unix: i64,
+}
+
+/// Recompute the whole partner chain and confirm every link + hash is intact.
+pub async fn verify_chain(pool: &PgPool) -> Result<bool, WalletError> {
+    let rows: Vec<ChainRow> = sqlx::query_as(
+        "SELECT seq, partner_id, trip_id, kind, amount, balance_after, prev_hash, entry_hash, \
+                extract(epoch FROM created_at)::bigint AS created_at_unix \
+         FROM partner_ledger ORDER BY seq",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut expected_prev = GENESIS_HASH.to_string();
+    for r in &rows {
+        if r.prev_hash != expected_prev {
+            return Ok(false);
+        }
+        let payload = format!(
+            "{}|{}|{}|{}|{}|{}",
+            r.partner_id,
+            r.trip_id.map(|t| t.to_string()).unwrap_or_default(),
+            r.kind,
+            r.amount.round_dp(2),
+            r.balance_after.round_dp(2),
+            r.created_at_unix,
+        );
+        if chain_hash(r.seq, &r.prev_hash, &payload) != r.entry_hash {
+            return Ok(false);
+        }
+        expected_prev = r.entry_hash.clone();
+    }
+    Ok(true)
+}
 
 /// Append one signed movement to the partner chain and move the wallet, atomically.
 /// `amount` is signed (+ owed to partner, − spent/withdrawn). Returns the new balance.

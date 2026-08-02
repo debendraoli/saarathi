@@ -1,11 +1,10 @@
 //! Platform-admin partner governance: onboard fleet partners, set their
-//! commission share, and suspend/activate them. Partner-scoped staff manage
-//! their own fleet via `partner_portal_routes`.
+//! commission share, suspend/activate. Staff-only (super_admin / admin).
 
 use crate::audit;
+use crate::auth::AdminUser;
 use crate::error::{AppError, AppResult};
-use crate::models::{PartnerStatus, PartnerType, UserRole};
-use crate::state::{AppState, StaffUser};
+use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::{routing::get, Json, Router};
 use chrono::{DateTime, Utc};
@@ -21,23 +20,14 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/admin/partners/{id}", get(detail).put(update))
 }
 
-/// Only super-admins and admins govern partners.
-fn require_partner_admin(role: UserRole) -> AppResult<()> {
-    if matches!(role, UserRole::SuperAdmin | UserRole::Admin) {
-        Ok(())
-    } else {
-        Err(AppError::Forbidden)
-    }
-}
-
 #[derive(Serialize, sqlx::FromRow)]
 struct Partner {
     id: Uuid,
     name: String,
     legal_name: Option<String>,
     #[sqlx(rename = "type")]
-    partner_type: PartnerType,
-    status: PartnerStatus,
+    partner_type: String,
+    status: String,
     city: Option<String>,
     contact_phone: Option<String>,
     contact_email: Option<String>,
@@ -46,8 +36,8 @@ struct Partner {
     created_at: DateTime<Utc>,
 }
 
-const PARTNER_COLS: &str = "id, name, legal_name, type AS \"type\", status, city, contact_phone, \
-    contact_email, pan_vat, commission_share, created_at";
+const PARTNER_COLS: &str = "id, name, legal_name, type::text AS \"type\", status::text AS status, \
+    city, contact_phone, contact_email, pan_vat, commission_share, created_at";
 
 #[derive(Deserialize)]
 struct NewPartner {
@@ -55,7 +45,7 @@ struct NewPartner {
     owner_phone: String,
     legal_name: Option<String>,
     #[serde(default)]
-    partner_type: Option<PartnerType>,
+    partner_type: Option<String>,
     city: Option<String>,
     contact_email: Option<String>,
     pan_vat: Option<String>,
@@ -65,10 +55,9 @@ struct NewPartner {
 
 async fn create(
     State(st): State<AppState>,
-    StaffUser(claims): StaffUser,
+    AdminUser(claims): AdminUser,
     Json(body): Json<NewPartner>,
 ) -> AppResult<Json<Partner>> {
-    require_partner_admin(claims.role)?;
     if body.name.trim().is_empty() {
         return Err(AppError::BadRequest("name is required".into()));
     }
@@ -76,23 +65,28 @@ async fn create(
     if owner_phone.is_empty() {
         return Err(AppError::BadRequest("owner_phone is required".into()));
     }
+    let ptype = body.partner_type.unwrap_or_else(|| "fleet".into());
+    if !matches!(ptype.as_str(), "fleet" | "corporate" | "agent") {
+        return Err(AppError::BadRequest(
+            "partner_type must be 'fleet', 'corporate', or 'agent'".into(),
+        ));
+    }
     // Partner share is carved from (and clamped to) the legal commission cap.
     let share = body
         .commission_share
         .unwrap_or(Decimal::ZERO)
         .max(Decimal::ZERO)
         .min(MAX_COMMISSION_RATE);
-    let ptype = body.partner_type.unwrap_or(PartnerType::Fleet);
 
     let mut tx = st.db.begin().await?;
     let partner: Partner = sqlx::query_as(&format!(
         "INSERT INTO partners (name, legal_name, type, city, contact_phone, contact_email, \
             pan_vat, commission_share, onboarded_by) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING {PARTNER_COLS}"
+         VALUES ($1,$2,$3::partner_type,$4,$5,$6,$7,$8,$9) RETURNING {PARTNER_COLS}"
     ))
     .bind(body.name.trim())
     .bind(body.legal_name)
-    .bind(ptype)
+    .bind(&ptype)
     .bind(body.city)
     .bind(owner_phone)
     .bind(body.contact_email)
@@ -119,6 +113,7 @@ async fn create(
     .bind(claims.sub)
     .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     audit::record(
         &st.db,
@@ -129,7 +124,6 @@ async fn create(
         json!({ "owner_phone": owner_phone }),
     )
     .await?;
-    tx.commit().await?;
     Ok(Json(partner))
 }
 
@@ -140,19 +134,16 @@ struct ListQuery {
 
 async fn list(
     State(st): State<AppState>,
-    StaffUser(claims): StaffUser,
+    _admin: AdminUser,
     Query(q): Query<ListQuery>,
 ) -> AppResult<Json<Vec<Partner>>> {
-    require_partner_admin(claims.role)?;
     let rows: Vec<Partner> = match q.status {
-        Some(s) => {
-            sqlx::query_as(&format!(
+        Some(s) => sqlx::query_as(&format!(
             "SELECT {PARTNER_COLS} FROM partners WHERE status::text = $1 ORDER BY created_at DESC"
         ))
-            .bind(s)
-            .fetch_all(&st.db)
-            .await?
-        }
+        .bind(s)
+        .fetch_all(&st.db)
+        .await?,
         None => {
             sqlx::query_as(&format!(
                 "SELECT {PARTNER_COLS} FROM partners ORDER BY created_at DESC"
@@ -173,10 +164,9 @@ struct PartnerDetail {
 
 async fn detail(
     State(st): State<AppState>,
-    StaffUser(claims): StaffUser,
+    _admin: AdminUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<PartnerDetail>> {
-    require_partner_admin(claims.role)?;
     let partner: Partner = sqlx::query_as(&format!(
         "SELECT {PARTNER_COLS} FROM partners WHERE id = $1"
     ))
@@ -212,11 +202,10 @@ struct UpdatePartner {
 
 async fn update(
     State(st): State<AppState>,
-    StaffUser(claims): StaffUser,
+    AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdatePartner>,
 ) -> AppResult<Json<Partner>> {
-    require_partner_admin(claims.role)?;
     if let Some(s) = &body.status {
         if !matches!(
             s.as_str(),

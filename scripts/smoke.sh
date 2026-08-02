@@ -18,6 +18,7 @@ NOTIFY="${NOTIFY:-http://localhost:8083}"
 ROUTING="${ROUTING:-http://localhost:8084}"
 PAYMENTS="${PAYMENTS:-http://localhost:8085}"
 CAMPAIGNS="${CAMPAIGNS:-http://localhost:8086}"
+PARTNERS="${PARTNERS:-http://localhost:8087}"
 ADMIN_PHONE="${SEED_DEV_ADMIN_PHONE:-+9779800000000}"
 
 command -v jq >/dev/null || { echo "jq is required"; exit 1; }
@@ -31,6 +32,7 @@ j "$NOTIFY/health" | jq -e '.status=="ok"' >/dev/null && echo "  notify ok"
 j "$ROUTING/health" | jq -e '.status=="ok"' >/dev/null && echo "  routing ok"
 j "$PAYMENTS/health" | jq -e '.status=="ok"' >/dev/null && echo "  payments ok"
 j "$CAMPAIGNS/health" | jq -e '.status=="ok"' >/dev/null && echo "  campaigns ok"
+j "$PARTNERS/health" | jq -e '.status=="ok"' >/dev/null && echo "  partners ok"
 
 login() { # phone [as_driver] -> token pair JSON on stdout
   local phone="$1" as_driver="${2:-false}" code
@@ -414,29 +416,29 @@ echo "  rule engine: new rider disc=NPR $NEWDISC, veteran disc=NPR $VETDISC (ine
 
 step "fleet partnership (phase 1: tenancy + fleet management)"
 OWNER_PHONE="+97798$(( RANDOM % 900000 + 100000 ))"
-PID=$(j -X POST "$API/v1/admin/partners" -H "authorization: Bearer $ADMIN_TOKEN" \
+PID=$(j -X POST "$PARTNERS/v1/admin/partners" -H "authorization: Bearer $ADMIN_TOKEN" \
   -H 'content-type: application/json' \
   -d "{\"name\":\"Ghorahi Moto Fleet\",\"owner_phone\":\"$OWNER_PHONE\",\"commission_share\":0.04}" | jq -r '.id')
 [ -n "$PID" ] && [ "$PID" != "null" ] || { echo "  partner create failed"; exit 1; }
 OWNER_TOKEN=$(login "$OWNER_PHONE" | jq -r '.access_token')
-MYROLE=$(j "$API/v1/partner/memberships" -H "authorization: Bearer $OWNER_TOKEN" \
+MYROLE=$(j "$PARTNERS/v1/partner/memberships" -H "authorization: Bearer $OWNER_TOKEN" \
   | jq -r --arg p "$PID" '.[] | select(.partner_id==$p) | .role')
 [ "$MYROLE" = "owner" ] || { echo "  owner membership missing ($MYROLE)"; exit 1; }
 MGR_PHONE="+97798$(( RANDOM % 900000 + 100000 ))"
-j -X POST "$API/v1/partner/$PID/members" -H "authorization: Bearer $OWNER_TOKEN" \
+j -X POST "$PARTNERS/v1/partner/$PID/members" -H "authorization: Bearer $OWNER_TOKEN" \
   -H 'content-type: application/json' -d "{\"phone\":\"$MGR_PHONE\",\"role\":\"manager\"}" >/dev/null
 MGR_TOKEN=$(login "$MGR_PHONE" | jq -r '.access_token')
-j -X POST "$API/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" \
+j -X POST "$PARTNERS/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" \
   -H 'content-type: application/json' -d "{\"phone\":\"$DPHONE\"}" >/dev/null
-ROSTER=$(j "$API/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" | jq 'length')
+ROSTER=$(j "$PARTNERS/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" | jq 'length')
 [ "$ROSTER" -ge 1 ] || { echo "  fleet roster empty"; exit 1; }
-FLEET_TRIPS=$(j "$RIDES/v1/partner/$PID/analytics" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.trips.completed')
+FLEET_TRIPS=$(j "$PARTNERS/v1/partner/$PID/analytics" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.trips.completed')
 awk -v t="$FLEET_TRIPS" 'BEGIN{exit !(t+0>=1)}' \
   || { echo "  fleet analytics missing trips ($FLEET_TRIPS)"; exit 1; }
-PID2=$(j -X POST "$API/v1/admin/partners" -H "authorization: Bearer $ADMIN_TOKEN" \
+PID2=$(j -X POST "$PARTNERS/v1/admin/partners" -H "authorization: Bearer $ADMIN_TOKEN" \
   -H 'content-type: application/json' \
   -d "{\"name\":\"Tulsipur Fleet\",\"owner_phone\":\"+97798$(( RANDOM % 900000 + 100000 ))\"}" | jq -r '.id')
-FORBID=$(curl -sS -o /dev/null -w '%{http_code}' "$API/v1/partner/$PID2/drivers" -H "authorization: Bearer $MGR_TOKEN")
+FORBID=$(curl -sS -o /dev/null -w '%{http_code}' "$PARTNERS/v1/partner/$PID2/drivers" -H "authorization: Bearer $MGR_TOKEN")
 [ "$FORBID" = "403" ] || { echo "  tenant isolation breach (got $FORBID)"; exit 1; }
 echo "  partner onboarded; owner→manager→driver; fleet completed trips=$FLEET_TRIPS; cross-tenant=$FORBID (isolated)"
 
@@ -453,7 +455,7 @@ j -X POST "$API/v1/driver/documents" -H "authorization: Bearer $FDTOKEN" \
 FDID=$(j "$API/v1/admin/drivers?status=queue" -H "authorization: Bearer $ADMIN_TOKEN" \
   | jq -r --arg p "$FDPHONE" '.[] | select(.phone==$p) | .id' | head -n1)
 j -X POST "$API/v1/admin/drivers/$FDID/approve" -H "authorization: Bearer $ADMIN_TOKEN" >/dev/null
-j -X POST "$API/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" \
+j -X POST "$PARTNERS/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" \
   -H 'content-type: application/json' -d "{\"phone\":\"$FDPHONE\"}" >/dev/null
 
 fleet_trip() { # completes a trip driven by the fleet driver via ops-assign; echoes trip id
@@ -470,27 +472,27 @@ fleet_trip() { # completes a trip driven by the fleet driver via ops-assign; ech
 }
 
 fleet_trip >/dev/null   # first fleet trip → partner earns its revenue-share
-SHARE=$(j "$RIDES/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.balance')
+SHARE=$(j "$PARTNERS/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.balance')
 awk -v s="$SHARE" 'BEGIN{exit !(s+0>0)}' \
   || { echo "  partner revenue-share not accrued ($SHARE)"; exit 1; }
 
 # Owner tops up the fleet wallet and launches a partner-funded driver bonus.
-TREF=$(j -X POST "$RIDES/v1/partner/$PID/wallet/topup" -H "authorization: Bearer $OWNER_TOKEN" \
+TREF=$(j -X POST "$PARTNERS/v1/partner/$PID/wallet/topup" -H "authorization: Bearer $OWNER_TOKEN" \
   -H 'content-type: application/json' -d '{"amount":500}' | jq -r '.reference')
-j -X POST "$RIDES/v1/partner/$PID/wallet/topup/confirm" -H "authorization: Bearer $OWNER_TOKEN" \
+j -X POST "$PARTNERS/v1/partner/$PID/wallet/topup/confirm" -H "authorization: Bearer $OWNER_TOKEN" \
   -H 'content-type: application/json' -d "{\"reference\":\"$TREF\"}" >/dev/null
-j -X POST "$RIDES/v1/partner/$PID/campaigns" -H "authorization: Bearer $OWNER_TOKEN" \
+j -X POST "$PARTNERS/v1/partner/$PID/campaigns" -H "authorization: Bearer $OWNER_TOKEN" \
   -H 'content-type: application/json' -d '{"code":"FLEET10","title":"Fleet bonus","kind":"flat","value":10}' >/dev/null
 
 fleet_trip >/dev/null   # next fleet trip → partner-funded bonus paid from the wallet
-FUSED=$(j "$RIDES/v1/partner/$PID/campaigns" -H "authorization: Bearer $OWNER_TOKEN" \
+FUSED=$(j "$PARTNERS/v1/partner/$PID/campaigns" -H "authorization: Bearer $OWNER_TOKEN" \
   | jq -r '.[] | select(.code=="FLEET10") | .used_count')
 awk -v u="$FUSED" 'BEGIN{exit !(u+0>=1)}' || { echo "  fleet bonus not granted ($FUSED)"; exit 1; }
-SPENT=$(j "$RIDES/v1/partner/$PID/ledger" -H "authorization: Bearer $OWNER_TOKEN" \
+SPENT=$(j "$PARTNERS/v1/partner/$PID/ledger" -H "authorization: Bearer $OWNER_TOKEN" \
   | jq '[.[] | select(.kind=="promo_spend")] | length')
 [ "$SPENT" -ge 1 ] || { echo "  fleet bonus not debited from wallet"; exit 1; }
 
-PPOUT=$(j -X POST "$RIDES/v1/partner/$PID/payouts" -H "authorization: Bearer $OWNER_TOKEN" \
+PPOUT=$(j -X POST "$PARTNERS/v1/partner/$PID/payouts" -H "authorization: Bearer $OWNER_TOKEN" \
   -H 'content-type: application/json' -d '{}')
 PPREF=$(echo "$PPOUT" | jq -r '.reference'); PPNET=$(echo "$PPOUT" | jq -r '.net')
 j -X POST "$PAYMENTS/v1/psp/payout/callback" -H 'content-type: application/json' \
@@ -500,15 +502,15 @@ echo "  revenue-share=NPR $SHARE; wallet topup → fleet bonus used=$FUSED (debi
 step "fleet partnership (phase 3: corporate rider tab + ledger integrity)"
 # Owner puts a rider on the company tab with a monthly cap.
 CRPHONE="+97797$(( RANDOM % 900000 + 100000 ))"
-j -X POST "$API/v1/partner/$PID/riders" -H "authorization: Bearer $OWNER_TOKEN" \
+j -X POST "$PARTNERS/v1/partner/$PID/riders" -H "authorization: Bearer $OWNER_TOKEN" \
   -H 'content-type: application/json' -d "{\"phone\":\"$CRPHONE\",\"monthly_cap\":2000}" >/dev/null
 CRTOKEN=$(login "$CRPHONE" | jq -r '.access_token')
 # Fund the company wallet so it can cover corporate rides.
-TREF2=$(j -X POST "$RIDES/v1/partner/$PID/wallet/topup" -H "authorization: Bearer $OWNER_TOKEN" \
+TREF2=$(j -X POST "$PARTNERS/v1/partner/$PID/wallet/topup" -H "authorization: Bearer $OWNER_TOKEN" \
   -H 'content-type: application/json' -d '{"amount":1000}' | jq -r '.reference')
-j -X POST "$RIDES/v1/partner/$PID/wallet/topup/confirm" -H "authorization: Bearer $OWNER_TOKEN" \
+j -X POST "$PARTNERS/v1/partner/$PID/wallet/topup/confirm" -H "authorization: Bearer $OWNER_TOKEN" \
   -H 'content-type: application/json' -d "{\"reference\":\"$TREF2\"}" >/dev/null
-BAL0=$(j "$RIDES/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.balance')
+BAL0=$(j "$PARTNERS/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.balance')
 # The corporate rider books on the company tab; a fleet driver completes it.
 CT=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $CRTOKEN" -H 'content-type: application/json' \
   -d '{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler","payment_method":"corporate"}' | jq -r '.id')
@@ -518,14 +520,14 @@ for s in arriving in_progress completed; do
   j -X POST "$RIDES/v1/rides/$CT/status" -H "authorization: Bearer $FDTOKEN" \
     -H 'content-type: application/json' -d "{\"status\":\"$s\"}" >/dev/null
 done
-CHARGED=$(j "$RIDES/v1/partner/$PID/ledger" -H "authorization: Bearer $OWNER_TOKEN" \
+CHARGED=$(j "$PARTNERS/v1/partner/$PID/ledger" -H "authorization: Bearer $OWNER_TOKEN" \
   | jq '[.[] | select(.kind=="ride_charge")] | length')
 [ "$CHARGED" -ge 1 ] || { echo "  corporate ride not charged to company wallet"; exit 1; }
 RIDER_CREDITS=$(j "$PAYMENTS/v1/credits" -H "authorization: Bearer $CRTOKEN" | jq -r '.balance')
 awk -v b="$RIDER_CREDITS" 'BEGIN{exit !(b+0==0)}' \
   || { echo "  corporate rider charged personally ($RIDER_CREDITS)"; exit 1; }
-BAL1=$(j "$RIDES/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.balance')
-INTACT=$(j "$RIDES/v1/partner/$PID/ledger/verify" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.chain_intact')
+BAL1=$(j "$PARTNERS/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.balance')
+INTACT=$(j "$PARTNERS/v1/partner/$PID/ledger/verify" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.chain_intact')
 [ "$INTACT" = "true" ] || { echo "  partner ledger chain broken"; exit 1; }
 echo "  corporate tab: wallet ${BAL0} -> ${BAL1}, ride_charges=$CHARGED, rider paid NPR 0; ledger intact=$INTACT"
 

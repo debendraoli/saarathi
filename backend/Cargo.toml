@@ -8,6 +8,7 @@ members = [
     "services/routing",
     "services/payments",
     "services/campaigns",
+    "services/partners",
 ]
 
 [workspace.package]

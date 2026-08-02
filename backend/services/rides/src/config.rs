@@ -40,8 +40,6 @@ pub struct Config {
     /// Weekly driver subscription pass (unlimited rides, keep 100% of fares).
     pub subscription_weekly_price: Decimal,
     pub subscription_weekly_days: i64,
-    /// Tax deducted at source on payouts (recipient nets amount − TDS).
-    pub tds_rate: Decimal,
     /// VAT rate applied to the platform's commission (reporting / liability).
     pub vat_rate: Decimal,
     /// Parcel delivery pricing (config-driven; not bound by the ride per-km caps).
@@ -85,7 +83,6 @@ impl Config {
             bargain_floor_ratio: dec_env("BARGAIN_FLOOR_RATIO", "0.5"),
             subscription_weekly_price: dec_env("SUBSCRIPTION_WEEKLY_PRICE", "500"),
             subscription_weekly_days: int_env("SUBSCRIPTION_WEEKLY_DAYS", 7),
-            tds_rate: dec_env("PAYOUT_TDS_RATE", "0.015"),
             vat_rate: dec_env("VAT_RATE", "0.13"),
             delivery_base_fare: dec_env("DELIVERY_BASE_FARE", "30"),
             delivery_per_km: dec_env("DELIVERY_PER_KM", "15"),

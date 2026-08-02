@@ -93,6 +93,7 @@ pub enum VehicleClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "partner_type", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // canonical mapping of the PG enum; queries read it via ::text
 pub enum PartnerType {
     Fleet,
     Corporate,
@@ -102,6 +103,7 @@ pub enum PartnerType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "partner_status", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // canonical mapping of the PG enum; queries read it via ::text
 pub enum PartnerStatus {
     Pending,
     Active,
@@ -113,6 +115,7 @@ pub enum PartnerStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "partner_role", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)] // canonical mapping of the PG enum; queries read it via ::text
 pub enum PartnerRole {
     Owner,
     Admin,
@@ -125,10 +128,12 @@ pub enum PartnerRole {
 
 impl PartnerRole {
     /// Manage members (invite / set role / remove).
+    #[allow(dead_code)]
     pub fn can_manage_members(self) -> bool {
         matches!(self, PartnerRole::Owner | PartnerRole::Admin)
     }
     /// Add / release / suspend fleet drivers.
+    #[allow(dead_code)]
     pub fn can_manage_drivers(self) -> bool {
         matches!(
             self,
