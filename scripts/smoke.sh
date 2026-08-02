@@ -10,15 +10,19 @@
 #
 # Override endpoints via API / RIDES env vars. Requires OTP_DEV_MODE=true so the
 # OTP is echoed back (default in backend/.env).
+# Override endpoints via env vars. By default all client traffic flows through
+# the API gateway (Traefik, :8080); set GATEWAY= to change it. Requires
+# OTP_DEV_MODE=true so the OTP is echoed back (default in backend/.env).
 set -euo pipefail
 
-API="${API:-http://localhost:8081}"
-RIDES="${RIDES:-http://localhost:8082}"
-NOTIFY="${NOTIFY:-http://localhost:8083}"
-ROUTING="${ROUTING:-http://localhost:8084}"
-PAYMENTS="${PAYMENTS:-http://localhost:8085}"
-CAMPAIGNS="${CAMPAIGNS:-http://localhost:8086}"
-PARTNERS="${PARTNERS:-http://localhost:8087}"
+GW="${GATEWAY:-http://localhost:8080}"       # single front door (Traefik gateway)
+API="${API:-$GW}"
+RIDES="${RIDES:-$GW}"
+NOTIFY="${NOTIFY:-$GW}"
+PAYMENTS="${PAYMENTS:-$GW}"
+CAMPAIGNS="${CAMPAIGNS:-$GW}"
+PARTNERS="${PARTNERS:-$GW}"
+ROUTING="${ROUTING:-http://localhost:8084}"  # internal (rides→routing); not exposed via gateway
 ADMIN_PHONE="${SEED_DEV_ADMIN_PHONE:-+9779800000000}"
 
 command -v jq >/dev/null || { echo "jq is required"; exit 1; }
@@ -26,13 +30,18 @@ j() { curl -fsS "$@"; }
 step() { printf '\n▶ %s\n' "$1"; }
 
 step "health checks"
-j "$API/health"   | jq -e '.status=="ok"' >/dev/null && echo "  auth ok"
-j "$RIDES/health" | jq -e '.status=="ok"' >/dev/null && echo "  rides ok"
-j "$NOTIFY/health" | jq -e '.status=="ok"' >/dev/null && echo "  notify ok"
-j "$ROUTING/health" | jq -e '.status=="ok"' >/dev/null && echo "  routing ok"
-j "$PAYMENTS/health" | jq -e '.status=="ok"' >/dev/null && echo "  payments ok"
-j "$CAMPAIGNS/health" | jq -e '.status=="ok"' >/dev/null && echo "  campaigns ok"
-j "$PARTNERS/health" | jq -e '.status=="ok"' >/dev/null && echo "  partners ok"
+# Liveness probes hit the services directly (as k8s does); /health isn't routed.
+j "http://localhost:8081/health" | jq -e '.status=="ok"' >/dev/null && echo "  auth ok"
+j "http://localhost:8082/health" | jq -e '.status=="ok"' >/dev/null && echo "  rides ok"
+j "http://localhost:8083/health" | jq -e '.status=="ok"' >/dev/null && echo "  notify ok"
+j "http://localhost:8084/health" | jq -e '.status=="ok"' >/dev/null && echo "  routing ok"
+j "http://localhost:8085/health" | jq -e '.status=="ok"' >/dev/null && echo "  payments ok"
+j "http://localhost:8086/health" | jq -e '.status=="ok"' >/dev/null && echo "  campaigns ok"
+j "http://localhost:8087/health" | jq -e '.status=="ok"' >/dev/null && echo "  partners ok"
+# The gateway routes an unauthenticated call to notify → 401 proves path routing.
+GWCODE=$(curl -sS -o /dev/null -w '%{http_code}' "$GW/v1/notifications")
+[ "$GWCODE" = "401" ] || { echo "  gateway not routing (got $GWCODE)"; exit 1; }
+echo "  gateway routing ok (:8080 → services)"
 
 login() { # phone [as_driver] -> token pair JSON on stdout
   local phone="$1" as_driver="${2:-false}" code

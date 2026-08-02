@@ -1,0 +1,73 @@
+# Production API gateway — k3s ships Traefik as its default ingress, so these
+# IngressRoute CRDs are the 1:1 prod mirror of the local gateway route table in
+# backend/traefik/dynamic/routes.yml. Same path rules, but the upstreams are
+# in-cluster Services instead of host ports.
+#
+# `saarathi-routing` has NO IngressRoute on purpose — it's an internal ClusterIP
+# Service that only `rides` calls (east-west); never publicly reachable.
+#
+# Assumptions: each service is a ClusterIP Service named `saarathi-<svc>` exposing
+# port 80. TLS is terminated here via the `websecure` entrypoint + a cert
+# resolver / stored certificate (wire up cert-manager or Traefik ACME in infra).
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: saarathi-api
+  namespace: saarathi
+spec:
+  entryPoints: ["websecure"]
+  routes:
+    - kind: Rule
+      match: >-
+        PathPrefix(`/v1/auth`) || PathPrefix(`/v1/me`)
+        || PathPrefix(`/v1/driver/register`) || PathPrefix(`/v1/driver/documents`) || PathPrefix(`/v1/driver/status`)
+        || PathPrefix(`/v1/admin/drivers`) || PathPrefix(`/v1/admin/documents`)
+      services:
+        - name: saarathi-auth
+          port: 80
+
+    - kind: Rule
+      match: >-
+        PathPrefix(`/v1/rides`) || PathPrefix(`/v1/delivery`) || PathPrefix(`/v1/wallet`)
+        || PathPrefix(`/v1/ws`) || PathPrefix(`/v1/events`) || PathPrefix(`/v1/flags`)
+        || PathPrefix(`/v1/reports`) || PathPrefix(`/v1/credit-plans`) || PathPrefix(`/v1/drivers`)
+        || PathPrefix(`/v1/driver/analytics`) || PathPrefix(`/v1/driver/credits`)
+        || PathPrefix(`/v1/driver/heartbeat`) || PathPrefix(`/v1/driver/offers`)
+        || PathPrefix(`/v1/driver/offline`) || PathPrefix(`/v1/driver/online`)
+        || PathPrefix(`/v1/driver/subscription`)
+        || PathPrefix(`/v1/admin/analytics`) || PathPrefix(`/v1/admin/cancellations`)
+        || PathPrefix(`/v1/admin/credit-plans`) || PathPrefix(`/v1/admin/flags`)
+        || PathPrefix(`/v1/admin/leaderboard`) || PathPrefix(`/v1/admin/ledger`)
+        || PathPrefix(`/v1/admin/reports`) || PathPrefix(`/v1/admin/rides`)
+        || PathPrefix(`/v1/admin/sos`) || PathPrefix(`/v1/admin/subscriptions`)
+        || PathPrefix(`/v1/admin/surge`) || PathPrefix(`/v1/admin/trips`)
+      services:
+        - name: saarathi-rides
+          port: 80
+
+    - kind: Rule
+      match: PathPrefix(`/v1/notifications`)
+      services:
+        - name: saarathi-notify
+          port: 80
+
+    - kind: Rule
+      match: >-
+        PathPrefix(`/v1/credits`) || PathPrefix(`/v1/payouts`) || PathPrefix(`/v1/psp`)
+        || PathPrefix(`/v1/admin/payouts`)
+      services:
+        - name: saarathi-payments
+          port: 80
+
+    - kind: Rule
+      match: PathPrefix(`/v1/campaigns`) || PathPrefix(`/v1/admin/campaigns`)
+      services:
+        - name: saarathi-campaigns
+          port: 80
+
+    - kind: Rule
+      match: PathPrefix(`/v1/partner`) || PathPrefix(`/v1/admin/partners`)
+      services:
+        - name: saarathi-partners
+          port: 80

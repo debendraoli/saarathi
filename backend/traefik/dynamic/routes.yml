@@ -1,0 +1,85 @@
+# Traefik dynamic configuration — the API gateway route table.
+#
+# One north-south front door: routes each request by path to the owning service.
+# `routing` (8084) is intentionally absent — it's an internal, service-to-service
+# dependency of rides and must not be publicly reachable. Prefixes that are split
+# across services (/v1/admin/*, /v1/driver/*) are disambiguated by enumerating the
+# specific sub-paths, so every rule maps to exactly one service.
+#
+# This mirrors the production k3s ingress (Traefik) — see deploy/k8s/ingressroute.yaml.
+
+http:
+  routers:
+    auth:
+      entryPoints: ["web"]
+      service: auth
+      rule: >-
+        PathPrefix(`/v1/auth`) || PathPrefix(`/v1/me`)
+        || PathPrefix(`/v1/driver/register`) || PathPrefix(`/v1/driver/documents`) || PathPrefix(`/v1/driver/status`)
+        || PathPrefix(`/v1/admin/drivers`) || PathPrefix(`/v1/admin/documents`)
+
+    rides:
+      entryPoints: ["web"]
+      service: rides
+      rule: >-
+        PathPrefix(`/v1/rides`) || PathPrefix(`/v1/delivery`) || PathPrefix(`/v1/wallet`)
+        || PathPrefix(`/v1/ws`) || PathPrefix(`/v1/events`) || PathPrefix(`/v1/flags`)
+        || PathPrefix(`/v1/reports`) || PathPrefix(`/v1/credit-plans`) || PathPrefix(`/v1/drivers`)
+        || PathPrefix(`/v1/driver/analytics`) || PathPrefix(`/v1/driver/credits`)
+        || PathPrefix(`/v1/driver/heartbeat`) || PathPrefix(`/v1/driver/offers`)
+        || PathPrefix(`/v1/driver/offline`) || PathPrefix(`/v1/driver/online`)
+        || PathPrefix(`/v1/driver/subscription`)
+        || PathPrefix(`/v1/admin/analytics`) || PathPrefix(`/v1/admin/cancellations`)
+        || PathPrefix(`/v1/admin/credit-plans`) || PathPrefix(`/v1/admin/flags`)
+        || PathPrefix(`/v1/admin/leaderboard`) || PathPrefix(`/v1/admin/ledger`)
+        || PathPrefix(`/v1/admin/reports`) || PathPrefix(`/v1/admin/rides`)
+        || PathPrefix(`/v1/admin/sos`) || PathPrefix(`/v1/admin/subscriptions`)
+        || PathPrefix(`/v1/admin/surge`) || PathPrefix(`/v1/admin/trips`)
+
+    notify:
+      entryPoints: ["web"]
+      service: notify
+      rule: PathPrefix(`/v1/notifications`)
+
+    payments:
+      entryPoints: ["web"]
+      service: payments
+      rule: >-
+        PathPrefix(`/v1/credits`) || PathPrefix(`/v1/payouts`) || PathPrefix(`/v1/psp`)
+        || PathPrefix(`/v1/admin/payouts`)
+
+    campaigns:
+      entryPoints: ["web"]
+      service: campaigns
+      rule: PathPrefix(`/v1/campaigns`) || PathPrefix(`/v1/admin/campaigns`)
+
+    partners:
+      entryPoints: ["web"]
+      service: partners
+      rule: PathPrefix(`/v1/partner`) || PathPrefix(`/v1/admin/partners`)
+
+  services:
+    auth:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8081
+    rides:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8082
+    notify:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8083
+    payments:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8085
+    campaigns:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8086
+    partners:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8087

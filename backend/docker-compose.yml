@@ -43,6 +43,31 @@ services:
     volumes:
       - ./.data/nats:/data
 
+  # API gateway — the single north-south front door. Mirrors production: k3s ships
+  # Traefik as its default ingress, so the same router rules translate 1:1 to
+  # Traefik IngressRoute CRDs (see deploy/k8s/ingressroute.yaml). Routes by path
+  # to the per-service host ports; `routing` (8084) stays internal (not exposed).
+  # Gateway: http://localhost:8080   Dashboard: http://localhost:8090
+  gateway:
+    image: traefik:v3.1
+    command:
+      - --entrypoints.web.address=:8080
+      - --entrypoints.traefik.address=:8090
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --accesslog=true
+      - --log.level=INFO
+    ports:
+      - "8080:8080"   # the gateway (all client traffic)
+      - "8090:8090"   # Traefik dashboard (dev only)
+    volumes:
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+    extra_hosts:
+      # Reach services running on the host (cargo run); host-gateway on Linux.
+      - "host.docker.internal:host-gateway"
+
   # Self-hosted Valhalla routing (OSM-based). On first boot it downloads the
   # configured OSM extract and builds tiles into ./.data/valhalla (this takes a
   # while); subsequent boots reuse the tiles. Point the rides service at it with
