@@ -69,11 +69,17 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
             onTap: (p) => setState(() => _dest = p),
             pins: [
               if (_pickup != null)
-                MapPin(_pickup!, Icons.my_location_rounded,
-                    Theme.of(context).colorScheme.primary),
+                MapPin(
+                  _pickup!,
+                  Icons.my_location_rounded,
+                  Theme.of(context).colorScheme.primary,
+                ),
               if (_dest != null)
-                MapPin(_dest!, Icons.location_on_rounded,
-                    Theme.of(context).colorScheme.secondary),
+                MapPin(
+                  _dest!,
+                  Icons.location_on_rounded,
+                  Theme.of(context).colorScheme.secondary,
+                ),
             ],
           ),
           Align(
@@ -128,8 +134,11 @@ class _Sheet extends StatelessWidget {
             const Divider(height: 20),
             Row(
               children: [
-                Icon(Icons.location_on_rounded,
-                    size: 18, color: Theme.of(context).colorScheme.secondary),
+                Icon(
+                  Icons.location_on_rounded,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.secondary,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: TextField(

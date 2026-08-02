@@ -61,7 +61,8 @@ class ParcelDraft {
         'recipient_phone': recipientPhone,
         'fragile': fragile,
         'cod_amount': codAmount,
-        if (pickupNote != null && pickupNote!.isNotEmpty) 'pickup_note': pickupNote,
+        if (pickupNote != null && pickupNote!.isNotEmpty)
+          'pickup_note': pickupNote,
         'payment_method': paymentMethod,
       };
 }

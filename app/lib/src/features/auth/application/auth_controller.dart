@@ -38,7 +38,8 @@ class AuthController extends Notifier<AuthState> {
 
   Future<String?> requestOtp(String phone) => _repo.requestOtp(phone);
 
-  Future<void> verifyOtp(String phone, String code, {bool asDriver = false}) async {
+  Future<void> verifyOtp(String phone, String code,
+      {bool asDriver = false}) async {
     final session = await _repo.verifyOtp(phone, code, asDriver: asDriver);
     await _tokens.save(access: session.access, refresh: session.refresh);
     state = AuthState(

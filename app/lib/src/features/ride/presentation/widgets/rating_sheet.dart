@@ -47,12 +47,14 @@ class _RatingSheetState extends State<_RatingSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(l.rateTrip,
-              textAlign: TextAlign.center,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w800)),
+          Text(
+            l.rateTrip,
+            textAlign: TextAlign.center,
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(fontWeight: FontWeight.w800),
+          ),
           const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -63,7 +65,9 @@ class _RatingSheetState extends State<_RatingSheet> {
                 onPressed: () => setState(() => _stars = i + 1),
                 icon: Icon(
                   filled ? Icons.star_rounded : Icons.star_outline_rounded,
-                  color: filled ? Colors.amber : Theme.of(context).colorScheme.outline,
+                  color: filled
+                      ? Colors.amber
+                      : Theme.of(context).colorScheme.outline,
                 ),
               );
             }),
@@ -76,8 +80,8 @@ class _RatingSheetState extends State<_RatingSheet> {
           ),
           const SizedBox(height: 16),
           FilledButton(
-            onPressed: () =>
-                Navigator.pop(context, RatingResult(_stars, _comment.text.trim())),
+            onPressed: () => Navigator.pop(
+                context, RatingResult(_stars, _comment.text.trim())),
             child: Text(l.submit),
           ),
         ],

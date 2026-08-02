@@ -30,17 +30,21 @@ class DriverKycRepository {
 
   final ApiClient _api;
 
-  Future<void> register(DriverInput input) => _api.post('/v1/driver/register', body: {
-        if (input.licenseNumber != null) 'license_number': input.licenseNumber,
-        if (input.dateOfBirth != null) 'date_of_birth': input.dateOfBirth,
-        if (input.address != null) 'address': input.address,
-        'vehicle': {
-          'class': input.vehicleClass.wire,
-          'plate_number': input.plateNumber,
-          if (input.make != null) 'make': input.make,
-          if (input.model != null) 'model': input.model,
+  Future<void> register(DriverInput input) => _api.post(
+        '/v1/driver/register',
+        body: {
+          if (input.licenseNumber != null)
+            'license_number': input.licenseNumber,
+          if (input.dateOfBirth != null) 'date_of_birth': input.dateOfBirth,
+          if (input.address != null) 'address': input.address,
+          'vehicle': {
+            'class': input.vehicleClass.wire,
+            'plate_number': input.plateNumber,
+            if (input.make != null) 'make': input.make,
+            if (input.model != null) 'model': input.model,
+          },
         },
-      });
+      );
 
   Future<void> uploadDocument(String kind, String filePath) async {
     final form = FormData.fromMap({

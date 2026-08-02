@@ -36,8 +36,9 @@ class MapView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tileUrl =
-        AppConfig.tileUrlTemplate.isNotEmpty ? AppConfig.tileUrlTemplate : _osmFallback;
+    final tileUrl = AppConfig.tileUrlTemplate.isNotEmpty
+        ? AppConfig.tileUrlTemplate
+        : _osmFallback;
     return FlutterMap(
       mapController: controller,
       options: MapOptions(
@@ -45,7 +46,9 @@ class MapView extends StatelessWidget {
         initialZoom: zoom,
         onTap: onTap == null ? null : (_, p) => onTap!(p),
         interactionOptions: const InteractionOptions(
-          flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag | InteractiveFlag.doubleTapZoom,
+          flags: InteractiveFlag.pinchZoom |
+              InteractiveFlag.drag |
+              InteractiveFlag.doubleTapZoom,
         ),
       ),
       children: [

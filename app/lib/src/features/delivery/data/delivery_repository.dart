@@ -16,12 +16,15 @@ class DeliveryRepository {
     required ParcelSize size,
     bool fragile = false,
   }) async {
-    final res = await _api.post('/v1/delivery/estimate', body: {
-      'origin': {'lat': origin.latitude, 'lng': origin.longitude},
-      'dest': {'lat': dest.latitude, 'lng': dest.longitude},
-      'size_tier': size.wire,
-      'fragile': fragile,
-    });
+    final res = await _api.post(
+      '/v1/delivery/estimate',
+      body: {
+        'origin': {'lat': origin.latitude, 'lng': origin.longitude},
+        'dest': {'lat': dest.latitude, 'lng': dest.longitude},
+        'size_tier': size.wire,
+        'fragile': fragile,
+      },
+    );
     return DeliveryEstimate.fromJson(res as Map<String, dynamic>);
   }
 

@@ -108,7 +108,8 @@ class _StatusBanner extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  Text(title,
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
                   Text(body, style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),
@@ -156,7 +157,8 @@ class _DocRowState extends ConsumerState<_DocRow> {
     );
     if (source == null) return;
 
-    final file = await ImagePicker().pickImage(source: source, imageQuality: 70);
+    final file =
+        await ImagePicker().pickImage(source: source, imageQuality: 70);
     if (file == null) return;
 
     setState(() => _busy = true);
@@ -167,8 +169,8 @@ class _DocRowState extends ConsumerState<_DocRow> {
       ref.invalidate(driverKycProvider);
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(AppL10n.of(context).errorGeneric)));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppL10n.of(context).errorGeneric)));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -182,16 +184,23 @@ class _DocRowState extends ConsumerState<_DocRow> {
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         leading: Icon(
-          widget.uploaded ? Icons.check_circle_rounded : Icons.upload_file_rounded,
+          widget.uploaded
+              ? Icons.check_circle_rounded
+              : Icons.upload_file_rounded,
           color: widget.uploaded ? scheme.primary : scheme.outline,
         ),
         title: Text(docLabel(widget.kind)),
         trailing: _busy
             ? const SizedBox(
-                height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2.2))
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(strokeWidth: 2.2),
+              )
             : TextButton(
                 onPressed: _capture,
-                child: Text(widget.uploaded ? AppL10n.of(context).actionRetry : 'Upload'),
+                child: Text(widget.uploaded
+                    ? AppL10n.of(context).actionRetry
+                    : 'Upload'),
               ),
       ),
     );

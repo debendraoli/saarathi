@@ -61,17 +61,23 @@ lib/src/
 
 The generated runners need these to actually run:
 
-- **Android** (`android/app/src/main/AndroidManifest.xml`): permissions
-  `INTERNET`, `ACCESS_FINE_LOCATION`, `CAMERA`; for dev against a plaintext
-  gateway add `android:usesCleartextTraffic="true"` on `<application>`; add a
-  deep-link `<intent-filter>` for scheme `saarathi`.
+- **Android** (`android/app/src/main/AndroidManifest.xml` + `build.gradle`):
+  permissions `INTERNET`, `ACCESS_FINE_LOCATION`, `CAMERA`, `RECORD_AUDIO`,
+  `POST_NOTIFICATIONS`; `minSdkVersion 21+` (flutter_webrtc); for dev against a
+  plaintext gateway add `android:usesCleartextTraffic="true"`; a deep-link
+  `<intent-filter>` for scheme `saarathi`.
 - **iOS** (`ios/Runner/Info.plist`): `NSLocationWhenInUseUsageDescription`,
-  `NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription`; a
-  `CFBundleURLTypes` entry for scheme `saarathi`; for localhost dev, an
-  `NSAppTransportSecurity` exception.
+  `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`,
+  `NSPhotoLibraryUsageDescription`; a `CFBundleURLTypes` entry for scheme
+  `saarathi`; for localhost dev, an `NSAppTransportSecurity` exception.
+- **WebRTC**: set a Coturn relay via
+  `--dart-define=SAARATHI_TURN_URL=turn:… --dart-define=SAARATHI_TURN_USER=… --dart-define=SAARATHI_TURN_PASS=…`.
+- **Push**: local/foreground notifications work out of the box; production
+  FCM/APNs needs `google-services.json` / `GoogleService-Info.plist` — then call
+  `NotificationService.show` from the FCM handler.
 
 ## Not yet built (next passes)
 
-Food/grocery verticals · masked call + WebRTC voice/video · QR-sticker scan ·
-push notifications · saved places · notifications inbox · offline cache/reconcile.
+Food/grocery verticals · saved places · offline cache/reconcile · trickle-ICE
+candidate queueing · production FCM wiring.
 

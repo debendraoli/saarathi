@@ -56,24 +56,28 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
     if (_plate.text.trim().isEmpty) return;
     setState(() => _busy = true);
     try {
-      final two = (int n) => n.toString().padLeft(2, '0');
-      await ref.read(driverKycRepositoryProvider).register(DriverInput(
-            vehicleClass: _class,
-            plateNumber: _plate.text.trim(),
-            licenseNumber: _license.text.trim().isEmpty ? null : _license.text.trim(),
-            address: _address.text.trim().isEmpty ? null : _address.text.trim(),
-            make: _make.text.trim().isEmpty ? null : _make.text.trim(),
-            model: _model.text.trim().isEmpty ? null : _model.text.trim(),
-            dateOfBirth: _dob == null
-                ? null
-                : '${_dob!.year}-${two(_dob!.month)}-${two(_dob!.day)}',
-          ));
+      String two(int n) => n.toString().padLeft(2, '0');
+      await ref.read(driverKycRepositoryProvider).register(
+            DriverInput(
+              vehicleClass: _class,
+              plateNumber: _plate.text.trim(),
+              licenseNumber:
+                  _license.text.trim().isEmpty ? null : _license.text.trim(),
+              address:
+                  _address.text.trim().isEmpty ? null : _address.text.trim(),
+              make: _make.text.trim().isEmpty ? null : _make.text.trim(),
+              model: _model.text.trim().isEmpty ? null : _model.text.trim(),
+              dateOfBirth: _dob == null
+                  ? null
+                  : '${_dob!.year}-${two(_dob!.month)}-${two(_dob!.day)}',
+            ),
+          );
       await ref.read(authControllerProvider.notifier).refresh();
       if (mounted) context.pushReplacement(Routes.kyc);
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(AppL10n.of(context).errorGeneric)));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppL10n.of(context).errorGeneric)));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -107,7 +111,8 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
             onSelectionChanged: (s) => setState(() => _class = s.first),
           ),
           const SizedBox(height: 16),
-          _Field(controller: _plate, label: 'Plate number', hint: 'BA-1-PA-1234'),
+          _Field(
+              controller: _plate, label: 'Plate number', hint: 'BA-1-PA-1234'),
           _Field(controller: _make, label: 'Make (optional)'),
           _Field(controller: _model, label: 'Model (optional)'),
           const Divider(height: 32),
@@ -115,9 +120,11 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Date of birth'),
-            subtitle: Text(_dob == null
-                ? 'Not set'
-                : '${_dob!.year}-${_dob!.month}-${_dob!.day}'),
+            subtitle: Text(
+              _dob == null
+                  ? 'Not set'
+                  : '${_dob!.year}-${_dob!.month}-${_dob!.day}',
+            ),
             trailing: const Icon(Icons.calendar_today_rounded),
             onTap: _pickDob,
           ),
@@ -127,7 +134,10 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
             onPressed: _busy || _plate.text.trim().isEmpty ? null : _submit,
             child: _busy
                 ? const SizedBox(
-                    height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.4),
+                  )
                 : Text(l.registerAction),
           ),
         ],

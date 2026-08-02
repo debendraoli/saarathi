@@ -8,7 +8,8 @@ class AppTheme {
 
   /// Saffron/amber — matches the ops dashboard brand (#F5A623).
   static const Color brand = Color(0xFFF5A623);
-  static const Color crimson = Color(0xFFDC143C); // Nepali flag crimson (accent)
+  static const Color crimson =
+      Color(0xFFDC143C); // Nepali flag crimson (accent)
   static const Color ink = Color(0xFF1A1200);
 
   static ThemeData light() => _base(Brightness.light);
@@ -42,7 +43,8 @@ class AppTheme {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size.fromHeight(54),
-          textStyle: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          textStyle:
+              textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -63,7 +65,8 @@ class AppTheme {
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
       cardTheme: CardThemeData(
         elevation: 0,

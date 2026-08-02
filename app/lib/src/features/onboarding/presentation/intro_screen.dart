@@ -52,9 +52,11 @@ class _IntroScreenState extends ConsumerState<IntroScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   SegmentedButton<String>(
-                    style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                    style:
+                        const ButtonStyle(visualDensity: VisualDensity.compact),
                     segments: [
-                      ButtonSegment(value: 'en', label: Text(l.languageEnglish)),
+                      ButtonSegment(
+                          value: 'en', label: Text(l.languageEnglish)),
                       ButtonSegment(value: 'ne', label: Text(l.languageNepali)),
                     ],
                     selected: {locale?.languageCode ?? 'en'},

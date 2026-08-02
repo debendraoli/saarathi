@@ -48,7 +48,8 @@ class AppUser {
 }
 
 class Session {
-  const Session({required this.access, required this.refresh, required this.user});
+  const Session(
+      {required this.access, required this.refresh, required this.user});
 
   final String access;
   final String refresh;
@@ -64,15 +65,18 @@ class Session {
 enum AuthStatus { unknown, unauthenticated, authenticated }
 
 class AuthState {
-  const AuthState({this.status = AuthStatus.unknown, this.user, this.mode = AppMode.rider});
+  const AuthState(
+      {this.status = AuthStatus.unknown, this.user, this.mode = AppMode.rider});
 
   final AuthStatus status;
   final AppUser? user;
   final AppMode mode;
 
-  bool get isAuthenticated => status == AuthStatus.authenticated && user != null;
+  bool get isAuthenticated =>
+      status == AuthStatus.authenticated && user != null;
 
-  AuthState copyWith({AuthStatus? status, AppUser? user, AppMode? mode}) => AuthState(
+  AuthState copyWith({AuthStatus? status, AppUser? user, AppMode? mode}) =>
+      AuthState(
         status: status ?? this.status,
         user: user ?? this.user,
         mode: mode ?? this.mode,

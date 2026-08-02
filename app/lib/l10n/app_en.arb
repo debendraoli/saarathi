@@ -126,6 +126,10 @@
   "deliveryFee": "Delivery fee",
   "bookDelivery": "Book delivery",
 
+  "notifications": "Notifications",
+  "markAllRead": "Mark all read",
+  "noNotifications": "No notifications yet",
+
   "errorNetwork": "Network problem. Check your connection and try again.",
   "errorGeneric": "Something went wrong. Please try again."
 }

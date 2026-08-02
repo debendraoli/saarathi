@@ -40,7 +40,8 @@ class RideDraft {
   final VehicleClass vehicleClass;
   final String paymentMethod;
 
-  RideDraft copyWith({VehicleClass? vehicleClass, String? paymentMethod}) => RideDraft(
+  RideDraft copyWith({VehicleClass? vehicleClass, String? paymentMethod}) =>
+      RideDraft(
         pickup: pickup,
         destination: destination,
         vehicleClass: vehicleClass ?? this.vehicleClass,

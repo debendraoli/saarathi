@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,7 +9,11 @@ import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../comms/application/call_controller.dart';
+import '../../comms/presentation/call_screen.dart';
+import '../../safety/presentation/qr_scan_screen.dart';
 import '../application/ride_controller.dart';
+
 import '../application/trip_ws.dart';
 import '../data/ride_repository.dart';
 import '../domain/models.dart';
@@ -35,21 +41,38 @@ class TripScreen extends ConsumerWidget {
           onRetry: () => ref.invalidate(tripStreamProvider(tripId)),
         ),
         data: (trip) {
+          final myId = ref.watch(authControllerProvider).user?.id;
+          final iAmDriver = myId != null && myId == trip.driverId;
+          final canComms = trip.driverId != null && trip.isActive;
           return Stack(
             children: [
               MapView(
                 center: driverLoc ?? trip.origin,
                 route: [trip.origin, trip.dest],
                 pins: [
-                  MapPin(trip.origin, Icons.trip_origin,
-                      Theme.of(context).colorScheme.primary),
-                  MapPin(trip.dest, Icons.location_on_rounded,
-                      Theme.of(context).colorScheme.secondary),
+                  MapPin(
+                    trip.origin,
+                    Icons.trip_origin,
+                    Theme.of(context).colorScheme.primary,
+                  ),
+                  MapPin(
+                    trip.dest,
+                    Icons.location_on_rounded,
+                    Theme.of(context).colorScheme.secondary,
+                  ),
                   if (driverLoc != null)
-                    MapPin(driverLoc, Icons.navigation_rounded,
-                        Theme.of(context).colorScheme.tertiary),
+                    MapPin(
+                      driverLoc,
+                      Icons.navigation_rounded,
+                      Theme.of(context).colorScheme.tertiary,
+                    ),
                 ],
               ),
+              // Invisible: routes incoming calls to the call screen.
+              _CallWatcher(tripId: tripId),
+              // Invisible: the driver streams position during an active trip.
+              if (iAmDriver && trip.isActive)
+                _DriverLocationPublisher(tripId: tripId),
               SafeArea(
                 child: Align(
                   alignment: Alignment.topRight,
@@ -59,6 +82,16 @@ class TripScreen extends ConsumerWidget {
                   ),
                 ),
               ),
+              if (canComms)
+                SafeArea(
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: _CommsBar(tripId: tripId, isRider: !iAmDriver),
+                    ),
+                  ),
+                ),
               Align(
                 alignment: Alignment.bottomCenter,
                 child: _StatusSheet(trip: trip),
@@ -82,7 +115,11 @@ class _StatusSheet extends ConsumerWidget {
         return (Icons.search_rounded, l.findingDriver, l.findingDriverBody);
       case TripStatus.accepted:
       case TripStatus.arriving:
-        return (Icons.directions_car_rounded, l.driverAssigned, l.statusArriving);
+        return (
+          Icons.directions_car_rounded,
+          l.driverAssigned,
+          l.statusArriving
+        );
       case TripStatus.inProgress:
         return (Icons.navigation_rounded, l.statusOnTrip, '');
       case TripStatus.completed:
@@ -132,26 +169,35 @@ class _StatusSheet extends ConsumerWidget {
             Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                  child: Icon(icon,
-                      color: Theme.of(context).colorScheme.onPrimaryContainer),
+                  backgroundColor:
+                      Theme.of(context).colorScheme.primaryContainer,
+                  child: Icon(
+                    icon,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700)),
+                      Text(
+                        title,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
                       if (body.isNotEmpty)
-                        Text(body,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color:
-                                      Theme.of(context).colorScheme.onSurfaceVariant,
-                                )),
+                        Text(
+                          body,
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                        ),
                     ],
                   ),
                 ),
@@ -163,28 +209,6 @@ class _StatusSheet extends ConsumerWidget {
                   ),
               ],
             ),
-            if (!done && !searching && !iAmDriver) ...[
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {},
-                      icon: const Icon(Icons.call_rounded),
-                      label: Text(l.callDriver),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {},
-                      icon: const Icon(Icons.ios_share_rounded),
-                      label: Text(l.shareTrip),
-                    ),
-                  ),
-                ],
-              ),
-            ],
             if (driverNext != null) ...[
               const SizedBox(height: 14),
               FilledButton(
@@ -291,4 +315,136 @@ class _SosButton extends ConsumerWidget {
       },
     );
   }
+}
+
+/// Chat / voice / video / (rider) QR-scan actions during an active trip.
+class _CommsBar extends ConsumerWidget {
+  const _CommsBar({required this.tripId, required this.isRider});
+  final String tripId;
+  final bool isRider;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    Widget btn(IconData icon, VoidCallback onTap) => Material(
+          color: Theme.of(context).colorScheme.surface,
+          shape: const CircleBorder(),
+          elevation: 2,
+          child: IconButton(icon: Icon(icon), onPressed: onTap),
+        );
+
+    return Column(
+      children: [
+        btn(Icons.chat_rounded, () => context.push(Routes.chat, extra: tripId)),
+        const SizedBox(height: 8),
+        btn(Icons.call_rounded, () {
+          context.push(Routes.call,
+              extra: CallArgs(tripId: tripId, asCaller: true));
+        }),
+        const SizedBox(height: 8),
+        btn(Icons.videocam_rounded, () {
+          context.push(
+            Routes.call,
+            extra: CallArgs(tripId: tripId, video: true, asCaller: true),
+          );
+        }),
+        if (isRider) ...[
+          const SizedBox(height: 8),
+          btn(Icons.qr_code_scanner_rounded, () async {
+            final code = await scanQr(context);
+            if (code != null && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Verified: $code')),
+              );
+            }
+          }),
+        ],
+      ],
+    );
+  }
+}
+
+/// Watches for an incoming WebRTC call and opens the call screen to answer.
+class _CallWatcher extends ConsumerStatefulWidget {
+  const _CallWatcher({required this.tripId});
+  final String tripId;
+
+  @override
+  ConsumerState<_CallWatcher> createState() => _CallWatcherState();
+}
+
+class _CallWatcherState extends ConsumerState<_CallWatcher> {
+  CallController? _controller;
+  bool _open = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = ref.read(callControllerProvider(widget.tripId));
+    _controller!.addListener(_check);
+  }
+
+  Future<void> _check() async {
+    if (_open) return;
+    if (_controller!.status == CallStatus.incoming) {
+      _open = true;
+      await context.push(
+        Routes.call,
+        extra: CallArgs(tripId: widget.tripId, asCaller: false),
+      );
+      _open = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.removeListener(_check);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Watch to keep the call controller (and its signaling) alive.
+    ref.watch(callControllerProvider(widget.tripId));
+    return const SizedBox.shrink();
+  }
+}
+
+/// While a driver is on an active trip, publish live position every few seconds.
+class _DriverLocationPublisher extends ConsumerStatefulWidget {
+  const _DriverLocationPublisher({required this.tripId});
+  final String tripId;
+
+  @override
+  ConsumerState<_DriverLocationPublisher> createState() =>
+      _DriverLocationPublisherState();
+}
+
+class _DriverLocationPublisherState
+    extends ConsumerState<_DriverLocationPublisher> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _ping();
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _ping());
+  }
+
+  Future<void> _ping() async {
+    try {
+      final here = await currentLatLng();
+      await ref
+          .read(rideRepositoryProvider)
+          .postLocation(widget.tripId, here.latitude, here.longitude);
+    } catch (_) {/* skip a beat */}
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }

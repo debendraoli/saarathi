@@ -17,12 +17,16 @@ class AuthRepository {
     return map['dev_code'] as String?;
   }
 
-  Future<Session> verifyOtp(String phone, String code, {bool asDriver = false}) async {
-    final res = await _api.post('/v1/auth/otp/verify', body: {
-      'phone': phone,
-      'code': code,
-      'as_driver': asDriver,
-    });
+  Future<Session> verifyOtp(String phone, String code,
+      {bool asDriver = false}) async {
+    final res = await _api.post(
+      '/v1/auth/otp/verify',
+      body: {
+        'phone': phone,
+        'code': code,
+        'as_driver': asDriver,
+      },
+    );
     return Session.fromJson(res as Map<String, dynamic>);
   }
 

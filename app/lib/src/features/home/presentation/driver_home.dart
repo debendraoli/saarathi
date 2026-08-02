@@ -50,8 +50,11 @@ class _KycGate extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.badge_rounded,
-                size: 48, color: Theme.of(context).colorScheme.primary),
+            Icon(
+              Icons.badge_rounded,
+              size: 48,
+              color: Theme.of(context).colorScheme.primary,
+            ),
             const SizedBox(height: 16),
             Text(
               status == KycStatus.rejected ? l.kycRejected : l.kycUnderReview,
@@ -87,7 +90,8 @@ class _OnlineBoard extends ConsumerWidget {
         _OnlineCard(
           online: status.online,
           busy: status.busy,
-          onToggle: () => ref.read(driverControllerProvider.notifier).toggleOnline(),
+          onToggle: () =>
+              ref.read(driverControllerProvider.notifier).toggleOnline(),
         ),
         const SizedBox(height: 16),
         if (status.online && offers.isEmpty)
@@ -110,7 +114,8 @@ class _OnlineBoard extends ConsumerWidget {
 }
 
 class _OnlineCard extends StatelessWidget {
-  const _OnlineCard({required this.online, required this.busy, required this.onToggle});
+  const _OnlineCard(
+      {required this.online, required this.busy, required this.onToggle});
 
   final bool online;
   final bool busy;
@@ -129,8 +134,10 @@ class _OnlineCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(online ? Icons.bolt_rounded : Icons.bolt_outlined,
-                    color: online ? scheme.onPrimaryContainer : scheme.outline),
+                Icon(
+                  online ? Icons.bolt_rounded : Icons.bolt_outlined,
+                  color: online ? scheme.onPrimaryContainer : scheme.outline,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   online ? l.youAreOnline : l.youAreOffline,
@@ -142,19 +149,29 @@ class _OnlineCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
-            Text(online ? l.onlineBody : l.offlineBody,
-                style: TextStyle(
-                    color: online ? scheme.onPrimaryContainer : scheme.onSurfaceVariant)),
+            Text(
+              online ? l.onlineBody : l.offlineBody,
+              style: TextStyle(
+                color: online
+                    ? scheme.onPrimaryContainer
+                    : scheme.onSurfaceVariant,
+              ),
+            ),
             const SizedBox(height: 16),
             FilledButton(
               onPressed: busy ? null : onToggle,
               style: online
                   ? FilledButton.styleFrom(
-                      backgroundColor: scheme.error, foregroundColor: scheme.onError)
+                      backgroundColor: scheme.error,
+                      foregroundColor: scheme.onError,
+                    )
                   : null,
               child: busy
                   ? const SizedBox(
-                      height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.4),
+                    )
                   : Text(online ? l.goOffline : l.goOnline),
             ),
           ],
@@ -187,8 +204,8 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(AppL10n.of(context).errorGeneric)));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppL10n.of(context).errorGeneric)));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -214,11 +231,13 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                       : Icons.two_wheeler_rounded,
                 ),
                 const SizedBox(width: 8),
-                Text(l.newJobOffer,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700)),
+                Text(
+                  l.newJobOffer,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
               ],
             ),
             const SizedBox(height: 10),
@@ -251,7 +270,10 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                     onPressed: _busy ? null : () => _act(true),
                     child: _busy
                         ? const SizedBox(
-                            height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2.2))
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2.2),
+                          )
                         : Text(l.accept),
                   ),
                 ),

@@ -6,10 +6,13 @@ import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/domain/models.dart';
 import '../../features/auth/presentation/otp_screen.dart';
 import '../../features/auth/presentation/phone_screen.dart';
+import '../../features/comms/presentation/call_screen.dart';
+import '../../features/comms/presentation/chat_screen.dart';
 import '../../features/delivery/presentation/parcel_screen.dart';
 import '../../features/driver/presentation/become_driver_screen.dart';
 import '../../features/driver/presentation/kyc_documents_screen.dart';
 import '../../features/home/presentation/home_shell.dart';
+import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/onboarding/presentation/intro_screen.dart';
 import '../../features/onboarding/presentation/splash_screen.dart';
 import '../../features/ride/domain/models.dart';
@@ -30,6 +33,9 @@ class Routes {
   static const becomeDriver = '/driver/register';
   static const kyc = '/driver/kyc';
   static const parcel = '/delivery/parcel';
+  static const chat = '/ride/chat';
+  static const call = '/ride/call';
+  static const notifications = '/notifications';
 }
 
 /// Bridges Riverpod state changes to go_router's redirect re-evaluation.
@@ -79,15 +85,29 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: Routes.whereTo, builder: (_, __) => const WhereToScreen()),
       GoRoute(
         path: Routes.confirm,
-        builder: (_, state) => ConfirmRideScreen(draft: state.extra as RideDraft),
+        builder: (_, state) =>
+            ConfirmRideScreen(draft: state.extra as RideDraft),
       ),
       GoRoute(
         path: '${Routes.trip}/:id',
         builder: (_, state) => TripScreen(tripId: state.pathParameters['id']!),
       ),
-      GoRoute(path: Routes.becomeDriver, builder: (_, __) => const BecomeDriverScreen()),
+      GoRoute(
+          path: Routes.becomeDriver,
+          builder: (_, __) => const BecomeDriverScreen()),
       GoRoute(path: Routes.kyc, builder: (_, __) => const KycDocumentsScreen()),
       GoRoute(path: Routes.parcel, builder: (_, __) => const ParcelScreen()),
+      GoRoute(
+        path: Routes.chat,
+        builder: (_, state) => ChatScreen(tripId: state.extra as String),
+      ),
+      GoRoute(
+        path: Routes.call,
+        builder: (_, state) => CallScreen(args: state.extra as CallArgs),
+      ),
+      GoRoute(
+          path: Routes.notifications,
+          builder: (_, __) => const NotificationsScreen()),
     ],
   );
 });

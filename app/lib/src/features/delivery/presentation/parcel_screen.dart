@@ -70,27 +70,32 @@ class _ParcelScreenState extends ConsumerState<ParcelScreen> {
   }
 
   bool get _canBook =>
-      _pickup != null && _drop != null && _name.text.trim().isNotEmpty && _phone.text.trim().isNotEmpty;
+      _pickup != null &&
+      _drop != null &&
+      _name.text.trim().isNotEmpty &&
+      _phone.text.trim().isNotEmpty;
 
   Future<void> _book() async {
     if (!_canBook) return;
     setState(() => _booking = true);
     try {
-      final trip = await ref.read(deliveryRepositoryProvider).book(ParcelDraft(
-            origin: Place(point: _pickup!),
-            dest: Place(point: _drop!),
-            size: _size,
-            recipientName: _name.text.trim(),
-            recipientPhone: _phone.text.trim(),
-            fragile: _fragile,
-            codAmount: double.tryParse(_cod.text.trim()) ?? 0,
-            pickupNote: _note.text.trim(),
-          ));
+      final trip = await ref.read(deliveryRepositoryProvider).book(
+            ParcelDraft(
+              origin: Place(point: _pickup!),
+              dest: Place(point: _drop!),
+              size: _size,
+              recipientName: _name.text.trim(),
+              recipientPhone: _phone.text.trim(),
+              fragile: _fragile,
+              codAmount: double.tryParse(_cod.text.trim()) ?? 0,
+              pickupNote: _note.text.trim(),
+            ),
+          );
       if (mounted) context.go('${Routes.trip}/${trip.id}');
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(AppL10n.of(context).errorGeneric)));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppL10n.of(context).errorGeneric)));
       }
     } finally {
       if (mounted) setState(() => _booking = false);
@@ -115,9 +120,11 @@ class _ParcelScreenState extends ConsumerState<ParcelScreen> {
               },
               pins: [
                 if (_pickup != null)
-                  MapPin(_pickup!, Icons.trip_origin, Theme.of(context).colorScheme.primary),
+                  MapPin(_pickup!, Icons.trip_origin,
+                      Theme.of(context).colorScheme.primary),
                 if (_drop != null)
-                  MapPin(_drop!, Icons.location_on_rounded, Theme.of(context).colorScheme.secondary),
+                  MapPin(_drop!, Icons.location_on_rounded,
+                      Theme.of(context).colorScheme.secondary),
               ],
             ),
           ),
@@ -126,8 +133,11 @@ class _ParcelScreenState extends ConsumerState<ParcelScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 if (_drop == null)
-                  Text(l.chooseOnMap,
-                      style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  Text(
+                    l.chooseOnMap,
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
                 SegmentedButton<ParcelSize>(
                   segments: [
                     for (final s in ParcelSize.values)
@@ -164,12 +174,14 @@ class _ParcelScreenState extends ConsumerState<ParcelScreen> {
                 TextField(
                   controller: _cod,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Cash to collect (COD)'),
+                  decoration:
+                      const InputDecoration(labelText: 'Cash to collect (COD)'),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _note,
-                  decoration: const InputDecoration(labelText: 'Pickup note (optional)'),
+                  decoration: const InputDecoration(
+                      labelText: 'Pickup note (optional)'),
                 ),
               ],
             ),
@@ -189,8 +201,10 @@ class _ParcelScreenState extends ConsumerState<ParcelScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(l.deliveryFee),
-                      Text('NPR ${_estimate!.deliveryFee.toStringAsFixed(0)}',
-                          style: const TextStyle(fontWeight: FontWeight.w800)),
+                      Text(
+                        'NPR ${_estimate!.deliveryFee.toStringAsFixed(0)}',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
                     ],
                   ),
                 ),
@@ -198,7 +212,10 @@ class _ParcelScreenState extends ConsumerState<ParcelScreen> {
                 onPressed: _canBook && !_booking ? _book : null,
                 child: _booking
                     ? const SizedBox(
-                        height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2.4))
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.4),
+                      )
                     : Text(l.bookDelivery),
               ),
             ],

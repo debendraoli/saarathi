@@ -13,7 +13,8 @@ Future<LatLng> currentLatLng() async {
     if (perm == LocationPermission.denied) {
       perm = await Geolocator.requestPermission();
     }
-    if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) {
       return fallback;
     }
     final pos = await Geolocator.getCurrentPosition(

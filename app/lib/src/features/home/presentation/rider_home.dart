@@ -33,13 +33,17 @@ class RiderHome extends ConsumerWidget {
               label: l.modeRider,
               onTap: () => context.push(Routes.whereTo),
             ),
-            _Service(icon: Icons.restaurant_rounded, label: 'Food', soon: true),
+            const _Service(
+                icon: Icons.restaurant_rounded, label: 'Food', soon: true),
             _Service(
               icon: Icons.inventory_2_rounded,
               label: 'Parcel',
               onTap: () => context.push(Routes.parcel),
             ),
-            _Service(icon: Icons.local_grocery_store_rounded, label: 'Grocery', soon: true),
+            const _Service(
+                icon: Icons.local_grocery_store_rounded,
+                label: 'Grocery',
+                soon: true),
           ],
         ),
         const SizedBox(height: 20),
@@ -77,7 +81,8 @@ class _WhereToCard extends StatelessWidget {
                       ),
                 ),
               ),
-              Icon(Icons.arrow_forward_rounded, color: scheme.onPrimaryContainer),
+              Icon(Icons.arrow_forward_rounded,
+                  color: scheme.onPrimaryContainer),
             ],
           ),
         ),
@@ -87,7 +92,8 @@ class _WhereToCard extends StatelessWidget {
 }
 
 class _Service extends StatelessWidget {
-  const _Service({required this.icon, required this.label, this.onTap, this.soon = false});
+  const _Service(
+      {required this.icon, required this.label, this.onTap, this.soon = false});
 
   final IconData icon;
   final String label;
@@ -134,11 +140,15 @@ class _BecomeDriverCard extends ConsumerWidget {
         contentPadding: const EdgeInsets.all(12),
         leading: CircleAvatar(
           backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-          child: Icon(Icons.directions_car_rounded,
-              color: Theme.of(context).colorScheme.onSecondaryContainer),
+          child: Icon(
+            Icons.directions_car_rounded,
+            color: Theme.of(context).colorScheme.onSecondaryContainer,
+          ),
         ),
-        title: Text(l.becomeDriver,
-            style: const TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(
+          l.becomeDriver,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
         subtitle: Text(l.becomeDriverBody),
         trailing: const Icon(Icons.chevron_right_rounded),
         onTap: () => context.push(Routes.becomeDriver),

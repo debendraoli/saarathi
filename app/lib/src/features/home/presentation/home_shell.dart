@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_router.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/models.dart';
+import '../../notifications/data/notifications_repository.dart';
 import '../../ride/presentation/trip_history.dart';
 import 'account_tab.dart';
 import 'driver_home.dart';
@@ -36,7 +39,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         title: Text(_greeting(l, auth.user)),
         actions: [
           if (auth.user?.isDriver ?? false) _ModeSwitch(mode: auth.mode),
-          const SizedBox(width: 8),
+          const _NotificationBell(),
+          const SizedBox(width: 4),
         ],
       ),
       body: body,
@@ -67,6 +71,23 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   String _greeting(AppL10n l, AppUser? user) {
     final name = user?.fullName;
     return l.greeting(name == null || name.isEmpty ? '' : ', $name');
+  }
+}
+
+class _NotificationBell extends ConsumerWidget {
+  const _NotificationBell();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unread = ref.watch(inboxProvider).valueOrNull?.unread ?? 0;
+    return IconButton(
+      onPressed: () => context.push(Routes.notifications),
+      icon: Badge(
+        isLabelVisible: unread > 0,
+        label: Text('$unread'),
+        child: const Icon(Icons.notifications_rounded),
+      ),
+    );
   }
 }
 

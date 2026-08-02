@@ -52,12 +52,21 @@ class _ConfirmRideScreenState extends ConsumerState<ConfirmRideScreen> {
           Expanded(
             child: MapView(
               center: widget.draft.pickup.point,
-              route: [widget.draft.pickup.point, widget.draft.destination.point],
+              route: [
+                widget.draft.pickup.point,
+                widget.draft.destination.point
+              ],
               pins: [
-                MapPin(widget.draft.pickup.point, Icons.trip_origin,
-                    Theme.of(context).colorScheme.primary),
-                MapPin(widget.draft.destination.point, Icons.location_on_rounded,
-                    Theme.of(context).colorScheme.secondary),
+                MapPin(
+                  widget.draft.pickup.point,
+                  Icons.trip_origin,
+                  Theme.of(context).colorScheme.primary,
+                ),
+                MapPin(
+                  widget.draft.destination.point,
+                  Icons.location_on_rounded,
+                  Theme.of(context).colorScheme.secondary,
+                ),
               ],
             ),
           ),
@@ -72,7 +81,8 @@ class _ConfirmRideScreenState extends ConsumerState<ConfirmRideScreen> {
                 ),
                 error: (_, __) => ErrorRetry(
                   message: l.errorNetwork,
-                  onRetry: () => ref.invalidate(fareEstimateProvider(widget.draft)),
+                  onRetry: () =>
+                      ref.invalidate(fareEstimateProvider(widget.draft)),
                 ),
                 data: (fare) => _FareCard(
                   fare: fare,
@@ -117,7 +127,8 @@ class _FareCard extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              l.distanceDuration(fare.distanceKm.toStringAsFixed(1), fare.durationMins),
+              l.distanceDuration(
+                  fare.distanceKm.toStringAsFixed(1), fare.durationMins),
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),

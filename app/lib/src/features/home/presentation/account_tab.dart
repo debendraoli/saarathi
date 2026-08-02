@@ -31,7 +31,9 @@ class AccountTab extends ConsumerWidget {
               ),
             ),
             title: Text(
-              user?.fullName?.isNotEmpty == true ? user!.fullName! : (user?.phone ?? ''),
+              user?.fullName?.isNotEmpty == true
+                  ? user!.fullName!
+                  : (user?.phone ?? ''),
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             subtitle: Text(user?.phone ?? ''),
@@ -63,7 +65,8 @@ class AccountTab extends ConsumerWidget {
     );
   }
 
-  Future<void> _editName(BuildContext context, WidgetRef ref, String current) async {
+  Future<void> _editName(
+      BuildContext context, WidgetRef ref, String current) async {
     final controller = TextEditingController(text: current);
     final name = await showDialog<String>(
       context: context,

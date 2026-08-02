@@ -19,10 +19,28 @@ class AppConfig {
   }
 
   /// WebSocket base derived from the API base (http→ws, https→wss).
-  static String get wsBase =>
-      apiBase.replaceFirst('https://', 'wss://').replaceFirst('http://', 'ws://');
+  static String get wsBase => apiBase
+      .replaceFirst('https://', 'wss://')
+      .replaceFirst('http://', 'ws://');
 
   static const String deepLinkScheme = 'saarathi';
+
+  /// Self-hosted Coturn (TURN/STUN) for WebRTC NAT traversal. Configure at build:
+  ///   --dart-define=SAARATHI_TURN_URL=turn:turn.saarathi.np:3478
+  ///   --dart-define=SAARATHI_TURN_USER=... --dart-define=SAARATHI_TURN_PASS=...
+  static const String turnUrl =
+      String.fromEnvironment('SAARATHI_TURN_URL', defaultValue: '');
+  static const String turnUser =
+      String.fromEnvironment('SAARATHI_TURN_USER', defaultValue: '');
+  static const String turnPass =
+      String.fromEnvironment('SAARATHI_TURN_PASS', defaultValue: '');
+
+  /// ICE servers: a public STUN plus our TURN relay when configured.
+  static List<Map<String, dynamic>> get iceServers => [
+        {'urls': 'stun:stun.l.google.com:19302'},
+        if (turnUrl.isNotEmpty)
+          {'urls': turnUrl, 'username': turnUser, 'credential': turnPass},
+      ];
 
   /// Default map tiles. Swap to your self-hosted OSM tile server in production
   /// (e.g. https://tiles.saarathi.np/{z}/{x}/{y}.png) — Nepal/cost reasons.

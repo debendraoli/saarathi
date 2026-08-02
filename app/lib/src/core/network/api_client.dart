@@ -43,7 +43,8 @@ class ApiClient {
           handler.next(options);
         },
         onError: (e, handler) async {
-          if (e.response?.statusCode == 401 && !_isAuthPath(e.requestOptions.path)) {
+          if (e.response?.statusCode == 401 &&
+              !_isAuthPath(e.requestOptions.path)) {
             final ok = await _refresh();
             if (ok) {
               try {
@@ -71,7 +72,8 @@ class ApiClient {
 
   Future<Response<dynamic>> _retry(RequestOptions o) {
     // Drop the stale bearer so the interceptor re-injects the refreshed token.
-    final headers = Map<String, dynamic>.from(o.headers)..remove('authorization');
+    final headers = Map<String, dynamic>.from(o.headers)
+      ..remove('authorization');
     return _dio.request<dynamic>(
       o.path,
       data: o.data,

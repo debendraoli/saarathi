@@ -51,7 +51,9 @@ class _TripTile extends StatelessWidget {
     final isDelivery = trip.tripType == 'delivery';
     return Card(
       child: ListTile(
-        onTap: trip.isActive ? () => context.push('${Routes.trip}/${trip.id}') : null,
+        onTap: trip.isActive
+            ? () => context.push('${Routes.trip}/${trip.id}')
+            : null,
         leading: CircleAvatar(
           backgroundColor: scheme.surfaceContainerHighest,
           child: Icon(
@@ -76,7 +78,7 @@ class _TripTile extends StatelessWidget {
   static String _fmtDate(DateTime? d) {
     if (d == null) return '';
     final l = d.toLocal();
-    final two = (int n) => n.toString().padLeft(2, '0');
+    String two(int n) => n.toString().padLeft(2, '0');
     return '${l.year}-${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
   }
 }
@@ -113,8 +115,11 @@ class _Empty extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.receipt_long_rounded,
-              size: 48, color: Theme.of(context).colorScheme.outline),
+          Icon(
+            Icons.receipt_long_rounded,
+            size: 48,
+            color: Theme.of(context).colorScheme.outline,
+          ),
           const SizedBox(height: 12),
           Text(label),
         ],

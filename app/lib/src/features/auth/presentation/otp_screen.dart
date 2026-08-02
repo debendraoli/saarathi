@@ -55,7 +55,9 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   }
 
   Future<void> _resend() async {
-    final code = await ref.read(authControllerProvider.notifier).requestOtp(widget.phone);
+    final code = await ref
+        .read(authControllerProvider.notifier)
+        .requestOtp(widget.phone);
     ref.read(devOtpCodeProvider.notifier).state = code;
     if (code != null) _controller.text = code;
   }
@@ -113,7 +115,8 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
                     l.otpDevCode(devCode),
-                    style: TextStyle(color: Theme.of(context).colorScheme.tertiary),
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.tertiary),
                   ),
                 ),
               const SizedBox(height: 12),

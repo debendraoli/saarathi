@@ -47,7 +47,8 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
       _error = null;
     });
     try {
-      final devCode = await ref.read(authControllerProvider.notifier).requestOtp(e164);
+      final devCode =
+          await ref.read(authControllerProvider.notifier).requestOtp(e164);
       ref.read(devOtpCodeProvider.notifier).state = devCode;
       if (mounted) context.push(Routes.otp, extra: e164);
     } catch (_) {
@@ -129,13 +130,16 @@ class _DialCode extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('🇳🇵 +977',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700, color: AppTheme.ink)),
+          Text(
+            '🇳🇵 +977',
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700, color: AppTheme.ink),
+          ),
           const SizedBox(width: 8),
-          Container(width: 1, height: 24, color: Theme.of(context).dividerColor),
+          Container(
+              width: 1, height: 24, color: Theme.of(context).dividerColor),
         ],
       ),
     );

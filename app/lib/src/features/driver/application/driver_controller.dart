@@ -8,12 +8,14 @@ import '../data/driver_repository.dart';
 import '../domain/models.dart';
 
 class DriverStatus {
-  const DriverStatus({this.online = false, this.busy = false, this.jobTypes = const ['ride']});
+  const DriverStatus(
+      {this.online = false, this.busy = false, this.jobTypes = const ['ride']});
   final bool online;
   final bool busy;
   final List<String> jobTypes;
 
-  DriverStatus copyWith({bool? online, bool? busy, List<String>? jobTypes}) => DriverStatus(
+  DriverStatus copyWith({bool? online, bool? busy, List<String>? jobTypes}) =>
+      DriverStatus(
         online: online ?? this.online,
         busy: busy ?? this.busy,
         jobTypes: jobTypes ?? this.jobTypes,

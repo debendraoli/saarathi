@@ -1,7 +1,8 @@
 import '../../ride/domain/models.dart';
 
 /// A dispatch offer shown to an online driver (short TTL; accept/decline).
-class DriverOffer {  const DriverOffer({
+class DriverOffer {
+  const DriverOffer({
     required this.tripId,
     required this.grossFare,
     required this.finalFare,
@@ -23,7 +24,8 @@ class DriverOffer {  const DriverOffer({
         grossFare: asDouble(j['gross_fare']),
         finalFare: asDouble(j['final_fare']),
         vehicleClass: (j['vehicle_class'] as String?) ?? 'two_wheeler',
-        distanceKm: j['distance_km'] == null ? null : asDouble(j['distance_km']),
+        distanceKm:
+            j['distance_km'] == null ? null : asDouble(j['distance_km']),
       );
 }
 
@@ -66,7 +68,10 @@ enum KycStatus {
 
 /// Driver verification snapshot from GET /v1/driver/status.
 class DriverKyc {
-  const DriverKyc({required this.status, this.uploadedKinds = const {}, this.rejectionReason});
+  const DriverKyc(
+      {required this.status,
+      this.uploadedKinds = const {},
+      this.rejectionReason});
 
   final KycStatus status;
   final Set<String> uploadedKinds;
@@ -74,7 +79,8 @@ class DriverKyc {
 
   factory DriverKyc.fromJson(Map<String, dynamic> j) {
     final driver = j['driver'] as Map<String, dynamic>?;
-    final docs = (j['documents'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    final docs =
+        (j['documents'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
     return DriverKyc(
       status: KycStatus.fromWire(driver?['kyc_status'] as String?),
       uploadedKinds: docs.map((d) => d['kind'] as String).toSet(),
