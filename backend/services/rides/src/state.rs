@@ -14,4 +14,6 @@ pub struct AppState {
     pub hub: Hub,
     pub redis: redis::aio::ConnectionManager,
     pub payments: Arc<dyn crate::payments::PaymentProvider>,
+    /// NATS bus for inter-service events (notifications). `None` if unavailable.
+    pub nats: Option<async_nats::Client>,
 }

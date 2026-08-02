@@ -15,6 +15,7 @@ use axum::{
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::{prelude::FromPrimitive, Decimal};
 use saarathi_core::api::ErrorCode;
+use saarathi_core::domain::roles;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -42,7 +43,7 @@ async fn topup(
     AuthUser(claims): AuthUser,
     Json(body): Json<TopupRequest>,
 ) -> AppResult<Json<Value>> {
-    if claims.role != "driver" {
+    if claims.role != roles::DRIVER {
         return Err(AppError::Forbidden);
     }
     if body.amount <= Decimal::ZERO {
@@ -92,7 +93,7 @@ async fn buy_pass(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> AppResult<Json<Value>> {
-    if claims.role != "driver" {
+    if claims.role != roles::DRIVER {
         return Err(AppError::Forbidden);
     }
     let price = st.config.subscription_weekly_price;

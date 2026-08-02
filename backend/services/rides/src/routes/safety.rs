@@ -83,10 +83,10 @@ async fn trigger(
         Some(rider)
     };
     if let Some(other) = counterpart {
-        let _ = notify::send(
-            &st.db,
+        notify::send(
+            &st.nats,
             other,
-            "safety",
+            saarathi_core::domain::notif::SAFETY,
             "SOS raised on your trip",
             "Emergency alert — Ops has been notified.",
         )

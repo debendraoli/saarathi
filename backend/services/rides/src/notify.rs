@@ -1,28 +1,36 @@
-//! In-app notifications (E8). The inbox row is the durable record; for critical
-//! classes we also escalate to push/SMS — mocked here behind the same call so the
-//! real FCM/SMS providers drop in later (the "delivery ladder" from doc 09).
+//! Notification publishing. Trips don't write the inbox anymore — they publish a
+//! `NotifyRequest` to NATS and the standalone `saarathi-notify` service persists
+//! it and runs the push/SMS ladder. Fire-and-forget: a bus blip never fails a
+//! ride.
 
-use crate::error::AppResult;
-use sqlx::PgPool;
+use saarathi_core::events::{NotifyRequest, NOTIFY_SUBJECT};
 use uuid::Uuid;
 
+/// Publish a notification request for `user_id` onto the bus. No-op (logged) if
+/// NATS isn't connected.
 pub async fn send(
-    pool: &PgPool,
+    nats: &Option<async_nats::Client>,
     user_id: Uuid,
     class: &str,
     title: &str,
     body: &str,
-) -> AppResult<()> {
-    sqlx::query("INSERT INTO notifications (user_id, class, title, body) VALUES ($1, $2, $3, $4)")
-        .bind(user_id)
-        .bind(class)
-        .bind(title)
-        .bind(body)
-        .execute(pool)
-        .await?;
-    // Critical classes escalate past the inbox. Real push→SMS fallback lands here.
-    if matches!(class, "safety" | "transactional" | "compliance") {
-        tracing::info!(%user_id, class, title, "notification escalated (push/SMS mock)");
+) {
+    let Some(client) = nats else {
+        tracing::debug!(%user_id, class, "notification skipped (no NATS)");
+        return;
+    };
+    let req = NotifyRequest {
+        user_id,
+        class: class.to_string(),
+        title: title.to_string(),
+        body: body.to_string(),
+    };
+    match serde_json::to_vec(&req) {
+        Ok(bytes) => {
+            if let Err(e) = client.publish(NOTIFY_SUBJECT, bytes.into()).await {
+                tracing::warn!(error = %e, "failed to publish notification");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "failed to encode notification"),
     }
-    Ok(())
 }

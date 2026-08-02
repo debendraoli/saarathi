@@ -7,6 +7,7 @@ use crate::state::AppState;
 use axum::extract::State;
 use axum::{routing::get, Json, Router};
 use rust_decimal::Decimal;
+use saarathi_core::domain::roles;
 use serde_json::{json, Value};
 
 pub fn routes() -> Router<AppState> {
@@ -27,7 +28,7 @@ async fn analytics(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> AppResult<Json<Value>> {
-    if claims.role != "driver" {
+    if claims.role != roles::DRIVER {
         return Err(AppError::Forbidden);
     }
     let t: Totals = sqlx::query_as(

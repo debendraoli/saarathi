@@ -1,12 +1,12 @@
 [package]
-name = "saarathi-rides"
+name = "saarathi-notify"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "saarathi-rides"
+name = "saarathi-notify"
 path = "src/main.rs"
 
 [dependencies]
@@ -21,14 +21,10 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-rust_decimal = { workspace = true }
-rust_decimal_macros = { workspace = true }
 sqlx = { workspace = true }
 jsonwebtoken = { workspace = true }
 dotenvy = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
-reqwest = { workspace = true }
-futures-util = { workspace = true }
-redis = { workspace = true }
 async-nats = { workspace = true }
+futures-util = { workspace = true }

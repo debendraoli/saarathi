@@ -47,6 +47,15 @@ async fn main() -> anyhow::Result<()> {
     let redis_client = redis::Client::open(config.redis_url.clone())?;
     let redis = redis::aio::ConnectionManager::new(redis_client).await?;
 
+    // NATS bus for notifications (non-fatal: trips run fine if the bus is down).
+    let nats = match async_nats::connect(&config.nats_url).await {
+        Ok(c) => Some(c),
+        Err(e) => {
+            tracing::warn!(error = %e, "NATS unavailable; notifications will be skipped");
+            None
+        }
+    };
+
     let router = Arc::new(Router::new(&config));
     let port = config.port;
     let state = AppState {
@@ -56,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
         hub: Hub::new(),
         redis,
         payments: Arc::new(payments::MockProvider),
+        nats,
     };
 
     tokio::spawn(dispatch::run_dispatcher(state.clone()));

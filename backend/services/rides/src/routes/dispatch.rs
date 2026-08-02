@@ -12,6 +12,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use saarathi_core::api::ErrorCode;
+use saarathi_core::domain::roles;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -40,7 +41,7 @@ async fn go_online(
     AuthUser(claims): AuthUser,
     Json(body): Json<OnlineRequest>,
 ) -> AppResult<Json<Value>> {
-    if claims.role != "driver" {
+    if claims.role != roles::DRIVER {
         return Err(AppError::Forbidden);
     }
     // Only KYC-approved drivers may go online.
@@ -84,7 +85,7 @@ async fn heartbeat(
     AuthUser(claims): AuthUser,
     Json(body): Json<HeartbeatRequest>,
 ) -> AppResult<Json<Value>> {
-    if claims.role != "driver" {
+    if claims.role != roles::DRIVER {
         return Err(AppError::Forbidden);
     }
     let job_types = if body.job_types.is_empty() {
@@ -197,10 +198,10 @@ async fn accept_offer(
         id,
         json!({ "type": "status", "status": "accepted", "driver_id": claims.sub }).to_string(),
     );
-    let _ = crate::notify::send(
-        &st.db,
+    crate::notify::send(
+        &st.nats,
         trip.rider_id,
-        "transactional",
+        saarathi_core::domain::notif::TRANSACTIONAL,
         "Driver on the way",
         "Your driver accepted the trip and is heading to your pickup.",
     )

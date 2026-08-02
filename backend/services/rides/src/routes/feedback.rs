@@ -129,10 +129,10 @@ async fn create_report(
     .bind(b.detail)
     .fetch_one(&st.db)
     .await?;
-    let _ = notify::send(
-        &st.db,
+    notify::send(
+        &st.nats,
         claims.sub,
-        "transactional",
+        saarathi_core::domain::notif::TRANSACTIONAL,
         "Report received",
         "Our team will review it shortly.",
     )

@@ -13,6 +13,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
+use saarathi_core::domain::roles;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -111,7 +112,7 @@ async fn confirm_topup(
     }
 
     // Credit the right account (rider prepaid balance or driver credit balance).
-    let balance = if kind == "driver" {
+    let balance = if kind == roles::DRIVER {
         payments::credit_driver(&mut tx, user_id, amount, "topup", Some(&body.reference)).await?
     } else {
         payments::credit_rider(
@@ -146,7 +147,7 @@ async fn request_payout(
     AuthUser(claims): AuthUser,
     Json(body): Json<PayoutRequest>,
 ) -> AppResult<Json<Value>> {
-    if claims.role != "driver" {
+    if claims.role != roles::DRIVER {
         return Err(AppError::Forbidden);
     }
     let mut tx = st.db.begin().await?;

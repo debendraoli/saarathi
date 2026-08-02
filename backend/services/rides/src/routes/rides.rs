@@ -13,6 +13,7 @@ use axum::{
 };
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
+use saarathi_core::domain::roles;
 use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
@@ -246,7 +247,7 @@ async fn accept(
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Trip>> {
-    if claims.role != "driver" {
+    if claims.role != roles::DRIVER {
         return Err(AppError::Forbidden);
     }
     let trip: Trip = sqlx::query_as(&format!(

@@ -1,0 +1,239 @@
+//! `saarathi-notify` — the notification service.
+//!
+//! It owns the in-app inbox and the push/SMS "delivery ladder". Other services
+//! don't write notifications directly; they publish a `NotifyRequest` to NATS
+//! ([`saarathi_core::events::NOTIFY_SUBJECT`]) and this service consumes it,
+//! persists the durable inbox row, and escalates critical classes. Fully
+//! decoupled from the trip transaction — a natural first microservice split.
+
+use axum::extract::{FromRequestParts, Path, State};
+use axum::http::header::AUTHORIZATION;
+use axum::http::{request::Parts, HeaderName, Method, StatusCode};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use chrono::{DateTime, Utc};
+use futures_util::StreamExt;
+use jsonwebtoken::{decode, DecodingKey, Validation};
+use saarathi_core::domain::notif;
+use saarathi_core::events::{NotifyRequest, NOTIFY_SUBJECT};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
+use std::sync::Arc;
+use std::time::Duration;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::trace::TraceLayer;
+use uuid::Uuid;
+
+#[derive(Clone)]
+struct AppState {
+    db: PgPool,
+    jwt_secret: Arc<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Claims {
+    sub: Uuid,
+    #[allow(dead_code)] // present in the token; jsonwebtoken validates expiry
+    exp: usize,
+}
+
+/// Any authenticated user (a valid access token issued by saarathi-auth).
+struct AuthUser(Claims);
+
+impl FromRequestParts<AppState> for AuthUser {
+    type Rejection = StatusCode;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, StatusCode> {
+        let token = parts
+            .headers
+            .get(AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|h| h.strip_prefix("Bearer "))
+            .ok_or(StatusCode::UNAUTHORIZED)?;
+        let data = decode::<Claims>(
+            token,
+            &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
+            &Validation::default(),
+        )
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        Ok(AuthUser(data.claims))
+    }
+}
+
+fn env_or(key: &str, default: &str) -> String {
+    std::env::var(key)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| default.into())
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .init();
+
+    let database_url = std::env::var("DATABASE_URL")?;
+    let jwt_secret = std::env::var("JWT_SECRET")?;
+    let nats_url = env_or("NATS_URL", "nats://localhost:4222");
+    let port: u16 = env_or("NOTIFY_PORT", "8083").parse()?;
+    let origins: Vec<_> = env_or("CORS_ORIGINS", "http://localhost:3000")
+        .split(',')
+        .filter_map(|o| o.trim().parse().ok())
+        .collect();
+
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(&database_url)
+        .await?;
+    sqlx::raw_sql(include_str!("schema.sql"))
+        .execute(&pool)
+        .await?;
+
+    // Consume notification requests off the bus. If NATS is down we still serve
+    // the (read-only) inbox — delivery resumes when the bus returns.
+    match async_nats::connect(&nats_url).await {
+        Ok(client) => {
+            tokio::spawn(consume(client, pool.clone()));
+            tracing::info!(%nats_url, "notify: subscribed to {NOTIFY_SUBJECT}");
+        }
+        Err(e) => tracing::warn!(error = %e, "notify: NATS unavailable; inbox is read-only"),
+    }
+
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([
+            HeaderName::from_static("authorization"),
+            HeaderName::from_static("content-type"),
+        ]);
+
+    let state = AppState {
+        db: pool,
+        jwt_secret: Arc::new(jwt_secret),
+    };
+    let app = Router::new()
+        .route("/health", get(health))
+        .route("/v1/notifications", get(inbox))
+        .route("/v1/notifications/{id}/read", post(mark_read))
+        .route("/v1/notifications/read-all", post(read_all))
+        .layer(cors)
+        .layer(TraceLayer::new_for_http())
+        .with_state(state);
+
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    tracing::info!("saarathi-notify listening on http://{addr}");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+/// NATS consumer loop: durable inbox row + push/SMS escalation for critical classes.
+async fn consume(client: async_nats::Client, pool: PgPool) {
+    let mut sub = match client.subscribe(NOTIFY_SUBJECT).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(error = %e, "notify: failed to subscribe");
+            return;
+        }
+    };
+    while let Some(msg) = sub.next().await {
+        match serde_json::from_slice::<NotifyRequest>(&msg.payload) {
+            Ok(req) => {
+                if let Err(e) = deliver(&pool, &req).await {
+                    tracing::warn!(error = %e, "notify: delivery failed");
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "notify: bad NotifyRequest payload"),
+        }
+    }
+}
+
+async fn deliver(pool: &PgPool, req: &NotifyRequest) -> anyhow::Result<()> {
+    sqlx::query("INSERT INTO notifications (user_id, class, title, body) VALUES ($1, $2, $3, $4)")
+        .bind(req.user_id)
+        .bind(&req.class)
+        .bind(&req.title)
+        .bind(&req.body)
+        .execute(pool)
+        .await?;
+    if notif::CRITICAL.contains(&req.class.as_str()) {
+        tracing::info!(user_id = %req.user_id, class = %req.class, title = %req.title,
+            "notification escalated (push/SMS mock)");
+    }
+    Ok(())
+}
+
+async fn health() -> Json<Value> {
+    Json(json!({ "service": "saarathi-notify", "status": "ok" }))
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+struct Notification {
+    id: Uuid,
+    class: String,
+    title: String,
+    body: Option<String>,
+    read_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+}
+
+async fn inbox(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> Result<Json<Value>, StatusCode> {
+    let items: Vec<Notification> = sqlx::query_as(
+        "SELECT id, class, title, body, read_at, created_at FROM notifications \
+         WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100",
+    )
+    .bind(claims.sub)
+    .fetch_all(&st.db)
+    .await
+    .map_err(internal)?;
+    let unread = items.iter().filter(|n| n.read_at.is_none()).count();
+    Ok(Json(json!({ "unread": unread, "items": items })))
+}
+
+async fn mark_read(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, StatusCode> {
+    let res = sqlx::query(
+        "UPDATE notifications SET read_at = now() WHERE id = $1 AND user_id = $2 AND read_at IS NULL",
+    )
+    .bind(id)
+    .bind(claims.sub)
+    .execute(&st.db)
+    .await
+    .map_err(internal)?;
+    if res.rows_affected() == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn read_all(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> Result<Json<Value>, StatusCode> {
+    let res = sqlx::query(
+        "UPDATE notifications SET read_at = now() WHERE user_id = $1 AND read_at IS NULL",
+    )
+    .bind(claims.sub)
+    .execute(&st.db)
+    .await
+    .map_err(internal)?;
+    Ok(Json(json!({ "marked": res.rows_affected() })))
+}
+
+fn internal(e: sqlx::Error) -> StatusCode {
+    tracing::error!(error = ?e, "notify: db error");
+    StatusCode::INTERNAL_SERVER_ERROR
+}

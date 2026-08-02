@@ -14,6 +14,7 @@ set -euo pipefail
 
 API="${API:-http://localhost:8081}"
 RIDES="${RIDES:-http://localhost:8082}"
+NOTIFY="${NOTIFY:-http://localhost:8083}"
 ADMIN_PHONE="${SEED_DEV_ADMIN_PHONE:-+9779800000000}"
 
 command -v jq >/dev/null || { echo "jq is required"; exit 1; }
@@ -23,6 +24,7 @@ step() { printf '\n▶ %s\n' "$1"; }
 step "health checks"
 j "$API/health"   | jq -e '.status=="ok"' >/dev/null && echo "  auth ok"
 j "$RIDES/health" | jq -e '.status=="ok"' >/dev/null && echo "  rides ok"
+j "$NOTIFY/health" | jq -e '.status=="ok"' >/dev/null && echo "  notify ok"
 
 login() { # phone [as_driver] -> token pair JSON on stdout
   local phone="$1" as_driver="${2:-false}" code
@@ -239,7 +241,13 @@ j -X POST "$RIDES/v1/admin/sos/$SOSID/resolve" -H "authorization: Bearer $ADMIN_
   -H 'content-type: application/json' -d '{"note":"resolved in test"}' >/dev/null
 echo "  SOS raised (active=$ACTIVE) + resolved"
 
-UNREAD=$(j "$RIDES/v1/notifications" -H "authorization: Bearer $RTOKEN" | jq -r '.unread')
+# Notifications now flow over NATS to saarathi-notify (eventual consistency).
+UNREAD=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  UNREAD=$(j "$NOTIFY/v1/notifications" -H "authorization: Bearer $RTOKEN" | jq -r '.unread')
+  [ "$UNREAD" -ge 1 ] && break
+  sleep 0.5
+done
 [ "$UNREAD" -ge 1 ] || { echo "  expected notifications"; exit 1; }
 echo "  rider unread notifications: $UNREAD"
 

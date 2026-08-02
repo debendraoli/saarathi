@@ -6,6 +6,7 @@ use axum::extract::FromRequestParts;
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use jsonwebtoken::{decode, DecodingKey, Validation};
+use saarathi_core::domain::roles;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -19,12 +20,12 @@ pub struct Claims {
 
 impl Claims {
     pub fn is_staff(&self) -> bool {
-        !matches!(self.role.as_str(), "rider" | "driver")
+        !matches!(self.role.as_str(), roles::RIDER | roles::DRIVER)
     }
 
     /// Roles allowed to approve/reject (maker-checker): admin & super-admin.
     pub fn can_approve(&self) -> bool {
-        matches!(self.role.as_str(), "super_admin" | "admin")
+        matches!(self.role.as_str(), roles::SUPER_ADMIN | roles::ADMIN)
     }
 }
 

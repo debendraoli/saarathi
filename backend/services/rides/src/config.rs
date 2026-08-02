@@ -24,6 +24,8 @@ pub struct Config {
     pub commission_rate: Decimal,
     /// Redis connection for the driver geo-index + dispatch.
     pub redis_url: String,
+    /// NATS bus URL for inter-service events (notifications).
+    pub nats_url: String,
     /// How long a driver has to respond to a job offer before it moves on.
     pub offer_ttl_secs: i64,
     /// Dispatch search radius (km); expands up to the max if no driver responds.
@@ -70,6 +72,7 @@ impl Config {
             four_wheeler_per_km: dec_env("FARE_FOUR_WHEELER_PER_KM", "45"),
             commission_rate: dec_env("FARE_COMMISSION_RATE", "0.10"),
             redis_url: opt("REDIS_URL").unwrap_or_else(|| "redis://localhost:6379".into()),
+            nats_url: opt("NATS_URL").unwrap_or_else(|| "nats://localhost:4222".into()),
             offer_ttl_secs: int_env("DISPATCH_OFFER_TTL_SECS", 15),
             dispatch_radius_km: float_env("DISPATCH_RADIUS_KM", 2.0),
             dispatch_max_radius_km: float_env("DISPATCH_MAX_RADIUS_KM", 8.0),

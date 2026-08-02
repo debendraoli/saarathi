@@ -12,6 +12,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
+use saarathi_core::domain::roles;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -47,7 +48,7 @@ async fn create(
     StaffUser(claims): StaffUser,
     Json(body): Json<NewCampaign>,
 ) -> AppResult<Json<Campaign>> {
-    if !matches!(body.audience.as_str(), "rider" | "driver") {
+    if !matches!(body.audience.as_str(), roles::RIDER | roles::DRIVER) {
         return Err(AppError::BadRequest(
             "audience must be 'rider' or 'driver'".into(),
         ));

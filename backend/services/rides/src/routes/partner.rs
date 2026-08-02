@@ -13,6 +13,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
+use saarathi_core::domain::partner_roles as pr;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -62,12 +63,12 @@ async fn require_member(st: &AppState, user_id: Uuid, partner_id: Uuid) -> AppRe
 
 /// Money actions: owner / admin / finance only.
 fn can_manage_money(role: &str) -> bool {
-    matches!(role, "owner" | "admin" | "finance")
+    matches!(role, pr::OWNER | pr::ADMIN | pr::FINANCE)
 }
 
 /// Campaign actions: owner / admin / manager only.
 fn can_manage_campaigns(role: &str) -> bool {
-    matches!(role, "owner" | "admin" | "manager")
+    matches!(role, pr::OWNER | pr::ADMIN | pr::MANAGER)
 }
 
 #[derive(sqlx::FromRow)]

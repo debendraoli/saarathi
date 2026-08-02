@@ -237,19 +237,6 @@ CREATE TABLE IF NOT EXISTS sos_incidents (
 );
 CREATE INDEX IF NOT EXISTS sos_status_idx ON sos_incidents (status, created_at DESC);
 
--- In-app notification inbox (the durable record; push/SMS are best-effort on top).
-CREATE TABLE IF NOT EXISTS notifications (
-    id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id    uuid        NOT NULL,
-    class      text        NOT NULL,   -- safety | transactional | compliance | marketing
-    title      text        NOT NULL,
-    body       text,
-    channel    text        NOT NULL DEFAULT 'inapp',
-    read_at    timestamptz,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at DESC);
-
 -- Driver subscription passes ("unlimited for a period" — keep 100% of fares).
 -- The fair-cap reconciliation refunds any driver who paid more than the 10% cap.
 CREATE TABLE IF NOT EXISTS subscription_passes (
