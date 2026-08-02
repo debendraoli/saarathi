@@ -4,14 +4,76 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../shared/widgets/common.dart';
 import '../../driver/application/driver_controller.dart';
+import '../../driver/data/driver_kyc_repository.dart';
 import '../../driver/domain/models.dart';
 import '../../driver/data/driver_repository.dart';
 
 /// Driver home: one big online/offline control (presence heartbeat runs while
-/// online) and incoming job offers with transparent net earnings.
+/// online) and incoming job offers with transparent net earnings. Gated on KYC
+/// approval — the backend only lets approved drivers go online.
 class DriverHome extends ConsumerWidget {
   const DriverHome({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppL10n.of(context);
+    final kyc = ref.watch(driverKycProvider);
+
+    return kyc.when(
+      loading: () => const LoadingView(),
+      error: (_, __) => ErrorRetry(
+        message: l.errorNetwork,
+        onRetry: () => ref.invalidate(driverKycProvider),
+      ),
+      data: (data) {
+        if (data.status != KycStatus.approved) {
+          return _KycGate(status: data.status);
+        }
+        return const _OnlineBoard();
+      },
+    );
+  }
+}
+
+class _KycGate extends StatelessWidget {
+  const _KycGate({required this.status});
+  final KycStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppL10n.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.badge_rounded,
+                size: 48, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(height: 16),
+            Text(
+              status == KycStatus.rejected ? l.kycRejected : l.kycUnderReview,
+              style: Theme.of(context).textTheme.titleLarge,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(l.kycUnderReviewBody, textAlign: TextAlign.center),
+            const SizedBox(height: 20),
+            FilledButton(
+              onPressed: () => context.push(Routes.kyc),
+              child: Text(l.uploadDocuments),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OnlineBoard extends ConsumerWidget {
+  const _OnlineBoard();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

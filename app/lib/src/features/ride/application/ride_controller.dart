@@ -22,3 +22,8 @@ final tripStreamProvider =
     await Future<void>.delayed(const Duration(seconds: 3));
   }
 });
+
+/// The signed-in user's own trips, newest first (Activity tab).
+final myTripsProvider = FutureProvider.autoDispose<List<Trip>>((ref) {
+  return ref.watch(rideRepositoryProvider).myTrips();
+});

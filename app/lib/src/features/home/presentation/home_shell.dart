@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/models.dart';
+import '../../ride/presentation/trip_history.dart';
 import 'account_tab.dart';
 import 'driver_home.dart';
 import 'rider_home.dart';
@@ -28,7 +29,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final isDriverMode = auth.mode == AppMode.driver;
 
     final home = isDriverMode ? const DriverHome() : const RiderHome();
-    final body = [home, const _ActivityTab(), const AccountTab()][_tab];
+    final body = [home, const TripHistoryList(), const AccountTab()][_tab];
 
     return Scaffold(
       appBar: AppBar(
@@ -88,26 +89,6 @@ class _ModeSwitch extends ConsumerWidget {
         selected: {mode},
         onSelectionChanged: (s) =>
             ref.read(authControllerProvider.notifier).setMode(s.first),
-      ),
-    );
-  }
-}
-
-class _ActivityTab extends StatelessWidget {
-  const _ActivityTab();
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppL10n.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.receipt_long_rounded,
-              size: 48, color: Theme.of(context).colorScheme.outline),
-          const SizedBox(height: 12),
-          Text(l.tabActivity),
-        ],
       ),
     );
   }

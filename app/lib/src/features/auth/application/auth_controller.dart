@@ -50,6 +50,19 @@ class AuthController extends Notifier<AuthState> {
 
   void setMode(AppMode mode) => state = state.copyWith(mode: mode);
 
+  /// Re-fetch the account (e.g. after KYC registration promotes rider→driver).
+  Future<void> refresh() async {
+    try {
+      final user = await _repo.me();
+      state = state.copyWith(status: AuthStatus.authenticated, user: user);
+    } catch (_) {/* keep current state */}
+  }
+
+  Future<void> updateName(String name) async {
+    final user = await _repo.updateName(name);
+    state = state.copyWith(user: user);
+  }
+
   Future<void> signOut() async {
     await _tokens.clear();
     state = const AuthState(status: AuthStatus.unauthenticated);

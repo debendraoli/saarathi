@@ -125,6 +125,9 @@ class Trip {
     required this.finalFare,
     this.driverId,
     this.vehicleClass,
+    this.tripType,
+    this.distanceKm = 0,
+    this.createdAt,
   });
 
   final String id;
@@ -134,6 +137,9 @@ class Trip {
   final double finalFare;
   final String? driverId;
   final String? vehicleClass;
+  final String? tripType;
+  final double distanceKm;
+  final DateTime? createdAt;
 
   bool get isActive => const {
         TripStatus.searching,
@@ -151,5 +157,8 @@ class Trip {
         finalFare: asDouble(j['final_fare']),
         driverId: j['driver_id'] as String?,
         vehicleClass: j['vehicle_class'] as String?,
+        tripType: j['trip_type'] as String?,
+        distanceKm: asDouble(j['distance_km']),
+        createdAt: DateTime.tryParse((j['created_at'] as String?) ?? ''),
       );
 }

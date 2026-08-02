@@ -101,6 +101,28 @@
   "kycPending": "Verification pending",
   "kycPendingBody": "Your documents are under review. We'll notify you once approved.",
 
+  "sosSent": "Emergency alert sent",
+  "activityEmpty": "No trips yet",
+  "editName": "Edit name",
+  "yourName": "Your name",
+  "saveAction": "Save",
+
+  "becomeDriverTitle": "Driver registration",
+  "registerAction": "Register",
+  "uploadDocuments": "Upload documents",
+  "kycUnderReview": "Under review",
+  "kycUnderReviewBody": "Your documents are being verified. We'll notify you once approved.",
+  "kycApproved": "You're approved!",
+  "kycApprovedBody": "You can now go online and accept jobs.",
+  "kycRejected": "Verification failed",
+
+  "parcelTitle": "Send a parcel",
+  "recipientName": "Recipient name",
+  "recipientPhone": "Recipient phone",
+  "fragile": "Fragile",
+  "deliveryFee": "Delivery fee",
+  "bookDelivery": "Book delivery",
+
   "errorNetwork": "Network problem. Check your connection and try again.",
   "errorGeneric": "Something went wrong. Please try again."
 }

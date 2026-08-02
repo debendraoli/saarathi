@@ -116,6 +116,18 @@ class ApiClient {
   Future<dynamic> post(String path, {Object? body}) =>
       _send(() => _dio.post<dynamic>(path, data: body));
 
+  Future<dynamic> put(String path, {Object? body}) =>
+      _send(() => _dio.put<dynamic>(path, data: body));
+
+  /// Multipart upload (KYC documents). Lets dio set the multipart boundary.
+  Future<dynamic> upload(String path, FormData form) => _send(
+        () => _dio.post<dynamic>(
+          path,
+          data: form,
+          options: Options(contentType: 'multipart/form-data'),
+        ),
+      );
+
   Future<dynamic> _send(Future<Response<dynamic>> Function() run) async {
     try {
       final res = await run();

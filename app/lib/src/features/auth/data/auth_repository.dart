@@ -22,12 +22,17 @@ class AuthRepository {
       'phone': phone,
       'code': code,
       'as_driver': asDriver,
-    },,);
+    });
     return Session.fromJson(res as Map<String, dynamic>);
   }
 
   Future<AppUser> me() async {
     final res = await _api.get('/v1/me');
+    return AppUser.fromJson(res as Map<String, dynamic>);
+  }
+
+  Future<AppUser> updateName(String fullName) async {
+    final res = await _api.put('/v1/me', body: {'full_name': fullName});
     return AppUser.fromJson(res as Map<String, dynamic>);
   }
 }

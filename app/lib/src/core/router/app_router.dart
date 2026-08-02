@@ -6,6 +6,9 @@ import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/domain/models.dart';
 import '../../features/auth/presentation/otp_screen.dart';
 import '../../features/auth/presentation/phone_screen.dart';
+import '../../features/delivery/presentation/parcel_screen.dart';
+import '../../features/driver/presentation/become_driver_screen.dart';
+import '../../features/driver/presentation/kyc_documents_screen.dart';
 import '../../features/home/presentation/home_shell.dart';
 import '../../features/onboarding/presentation/intro_screen.dart';
 import '../../features/onboarding/presentation/splash_screen.dart';
@@ -24,6 +27,9 @@ class Routes {
   static const whereTo = '/ride/where-to';
   static const confirm = '/ride/confirm';
   static const trip = '/ride/trip'; // /ride/trip/:id
+  static const becomeDriver = '/driver/register';
+  static const kyc = '/driver/kyc';
+  static const parcel = '/delivery/parcel';
 }
 
 /// Bridges Riverpod state changes to go_router's redirect re-evaluation.
@@ -79,6 +85,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '${Routes.trip}/:id',
         builder: (_, state) => TripScreen(tripId: state.pathParameters['id']!),
       ),
+      GoRoute(path: Routes.becomeDriver, builder: (_, __) => const BecomeDriverScreen()),
+      GoRoute(path: Routes.kyc, builder: (_, __) => const KycDocumentsScreen()),
+      GoRoute(path: Routes.parcel, builder: (_, __) => const ParcelScreen()),
     ],
   );
 });

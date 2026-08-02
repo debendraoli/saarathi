@@ -3,6 +3,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
 import '../application/ride_controller.dart';
@@ -10,6 +11,7 @@ import '../application/trip_ws.dart';
 import '../data/ride_repository.dart';
 import '../domain/models.dart';
 import 'widgets/map_view.dart';
+import 'widgets/rating_sheet.dart';
 
 /// One screen for the whole live ride: searching → driver on the way → on trip →
 /// completed. Status comes from polling; the driver pin from the trip WS.
@@ -177,15 +179,33 @@ class _StatusSheet extends ConsumerWidget {
             ],
             if (done) ...[
               const SizedBox(height: 12),
-              FilledButton(
-                onPressed: () => context.go(Routes.home),
-                child: Text(l.actionDone),
-              ),
+              if (trip.status == TripStatus.completed)
+                FilledButton.icon(
+                  onPressed: () => _rate(context, ref, trip.id),
+                  icon: const Icon(Icons.star_rounded),
+                  label: Text(l.rateTrip),
+                )
+              else
+                FilledButton(
+                  onPressed: () => context.go(Routes.home),
+                  child: Text(l.actionDone),
+                ),
             ],
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _rate(BuildContext context, WidgetRef ref, String tripId) async {
+    final result = await showRatingSheet(context);
+    if (result == null) return;
+    try {
+      await ref
+          .read(rideRepositoryProvider)
+          .rate(tripId, result.stars, comment: result.comment);
+    } catch (_) {/* non-blocking */}
+    if (context.mounted) context.go(Routes.home);
   }
 }
 
@@ -221,9 +241,22 @@ class _SosButton extends ConsumerWidget {
           ),
         );
         if (ok == true && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(l.sos)),
-          );
+          try {
+            final here = await currentLatLng();
+            await ref.read(rideRepositoryProvider).sos(
+                  tripId,
+                  lat: here.latitude,
+                  lng: here.longitude,
+                );
+          } catch (_) {/* best effort */}
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                content: Text(l.sosSent),
+              ),
+            );
+          }
         }
       },
     );

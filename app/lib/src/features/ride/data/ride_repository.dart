@@ -32,7 +32,24 @@ class RideRepository {
     return Trip.fromJson(res as Map<String, dynamic>);
   }
 
-  Future<void> cancel(String id) => _api.post('/v1/rides/$id/status', body: {'status': 'cancelled'});
+  Future<List<Trip>> myTrips() async {
+    final res = await _api.get('/v1/rides');
+    final list = (res as List).cast<Map<String, dynamic>>();
+    return list.map(Trip.fromJson).toList();
+  }
+
+  Future<void> cancel(String id) =>
+      _api.post('/v1/rides/$id/status', body: {'status': 'cancelled'});
+
+  Future<void> rate(String id, int stars, {String? comment}) => _api.post(
+        '/v1/rides/$id/rate',
+        body: {'stars': stars, if (comment != null && comment.isNotEmpty) 'comment': comment},
+      );
+
+  Future<void> sos(String id, {double? lat, double? lng, String? note}) => _api.post(
+        '/v1/rides/$id/sos',
+        body: {'lat': lat, 'lng': lng, if (note != null) 'note': note},
+      );
 }
 
 final rideRepositoryProvider = Provider<RideRepository>((ref) {

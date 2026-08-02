@@ -34,7 +34,11 @@ class RiderHome extends ConsumerWidget {
               onTap: () => context.push(Routes.whereTo),
             ),
             _Service(icon: Icons.restaurant_rounded, label: 'Food', soon: true),
-            _Service(icon: Icons.inventory_2_rounded, label: 'Parcel', soon: true),
+            _Service(
+              icon: Icons.inventory_2_rounded,
+              label: 'Parcel',
+              onTap: () => context.push(Routes.parcel),
+            ),
             _Service(icon: Icons.local_grocery_store_rounded, label: 'Grocery', soon: true),
           ],
         ),
@@ -137,25 +141,7 @@ class _BecomeDriverCard extends ConsumerWidget {
             style: const TextStyle(fontWeight: FontWeight.w700)),
         subtitle: Text(l.becomeDriverBody),
         trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: () => showModalBottomSheet<void>(
-          context: context,
-          showDragHandle: true,
-          builder: (_) => Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.badge_rounded,
-                    size: 40, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(height: 12),
-                Text(l.becomeDriver,
-                    style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 8),
-                Text(l.kycPendingBody, textAlign: TextAlign.center),
-              ],
-            ),
-          ),
-        ),
+        onTap: () => context.push(Routes.becomeDriver),
       ),
     );
   }
