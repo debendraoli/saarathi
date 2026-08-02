@@ -16,7 +16,6 @@ pub struct Config {
     /// dashboard/apps can be tested without a live SMS gateway. Never in prod.
     pub otp_dev_mode: bool,
     pub kyc_storage_dir: String,
-    pub cors_origins: Vec<String>,
     /// Optionally upsert a dev super-admin on boot (for local dashboard testing).
     pub seed_dev_admin_phone: Option<String>,
 }
@@ -37,14 +36,6 @@ impl Config {
             otp_rate_window_secs: opt_parse("OTP_RATE_WINDOW_SECS", 3_600),
             otp_dev_mode: flag("OTP_DEV_MODE"),
             kyc_storage_dir: opt("KYC_STORAGE_DIR").unwrap_or_else(|| "./.data/kyc".into()),
-            cors_origins: opt("CORS_ORIGINS")
-                .map(|v| {
-                    v.split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                })
-                .unwrap_or_else(|| vec!["http://localhost:3000".into()]),
             seed_dev_admin_phone: opt("SEED_DEV_ADMIN_PHONE"),
         })
     }

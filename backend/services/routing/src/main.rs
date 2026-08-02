@@ -5,7 +5,7 @@
 //! unconfigured) it falls back to a haversine estimate so fares keep working on
 //! flaky rural connectivity. No POIs, no turn-by-turn, no nearby search.
 
-use axum::http::{HeaderName, Method, StatusCode};
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use rust_decimal::prelude::*;
@@ -13,7 +13,6 @@ use saarathi_core::routing::{haversine_path, LatLng, RouteProfile, RouteRequest,
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -99,16 +98,9 @@ async fn main() -> anyhow::Result<()> {
         cache_ttl_secs,
     };
 
-    // Routing has no user data and is called service-to-service; allow any origin.
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers([HeaderName::from_static("content-type")]);
-
     let app = Router::new()
         .route("/health", get(health))
         .route("/v1/route", post(route))
-        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

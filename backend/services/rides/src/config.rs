@@ -8,7 +8,6 @@ pub struct Config {
     pub database_url: String,
     pub port: u16,
     pub jwt_secret: String,
-    pub cors_origins: Vec<String>,
     /// Base URL of the saarathi-routing service, e.g. http://localhost:8084.
     /// Empty = skip the service and use the local haversine fallback.
     pub routing_service_url: String,
@@ -59,14 +58,6 @@ impl Config {
                 .parse()
                 .context("RIDES_PORT")?,
             jwt_secret: req("JWT_SECRET")?,
-            cors_origins: opt("CORS_ORIGINS")
-                .map(|v| {
-                    v.split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                })
-                .unwrap_or_else(|| vec!["http://localhost:3000".into()]),
             routing_service_url: opt("ROUTING_SERVICE_URL").unwrap_or_default(),
             road_factor: dec_env("ROUTING_ROAD_FACTOR", "1.3"),
             avg_speed_kmh: dec_env("ROUTING_AVG_SPEED_KMH", "22"),

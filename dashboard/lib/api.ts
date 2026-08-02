@@ -1,6 +1,7 @@
-// API client for the saarathi-auth service. Client-side only (uses localStorage).
+// API client. All calls go through the API gateway (Traefik), which routes by
+// path to the owning service — so one base URL covers every service.
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8081";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8080";
 
 const ACCESS_KEY = "saarathi.access";
 const REFRESH_KEY = "saarathi.refresh";
@@ -361,7 +362,8 @@ export interface OnboardDriverInput {
 
 // ── Rides service (campaigns) ────────────────────────────────────────────────
 
-const RIDES_BASE = process.env.NEXT_PUBLIC_RIDES_API_BASE ?? "http://localhost:8082";
+// Same gateway; kept as a separate constant for call-site clarity.
+const RIDES_BASE = process.env.NEXT_PUBLIC_RIDES_API_BASE ?? API_BASE;
 
 export interface Campaign {
   id: string;

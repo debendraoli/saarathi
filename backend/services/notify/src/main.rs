@@ -8,7 +8,7 @@
 
 use axum::extract::{FromRequestParts, Path, State};
 use axum::http::header::AUTHORIZATION;
-use axum::http::{request::Parts, HeaderName, Method, StatusCode};
+use axum::http::{request::Parts, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
@@ -22,7 +22,6 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
@@ -82,10 +81,6 @@ async fn main() -> anyhow::Result<()> {
     let jwt_secret = std::env::var("JWT_SECRET")?;
     let nats_url = env_or("NATS_URL", "nats://localhost:4222");
     let port: u16 = env_or("NOTIFY_PORT", "8083").parse()?;
-    let origins: Vec<_> = env_or("CORS_ORIGINS", "http://localhost:3000")
-        .split(',')
-        .filter_map(|o| o.trim().parse().ok())
-        .collect();
 
     let pool = PgPoolOptions::new()
         .max_connections(10)
@@ -106,14 +101,6 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => tracing::warn!(error = %e, "notify: NATS unavailable; inbox is read-only"),
     }
 
-    let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::list(origins))
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers([
-            HeaderName::from_static("authorization"),
-            HeaderName::from_static("content-type"),
-        ]);
-
     let state = AppState {
         db: pool,
         jwt_secret: Arc::new(jwt_secret),
@@ -123,7 +110,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/notifications", get(inbox))
         .route("/v1/notifications/{id}/read", post(mark_read))
         .route("/v1/notifications/read-all", post(read_all))
-        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

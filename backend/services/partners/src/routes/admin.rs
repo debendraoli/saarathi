@@ -138,12 +138,14 @@ async fn list(
     Query(q): Query<ListQuery>,
 ) -> AppResult<Json<Vec<Partner>>> {
     let rows: Vec<Partner> = match q.status {
-        Some(s) => sqlx::query_as(&format!(
+        Some(s) => {
+            sqlx::query_as(&format!(
             "SELECT {PARTNER_COLS} FROM partners WHERE status::text = $1 ORDER BY created_at DESC"
         ))
-        .bind(s)
-        .fetch_all(&st.db)
-        .await?,
+            .bind(s)
+            .fetch_all(&st.db)
+            .await?
+        }
         None => {
             sqlx::query_as(&format!(
                 "SELECT {PARTNER_COLS} FROM partners ORDER BY created_at DESC"

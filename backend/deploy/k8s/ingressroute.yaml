@@ -9,6 +9,33 @@
 # Assumptions: each service is a ClusterIP Service named `saarathi-<svc>` exposing
 # port 80. TLS is terminated here via the `websecure` entrypoint + a cert
 # resolver / stored certificate (wire up cert-manager or Traefik ACME in infra).
+#
+# CORS + coarse rate-limiting live at the gateway (these Middleware CRDs), not in
+# the services. Domain throttles (per-phone OTP) stay in auth.
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: cors
+  namespace: saarathi
+spec:
+  headers:
+    accessControlAllowOriginList: ["https://app.saarathi.example"]
+    accessControlAllowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    accessControlAllowHeaders: ["authorization", "content-type"]
+    accessControlMaxAge: 3600
+    addVaryHeader: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ratelimit
+  namespace: saarathi
+spec:
+  rateLimit:
+    average: 100
+    burst: 200
+    period: 1s
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
@@ -19,6 +46,9 @@ spec:
   entryPoints: ["websecure"]
   routes:
     - kind: Rule
+      middlewares:
+        - name: cors
+        - name: ratelimit
       match: >-
         PathPrefix(`/v1/auth`) || PathPrefix(`/v1/me`)
         || PathPrefix(`/v1/driver/register`) || PathPrefix(`/v1/driver/documents`) || PathPrefix(`/v1/driver/status`)
@@ -28,6 +58,9 @@ spec:
           port: 80
 
     - kind: Rule
+      middlewares:
+        - name: cors
+        - name: ratelimit
       match: >-
         PathPrefix(`/v1/rides`) || PathPrefix(`/v1/delivery`) || PathPrefix(`/v1/wallet`)
         || PathPrefix(`/v1/ws`) || PathPrefix(`/v1/events`) || PathPrefix(`/v1/flags`)
@@ -47,12 +80,18 @@ spec:
           port: 80
 
     - kind: Rule
+      middlewares:
+        - name: cors
+        - name: ratelimit
       match: PathPrefix(`/v1/notifications`)
       services:
         - name: saarathi-notify
           port: 80
 
     - kind: Rule
+      middlewares:
+        - name: cors
+        - name: ratelimit
       match: >-
         PathPrefix(`/v1/credits`) || PathPrefix(`/v1/payouts`) || PathPrefix(`/v1/psp`)
         || PathPrefix(`/v1/admin/payouts`)
@@ -61,13 +100,20 @@ spec:
           port: 80
 
     - kind: Rule
+      middlewares:
+        - name: cors
+        - name: ratelimit
       match: PathPrefix(`/v1/campaigns`) || PathPrefix(`/v1/admin/campaigns`)
       services:
         - name: saarathi-campaigns
           port: 80
 
     - kind: Rule
+      middlewares:
+        - name: cors
+        - name: ratelimit
       match: PathPrefix(`/v1/partner`) || PathPrefix(`/v1/admin/partners`)
       services:
         - name: saarathi-partners
           port: 80
+
