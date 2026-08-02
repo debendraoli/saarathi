@@ -1,0 +1,24 @@
+# Keep the Docker build context small and reproducible.
+# Context is the backend/ workspace root (see docker-compose.yml).
+
+# Build artefacts — never ship the host target dir (huge; wrong platform).
+target/
+**/target/
+
+# Local runtime data + secrets.
+.data/
+.env
+.env.*
+
+# macOS-only cargo tweak (SDKROOT) would break the Linux container build.
+.cargo/
+
+# Let the pinned builder image pick the toolchain (avoids a rustup re-download).
+rust-toolchain.toml
+
+# Not needed inside the service images.
+deploy/
+traefik/
+docker-compose.yml
+**/*.md
+.gitignore

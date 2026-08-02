@@ -127,30 +127,30 @@ http:
     auth:
       loadBalancer:
         servers:
-          - url: http://host.docker.internal:8081
+          - url: http://auth:8081
     rides:
       loadBalancer:
         servers:
-          - url: http://host.docker.internal:8082
+          - url: http://rides:8082
     notify:
       loadBalancer:
         servers:
-          - url: http://host.docker.internal:8083
+          - url: http://notify:8083
     payments:
       loadBalancer:
         servers:
-          - url: http://host.docker.internal:8085
+          - url: http://payments:8085
     campaigns:
       loadBalancer:
         servers:
-          - url: http://host.docker.internal:8086
+          - url: http://campaigns:8086
     partners:
       loadBalancer:
         servers:
-          - url: http://host.docker.internal:8087
+          - url: http://partners:8087
     # Referenced only by the /status/routing health router — routing's API
     # (/v1/route) is never exposed publicly.
     routing:
       loadBalancer:
         servers:
-          - url: http://host.docker.internal:8084
+          - url: http://routing:8084

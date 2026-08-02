@@ -4,6 +4,21 @@
 
 name: saarathi
 
+# Shared config for the seven Rust services. Each is built from its own
+# services/<name>/Dockerfile against the workspace root context, and reaches its
+# dependencies by compose DNS name (postgres/redis/nats), not localhost.
+x-svc-base: &svc-base
+  restart: unless-stopped
+
+x-svc-env: &svc-env
+  DATABASE_URL: postgres://saarathi:saarathi_dev@postgres:5432/saarathi
+  REDIS_URL: redis://redis:6379
+  NATS_URL: nats://nats:4222
+  # Every service verifies the same JWT — keep this identical across all of them.
+  # Override in backend/.env (generate with: openssl rand -hex 32).
+  JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-with-openssl-rand-hex-32}
+  RUST_LOG: ${RUST_LOG:-info}
+
 services:
   postgres:
     image: postgis/postgis:16-3.4
@@ -42,11 +57,16 @@ services:
       - "8222:8222"   # monitoring
     volumes:
       - ./.data/nats:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   # API gateway — the single north-south front door. Mirrors production: k3s ships
   # Traefik as its default ingress, so the same router rules translate 1:1 to
   # Traefik IngressRoute CRDs (see deploy/k8s/ingressroute.yaml). Routes by path
-  # to the per-service host ports; `routing` (8084) stays internal (not exposed).
+  # to the service containers by name; `routing` (8084) stays internal to rides.
   # Gateway: http://localhost:8080   Dashboard: http://localhost:8090
   gateway:
     image: traefik:v3.1
@@ -67,6 +87,186 @@ services:
     extra_hosts:
       # Reach services running on the host (cargo run); host-gateway on Linux.
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - auth
+      - rides
+      - notify
+      - payments
+      - campaigns
+      - partners
+
+  # ── Rust services ───────────────────────────────────────────────────────────
+  # Built from services/<name>/Dockerfile (context = this workspace root). The
+  # first `up --build` compiles the shared dependencies once (cache mounts), then
+  # each service's own crate. Ports are published so you can also hit a service
+  # directly (e.g. curl localhost:8081/health) in addition to via the gateway.
+
+  # Identity + KYC + location. Runs migrations and seeds a dev super-admin on boot.
+  auth:
+    <<: *svc-base
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    environment:
+      <<: *svc-env
+      PORT: 8081
+      OTP_DEV_MODE: ${OTP_DEV_MODE:-true}
+      KYC_STORAGE_DIR: /data/kyc
+      SEED_DEV_ADMIN_PHONE: ${SEED_DEV_ADMIN_PHONE:-+9779800000000}
+    ports:
+      - "8081:8081"
+    volumes:
+      - kyc-data:/data/kyc
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # Trips, fare estimation, dispatch, realtime WS. Measures distance via routing.
+  rides:
+    <<: *svc-base
+    build:
+      context: .
+      dockerfile: services/rides/Dockerfile
+    environment:
+      <<: *svc-env
+      RIDES_PORT: 8082
+      ROUTING_SERVICE_URL: http://routing:8084
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      routing:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # In-app inbox; consumes NotifyRequest off NATS (read-only if the bus is down).
+  notify:
+    <<: *svc-base
+    build:
+      context: .
+      dockerfile: services/notify/Dockerfile
+    environment:
+      <<: *svc-env
+      NOTIFY_PORT: 8083
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8083/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # Distance/duration engine (wraps Valhalla; haversine fallback). No database.
+  # Internal dependency of rides — port is published for local health checks only.
+  routing:
+    <<: *svc-base
+    build:
+      context: .
+      dockerfile: services/routing/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379
+      RUST_LOG: ${RUST_LOG:-info}
+      ROUTING_PORT: 8084
+      ROUTING_ENGINE: ${ROUTING_ENGINE:-valhalla}
+      # Blank = haversine fallback. To use the bundled engine (profile "routing"):
+      #   ROUTING_URL=http://valhalla:8002
+      ROUTING_URL: ${ROUTING_URL:-}
+    ports:
+      - "8084:8084"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8084/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # Top-ups, payouts, PSP callbacks. Shares the DB with rides.
+  payments:
+    <<: *svc-base
+    build:
+      context: .
+      dockerfile: services/payments/Dockerfile
+    environment:
+      <<: *svc-env
+      PAYMENTS_PORT: 8085
+    ports:
+      - "8085:8085"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8085/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # Campaign management (staff CRUD + preview). Shares the DB with rides.
+  campaigns:
+    <<: *svc-base
+    build:
+      context: .
+      dockerfile: services/campaigns/Dockerfile
+    environment:
+      <<: *svc-env
+      CAMPAIGNS_PORT: 8086
+    ports:
+      - "8086:8086"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # Fleet/partner domain: roster, fleet money, dashboards, fleet campaigns.
+  partners:
+    <<: *svc-base
+    build:
+      context: .
+      dockerfile: services/partners/Dockerfile
+    environment:
+      <<: *svc-env
+      PARTNERS_PORT: 8087
+    ports:
+      - "8087:8087"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8087/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
 
   # Self-hosted Valhalla routing (OSM-based). On first boot it downloads the
   # configured OSM extract and builds tiles into ./.data/valhalla (this takes a
@@ -94,3 +294,8 @@ services:
       interval: 15s
       timeout: 5s
       retries: 20
+
+# Named volume for KYC documents so the non-root auth container owns the dir
+# (bind mounts would be created root-owned and block writes).
+volumes:
+  kyc-data:
