@@ -2,6 +2,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../../ride/domain/models.dart' show asDouble;
 
+// Marketplace domain models (shared by customer + merchant surfaces).
 class Merchant {
   const Merchant({
     required this.id,
@@ -52,6 +53,8 @@ class MenuItem {
     required this.price,
     this.description,
     this.category,
+    this.merchantId,
+    this.isAvailable = true,
   });
 
   final String id;
@@ -59,6 +62,8 @@ class MenuItem {
   final double price;
   final String? description;
   final String? category;
+  final String? merchantId;
+  final bool isAvailable;
 
   factory MenuItem.fromJson(Map<String, dynamic> j) => MenuItem(
         id: j['id'] as String,
@@ -66,6 +71,8 @@ class MenuItem {
         price: asDouble(j['price']),
         description: j['description'] as String?,
         category: j['category'] as String?,
+    merchantId: j['merchant_id'] as String?,
+    isAvailable: (j['is_available'] as bool?) ?? true,
       );
 }
 
@@ -91,6 +98,7 @@ class CustomerOrder {
     required this.subtotal,
     required this.deliveryFee,
     required this.total,
+    this.merchantId,
     this.tripId,
     this.items = const [],
     this.createdAt,
@@ -102,6 +110,7 @@ class CustomerOrder {
   final double subtotal;
   final double deliveryFee;
   final double total;
+  final String? merchantId;
   final String? tripId;
   final List<OrderItem> items;
   final DateTime? createdAt;
@@ -121,6 +130,7 @@ class CustomerOrder {
         subtotal: asDouble(j['subtotal']),
         deliveryFee: asDouble(j['delivery_fee']),
         total: asDouble(j['total']),
+    merchantId: j['merchant_id'] as String?,
         tripId: j['trip_id'] as String?,
         items: items,
         createdAt: DateTime.tryParse((j['created_at'] as String?) ?? ''),

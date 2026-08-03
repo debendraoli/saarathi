@@ -17,6 +17,9 @@ import '../../features/marketplace/presentation/checkout_screen.dart';
 import '../../features/marketplace/presentation/marketplace_screen.dart';
 import '../../features/marketplace/presentation/merchant_screen.dart';
 import '../../features/marketplace/presentation/order_screen.dart';
+import '../../features/merchant/presentation/merchant_dashboard_screen.dart';
+import '../../features/merchant/presentation/merchant_menu_screen.dart';
+import '../../features/merchant/presentation/merchant_orders_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/onboarding/presentation/intro_screen.dart';
 import '../../features/onboarding/presentation/splash_screen.dart';
@@ -46,6 +49,9 @@ class Routes {
   static const merchant = '/marketplace/merchant';
   static const checkout = '/marketplace/checkout';
   static const order = '/marketplace/order'; // /marketplace/order/:id
+  static const merchantDashboard = '/store';
+  static const merchantOrders = '/store/orders';
+  static const merchantMenu = '/store/menu';
 }
 
 /// Bridges Riverpod state changes to go_router's redirect re-evaluation.
@@ -140,6 +146,20 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '${Routes.order}/:id',
         builder: (_, state) =>
             OrderScreen(orderId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: Routes.merchantDashboard,
+        builder: (_, __) => const MerchantDashboardScreen(),
+      ),
+      GoRoute(
+        path: Routes.merchantOrders,
+        builder: (_, state) =>
+            MerchantOrdersScreen(merchant: state.extra as Merchant),
+      ),
+      GoRoute(
+        path: Routes.merchantMenu,
+        builder: (_, state) =>
+            MerchantMenuScreen(merchant: state.extra as Merchant),
       ),
     ],
   );

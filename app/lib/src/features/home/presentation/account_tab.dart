@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/prefs.dart';
+import '../../../core/router/app_router.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../merchant/data/merchant_repository.dart';
 
 class AccountTab extends ConsumerWidget {
   const AccountTab({super.key});
@@ -13,6 +16,7 @@ class AccountTab extends ConsumerWidget {
     final l = AppL10n.of(context);
     final user = ref.watch(authControllerProvider).user;
     final locale = ref.watch(localeControllerProvider);
+    final merchants = ref.watch(myMerchantsProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -42,6 +46,23 @@ class AccountTab extends ConsumerWidget {
               onPressed: () => _editName(context, ref, user?.fullName ?? ''),
             ),
           ),
+        ),
+        merchants.maybeWhen(
+          data: (list) => list.isEmpty
+              ? const SizedBox.shrink()
+              : Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.storefront_rounded),
+                      title: Text(l.merchantStore),
+                      subtitle: Text(l.merchantStoreSubtitle),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => context.push(Routes.merchantDashboard),
+                    ),
+                  ),
+                ),
+          orElse: () => const SizedBox.shrink(),
         ),
         const SizedBox(height: 16),
         Text(l.chooseLanguage, style: Theme.of(context).textTheme.labelLarge),

@@ -27,8 +27,11 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/orders/{id}", get(order_detail))
         .route("/v1/orders/{id}/status", post(update_order_status))
         // Merchant-facing (owner of the merchant, or staff).
+        .route("/v1/merchant/merchants", get(my_merchants))
+        .route("/v1/merchant/merchants/{id}/menu", get(merchant_menu))
         .route("/v1/merchant/orders", get(merchant_orders))
         .route("/v1/merchant/menu", post(add_menu_item))
+        .route("/v1/merchant/menu/{id}/availability", post(set_item_availability))
         .route("/v1/merchant/open", post(set_open))
         // Ops onboarding.
         .route("/v1/admin/merchants", post(create_merchant))
@@ -311,7 +314,10 @@ async fn order_json(st: &AppState, id: Uuid, uid: Uuid, is_staff: bool) -> AppRe
     .fetch_optional(&st.db)
     .await?
     .ok_or(AppError::NotFound)?;
-    if order.customer_id != uid && !is_staff {
+    if order.customer_id != uid
+        && !is_staff
+        && !owns_or_staff(st, uid, is_staff, order.merchant_id).await?
+    {
         return Err(AppError::Forbidden);
     }
     let items: Vec<OrderItemRow> =
@@ -459,6 +465,68 @@ async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()> {
 }
 
 // ── Merchant-facing ──────────────────────────────────────────────────────────
+
+async fn my_merchants(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<Vec<Merchant>>> {
+    let rows: Vec<Merchant> = sqlx::query_as(
+        "SELECT id, name, vertical, address, phone, lat, lng, prep_mins, is_open, rating, image_key, \
+                0::double precision AS distance_m \
+         FROM merchants WHERE ($2 OR owner_user_id = $1) ORDER BY name",
+    )
+    .bind(claims.sub)
+    .bind(claims.is_staff())
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+/// Full menu (including unavailable items) for a merchant the caller manages.
+async fn merchant_menu(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Vec<MenuItem>>> {
+    if !owns_or_staff(&st, claims.sub, claims.is_staff(), id).await? {
+        return Err(AppError::Forbidden);
+    }
+    let items: Vec<MenuItem> = sqlx::query_as(
+        "SELECT id, merchant_id, name, description, category, price, is_available, image_key \
+         FROM menu_items WHERE merchant_id = $1 ORDER BY category, name",
+    )
+    .bind(id)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(items))
+}
+
+#[derive(Deserialize)]
+struct SetAvailable {
+    is_available: bool,
+}
+
+async fn set_item_availability(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(item_id): Path<Uuid>,
+    Json(body): Json<SetAvailable>,
+) -> AppResult<Json<Value>> {
+    let merchant_id: Uuid = sqlx::query_scalar("SELECT merchant_id FROM menu_items WHERE id = $1")
+        .bind(item_id)
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    if !owns_or_staff(&st, claims.sub, claims.is_staff(), merchant_id).await? {
+        return Err(AppError::Forbidden);
+    }
+    sqlx::query("UPDATE menu_items SET is_available = $2 WHERE id = $1")
+        .bind(item_id)
+        .bind(body.is_available)
+        .execute(&st.db)
+        .await?;
+    Ok(Json(json!({ "ok": true, "is_available": body.is_available })))
+}
 
 #[derive(Deserialize)]
 struct MerchantOrderQuery {
