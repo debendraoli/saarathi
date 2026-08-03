@@ -288,7 +288,12 @@ class _ShareTripButton extends StatelessWidget {
         icon: const Icon(Icons.ios_share_rounded),
         onPressed: () {
           final link = 'saarathi://trip/$tripId';
-          Share.share('${l.shareTripMessage}\n$link', subject: l.shareTrip);
+          SharePlus.instance.share(
+            ShareParams(
+              text: '${l.shareTripMessage}\n$link',
+              subject: l.shareTrip,
+            ),
+          );
         },
       ),
     );

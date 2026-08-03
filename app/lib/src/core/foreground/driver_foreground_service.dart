@@ -22,7 +22,7 @@ class _DriverTaskHandler extends TaskHandler {
   }
 
   @override
-  Future<void> onDestroy(DateTime timestamp) async {}
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
 }
 
 /// Drives the sticky foreground notification that keeps a driver online in the

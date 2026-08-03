@@ -27,7 +27,7 @@ class TokenStore {
 final tokenStoreProvider = Provider<TokenStore>((ref) {
   return TokenStore(
     const FlutterSecureStorage(
-      aOptions: AndroidOptions(encryptedSharedPreferences: true),
+      aOptions: AndroidOptions(),
     ),
   );
 });

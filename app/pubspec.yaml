@@ -16,45 +16,45 @@ dependencies:
 
   # State + navigation
   flutter_riverpod: ^2.6.1
-  go_router: ^14.6.2
+  go_router: ^17.3.0
 
   # Networking + secure token storage
   dio: ^5.7.0
-  flutter_secure_storage: ^9.2.2
+  flutter_secure_storage: ^10.3.1
   web_socket_channel: ^3.0.1
 
   # Maps (self-hosted OSM/Valhalla tiles) + location
-  flutter_map: ^7.0.2
+  flutter_map: ^8.3.1
   latlong2: ^0.9.1
-  geolocator: ^13.0.2
+  geolocator: ^14.0.3
 
   # Platform integration
-  app_links: ^6.3.2
+  app_links: ^7.2.1
   shared_preferences: ^2.3.3
-  package_info_plus: ^8.1.1
+  package_info_plus: ^10.2.1
   url_launcher: ^6.3.1
-  share_plus: ^10.1.4
+  share_plus: ^13.3.0
   image_picker: ^1.1.2
-  permission_handler: ^11.3.1
-  connectivity_plus: ^6.1.0
-  flutter_foreground_task: ^8.10.0
+  permission_handler: ^13.0.0
+  connectivity_plus: ^7.3.1
+  flutter_foreground_task: ^10.0.0
 
   # Realtime comms + safety + notifications
-  flutter_webrtc: ^0.12.5
-  mobile_scanner: ^5.2.3
-  flutter_local_notifications: ^18.0.1
-  firebase_core: ^3.8.0
-  firebase_messaging: ^15.1.5
+  flutter_webrtc: ^1.6.0
+  mobile_scanner: ^7.4.0
+  flutter_local_notifications: ^19.0.0
+  firebase_core: ^4.12.1
+  firebase_messaging: ^16.4.3
 
   # UI niceties
-  google_fonts: ^6.2.1
+  google_fonts: ^8.2.1
   intl: any
   cupertino_icons: ^1.0.8
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
