@@ -25,6 +25,8 @@ use std::time::Duration;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
+mod fcm;
+
 #[derive(Clone)]
 struct AppState {
     db: PgPool,
@@ -93,9 +95,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Consume notification requests off the bus. If NATS is down we still serve
     // the (read-only) inbox — delivery resumes when the bus returns.
+    let fcm = fcm::FcmSender::from_env();
     match async_nats::connect(&nats_url).await {
         Ok(client) => {
-            tokio::spawn(consume(client, pool.clone()));
+            tokio::spawn(consume(client, pool.clone(), fcm.clone()));
             tracing::info!(%nats_url, "notify: subscribed to {NOTIFY_SUBJECT}");
         }
         Err(e) => tracing::warn!(error = %e, "notify: NATS unavailable; inbox is read-only"),
@@ -121,7 +124,11 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// NATS consumer loop: durable inbox row + push/SMS escalation for critical classes.
-async fn consume(client: async_nats::Client, pool: PgPool) {
+async fn consume(
+    client: async_nats::Client,
+    pool: PgPool,
+    fcm: Option<Arc<fcm::FcmSender>>,
+) {
     let mut sub = match client.subscribe(NOTIFY_SUBJECT).await {
         Ok(s) => s,
         Err(e) => {
@@ -132,7 +139,7 @@ async fn consume(client: async_nats::Client, pool: PgPool) {
     while let Some(msg) = sub.next().await {
         match serde_json::from_slice::<NotifyRequest>(&msg.payload) {
             Ok(req) => {
-                if let Err(e) = deliver(&pool, &req).await {
+                if let Err(e) = deliver(&pool, &req, fcm.as_deref()).await {
                     tracing::warn!(error = %e, "notify: delivery failed");
                 }
             }
@@ -141,7 +148,7 @@ async fn consume(client: async_nats::Client, pool: PgPool) {
     }
 }
 
-async fn deliver(pool: &PgPool, req: &NotifyRequest) -> anyhow::Result<()> {
+async fn deliver(pool: &PgPool, req: &NotifyRequest, fcm: Option<&fcm::FcmSender>) -> anyhow::Result<()> {
     sqlx::query("INSERT INTO notifications (user_id, class, title, body) VALUES ($1, $2, $3, $4)")
         .bind(req.user_id)
         .bind(&req.class)
@@ -151,7 +158,22 @@ async fn deliver(pool: &PgPool, req: &NotifyRequest) -> anyhow::Result<()> {
         .await?;
     if notif::CRITICAL.contains(&req.class.as_str()) {
         tracing::info!(user_id = %req.user_id, class = %req.class, title = %req.title,
-            "notification escalated (push/SMS mock)");
+            "notification escalated (critical)");
+    }
+
+    // Fan out to the user's registered devices via FCM (when configured).
+    if let Some(sender) = fcm {
+        let tokens: Vec<(String,)> =
+            sqlx::query_as("SELECT token FROM device_tokens WHERE user_id = $1")
+                .bind(req.user_id)
+                .fetch_all(pool)
+                .await
+                .unwrap_or_default();
+        for (token,) in tokens {
+            if let Err(e) = sender.send(&token, &req.title, &req.body).await {
+                tracing::warn!(error = %e, "notify: FCM send failed");
+            }
+        }
     }
     Ok(())
 }

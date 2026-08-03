@@ -26,6 +26,25 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/orders", get(my_orders).post(place_order))
         .route("/v1/orders/{id}", get(order_detail))
         .route("/v1/orders/{id}/status", post(update_order_status))
+        // Merchant-facing (owner of the merchant, or staff).
+        .route("/v1/merchant/orders", get(merchant_orders))
+        .route("/v1/merchant/menu", post(add_menu_item))
+        .route("/v1/merchant/open", post(set_open))
+        // Ops onboarding.
+        .route("/v1/admin/merchants", post(create_merchant))
+}
+
+/// True when the user owns the merchant (or is staff).
+async fn owns_or_staff(st: &AppState, uid: Uuid, is_staff: bool, merchant_id: Uuid) -> AppResult<bool> {
+    if is_staff {
+        return Ok(true);
+    }
+    let owner: Option<Option<Uuid>> =
+        sqlx::query_scalar("SELECT owner_user_id FROM merchants WHERE id = $1")
+            .bind(merchant_id)
+            .fetch_optional(&st.db)
+            .await?;
+    Ok(matches!(owner, Some(Some(o)) if o == uid))
 }
 
 // ── Merchants + menu ─────────────────────────────────────────────────────────
@@ -328,19 +347,21 @@ async fn update_order_status(
         return Err(AppError::BadRequest("invalid order status".into()));
     }
 
-    let row: Option<(Uuid, String, Option<Uuid>)> =
-        sqlx::query_as("SELECT customer_id, status, trip_id FROM orders WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&st.db)
-            .await?;
-    let (customer_id, current, _trip_id) = row.ok_or(AppError::NotFound)?;
+    let row: Option<(Uuid, Uuid, String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT customer_id, merchant_id, status, trip_id FROM orders WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&st.db)
+    .await?;
+    let (customer_id, merchant_id, current, _trip_id) = row.ok_or(AppError::NotFound)?;
 
-    // A customer may only cancel their own order before it's being prepared.
-    let is_customer = customer_id == claims.sub;
-    if !claims.is_staff() {
+    // The merchant owner (or staff) drives the order; a customer may only cancel
+    // their own order before it's being prepared.
+    let is_merchant = owns_or_staff(&st, claims.sub, claims.is_staff(), merchant_id).await?;
+    if !is_merchant {
         let cancelling = body.status == "cancelled";
         let cancellable = matches!(current.as_str(), "placed" | "confirmed");
-        if !(is_customer && cancelling && cancellable) {
+        if !(customer_id == claims.sub && cancelling && cancellable) {
             return Err(AppError::Forbidden);
         }
     }
@@ -435,4 +456,124 @@ async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()> {
         }
     });
     Ok(())
+}
+
+// ── Merchant-facing ──────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct MerchantOrderQuery {
+    status: Option<String>,
+}
+
+async fn merchant_orders(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Query(q): Query<MerchantOrderQuery>,
+) -> AppResult<Json<Value>> {
+    let rows: Vec<OrderRow> = sqlx::query_as(
+        "SELECT o.id, o.customer_id, o.merchant_id, m.name AS merchant_name, o.status, o.subtotal, \
+                o.delivery_fee, o.total, o.payment_method, o.delivery_lat, o.delivery_lng, \
+                o.trip_id, o.created_at \
+         FROM orders o JOIN merchants m ON m.id = o.merchant_id \
+         WHERE ($2 OR m.owner_user_id = $1) AND ($3::text IS NULL OR o.status = $3) \
+         ORDER BY o.created_at DESC LIMIT 100",
+    )
+    .bind(claims.sub)
+    .bind(claims.is_staff())
+    .bind(q.status)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(json!(rows)))
+}
+
+#[derive(Deserialize)]
+struct AddItem {
+    merchant_id: Uuid,
+    name: String,
+    price: Decimal,
+    category: Option<String>,
+    description: Option<String>,
+}
+
+async fn add_menu_item(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<AddItem>,
+) -> AppResult<Json<Value>> {
+    if !owns_or_staff(&st, claims.sub, claims.is_staff(), body.merchant_id).await? {
+        return Err(AppError::Forbidden);
+    }
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO menu_items (merchant_id, name, price, category, description) \
+         VALUES ($1,$2,$3,$4,$5) RETURNING id",
+    )
+    .bind(body.merchant_id)
+    .bind(body.name.trim())
+    .bind(body.price)
+    .bind(body.category)
+    .bind(body.description)
+    .fetch_one(&st.db)
+    .await?;
+    Ok(Json(json!({ "id": id })))
+}
+
+#[derive(Deserialize)]
+struct SetOpen {
+    merchant_id: Uuid,
+    is_open: bool,
+}
+
+async fn set_open(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<SetOpen>,
+) -> AppResult<Json<Value>> {
+    if !owns_or_staff(&st, claims.sub, claims.is_staff(), body.merchant_id).await? {
+        return Err(AppError::Forbidden);
+    }
+    sqlx::query("UPDATE merchants SET is_open = $2 WHERE id = $1")
+        .bind(body.merchant_id)
+        .bind(body.is_open)
+        .execute(&st.db)
+        .await?;
+    Ok(Json(json!({ "ok": true, "is_open": body.is_open })))
+}
+
+#[derive(Deserialize)]
+struct CreateMerchant {
+    name: String,
+    vertical: String,
+    lat: f64,
+    lng: f64,
+    address: Option<String>,
+    phone: Option<String>,
+    /// Optional owner (the merchant-app account); defaults to the creating staff.
+    owner_user_id: Option<Uuid>,
+    prep_mins: Option<i32>,
+}
+
+async fn create_merchant(
+    State(st): State<AppState>,
+    crate::auth::StaffUser(claims): crate::auth::StaffUser,
+    Json(body): Json<CreateMerchant>,
+) -> AppResult<Json<Value>> {
+    if !matches!(body.vertical.as_str(), "food" | "grocery") {
+        return Err(AppError::BadRequest("vertical must be 'food' or 'grocery'".into()));
+    }
+    let owner = body.owner_user_id.unwrap_or(claims.sub);
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO merchants (owner_user_id, name, vertical, address, phone, lat, lng, prep_mins) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+    )
+    .bind(owner)
+    .bind(body.name.trim())
+    .bind(&body.vertical)
+    .bind(body.address)
+    .bind(body.phone)
+    .bind(body.lat)
+    .bind(body.lng)
+    .bind(body.prep_mins.unwrap_or(20))
+    .fetch_one(&st.db)
+    .await?;
+    Ok(Json(json!({ "id": id, "owner_user_id": owner })))
 }

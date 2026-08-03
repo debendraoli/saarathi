@@ -2193,6 +2193,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "jsonwebtoken",
+ "reqwest",
  "saarathi-core",
  "serde",
  "serde_json",
