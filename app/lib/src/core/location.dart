@@ -8,13 +8,16 @@ import 'config/app_config.dart';
 /// the native permission dialog the first time.
 Future<bool> ensureLocationPermission() async {
   try {
-    if (!await Geolocator.isLocationServiceEnabled()) return false;
+    // Ask for permission first so the OS dialog shows even if GPS is off.
     var perm = await Geolocator.checkPermission();
     if (perm == LocationPermission.denied) {
       perm = await Geolocator.requestPermission();
     }
-    return perm == LocationPermission.always ||
-        perm == LocationPermission.whileInUse;
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) {
+      return false;
+    }
+    return await Geolocator.isLocationServiceEnabled();
   } catch (_) {
     return false;
   }

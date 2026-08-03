@@ -64,6 +64,8 @@ async fn search(
         ("q", query.to_string()),
         ("limit", "8".into()),
         ("lang", "en".into()),
+        // Restrict to Nepal's bounding box (minLon,minLat,maxLon,maxLat).
+        ("bbox", "80.0,26.3,88.2,30.5".into()),
     ];
     // Bias toward the user's location when known.
     if let (Some(lat), Some(lng)) = (q.lat, q.lng) {
@@ -114,6 +116,13 @@ fn feature_to_place(f: &Value) -> Option<GeoPlace> {
     let lat = coords.get(1)?.as_f64()?;
     let p = f.get("properties")?;
     let get = |k: &str| p.get(k).and_then(|v| v.as_str()).map(str::to_string);
+
+    // Nepal only: drop anything the geocoder tags as another country.
+    if let Some(cc) = get("countrycode") {
+        if !cc.eq_ignore_ascii_case("NP") {
+            return None;
+        }
+    }
 
     let name = get("name");
     let street = get("street");

@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
-import '../../../core/offline/connectivity.dart';
 import '../../../core/location.dart';
+import '../../../core/offline/connectivity.dart';
 import '../../../core/router/app_router.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/models.dart';

@@ -55,9 +55,11 @@ class MerchantScreen extends ConsumerWidget {
               ));
             }
           }
-          rows.add(const SizedBox(height: 24));
+          rows.add(const SizedBox(height: 8));
           return ListView.builder(
-            padding: EdgeInsets.zero,
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.paddingOf(context).bottom + 16,
+            ),
             itemCount: rows.length,
             itemBuilder: (_, i) => rows[i],
           );
@@ -320,7 +322,11 @@ class _QtyControl extends StatelessWidget {
     if (qty == 0) {
       return OutlinedButton(
         onPressed: onAdd,
+        // Finite width overrides the global full-width button theme so the
+        // item text keeps its space.
         style: OutlinedButton.styleFrom(
+          minimumSize: const Size(64, 38),
+          padding: const EdgeInsets.symmetric(horizontal: 18),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         ),
