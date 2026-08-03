@@ -65,6 +65,9 @@
   "searchAddressHint": "Search address or landmark",
   "searchNoResults": "No matches—try a nearby landmark",
   "pickupGpsHint": "Pickup at your GPS location",
+  "locationOffTitle": "Turn on location",
+  "locationOffBody": "Your device location (GPS) is off. Turn it on for accurate pickup and nearby results.",
+  "enable": "Open settings",
   "savedPlaces": "Saved places",
   "recentSearches": "Recent",
 

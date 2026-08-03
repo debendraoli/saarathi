@@ -33,9 +33,34 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   void initState() {
     super.initState();
     // Ask for location up front so pickup/search have a real position.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ensureLocationPermission();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureLocationReady());
+  }
+
+  Future<void> _ensureLocationReady() async {
+    final granted = await ensureLocationPermission();
+    if (!mounted || !granted) return;
+    if (await isLocationServiceEnabled()) return;
+    if (!mounted) return;
+    final l = AppL10n.of(context);
+    final enable = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        icon: const Icon(Icons.location_off_rounded),
+        title: Text(l.locationOffTitle),
+        content: Text(l.locationOffBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(l.actionCancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l.enable),
+          ),
+        ],
+      ),
+    );
+    if (enable == true) await openLocationSettings();
   }
 
   @override

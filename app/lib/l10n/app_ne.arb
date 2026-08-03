@@ -65,6 +65,9 @@
   "searchAddressHint": "ठेगाना वा स्थल खोज्नुहोस्",
   "searchNoResults": "केही भेटिएन—नजिकको स्थल राख्नुहोस्",
   "pickupGpsHint": "तपाईंको GPS स्थानबाट पिकअप",
+  "locationOffTitle": "स्थान अन गर्नुहोस्",
+  "locationOffBody": "तपाईंको यन्त्रको स्थान (GPS) बन्द छ। सटिक पिकअप र नजिकका नतिजाका लागि अन गर्नुहोस्।",
+  "enable": "सेटिङ खोल्नुहोस्",
   "savedPlaces": "सेभ गरिएका स्थान",
   "recentSearches": "हालसालका",
 

@@ -162,7 +162,9 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
   @override
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
-    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    final media = MediaQuery.of(context);
+    // Clear the keyboard (viewInsets) and the system nav bar (padding).
+    final bottom = media.viewInsets.bottom + media.padding.bottom;
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottom),
       child: Column(

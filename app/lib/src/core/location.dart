@@ -27,6 +27,22 @@ Future<bool> _request() async {
   }
 }
 
+/// Whether the device's location service (GPS toggle) is on.
+Future<bool> isLocationServiceEnabled() async {
+  try {
+    return await Geolocator.isLocationServiceEnabled();
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Opens the OS location settings so the user can switch GPS on.
+Future<void> openLocationSettings() async {
+  try {
+    await Geolocator.openLocationSettings();
+  } catch (_) {/* best effort */}
+}
+
 /// Best-effort current position, degrading to the Dang district centre when
 /// location is unavailable/denied (offline-tolerant, Nepal rural reality).
 Future<LatLng> currentLatLng() async {
