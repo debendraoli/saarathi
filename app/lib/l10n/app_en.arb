@@ -107,6 +107,8 @@
   "kycPendingBody": "Your documents are under review. We'll notify you once approved.",
 
   "sosSent": "Emergency alert sent",
+  "shareTrip": "Share trip",
+  "shareTripMessage": "Follow my Saarathi trip live:",
   "activityEmpty": "No trips yet",
   "editName": "Edit name",
   "yourName": "Your name",

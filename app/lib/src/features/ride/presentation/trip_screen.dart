@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
@@ -77,7 +78,14 @@ class TripScreen extends ConsumerWidget {
                   alignment: Alignment.topRight,
                   child: Padding(
                     padding: const EdgeInsets.all(12),
-                    child: _SosButton(tripId: tripId),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _SosButton(tripId: tripId),
+                        const SizedBox(height: 8),
+                        _ShareTripButton(tripId: tripId),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -259,6 +267,31 @@ class _StatusSheet extends ConsumerWidget {
           .rate(tripId, result.stars, comment: result.comment);
     } catch (_) {/* non-blocking */}
     if (context.mounted) context.go(Routes.home);
+  }
+}
+
+/// Shares a `saarathi://trip/<id>` deep link so a trusted contact can follow
+/// along. Opening it on a device with the app installed jumps to this trip.
+class _ShareTripButton extends StatelessWidget {
+  const _ShareTripButton({required this.tripId});
+  final String tripId;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppL10n.of(context);
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      shape: const CircleBorder(),
+      elevation: 2,
+      child: IconButton(
+        tooltip: l.shareTrip,
+        icon: const Icon(Icons.ios_share_rounded),
+        onPressed: () {
+          final link = 'saarathi://trip/$tripId';
+          Share.share('${l.shareTripMessage}\n$link', subject: l.shareTrip);
+        },
+      ),
+    );
   }
 }
 

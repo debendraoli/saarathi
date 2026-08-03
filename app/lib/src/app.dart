@@ -6,6 +6,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import 'core/prefs.dart';
 import 'core/router/app_router.dart';
+import 'core/router/deep_links.dart';
 import 'core/theme/app_theme.dart';
 
 class SaarathiApp extends ConsumerWidget {
@@ -15,6 +16,7 @@ class SaarathiApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(goRouterProvider);
     final locale = ref.watch(localeControllerProvider);
+    ref.watch(deepLinkHandlerProvider); // forwards saarathi:// links to routes
 
     return MaterialApp.router(
       title: 'Saarathi',
