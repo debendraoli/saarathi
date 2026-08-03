@@ -55,6 +55,7 @@ class MenuItem {
     this.category,
     this.merchantId,
     this.isAvailable = true,
+    this.imageUrl,
   });
 
   final String id;
@@ -64,6 +65,7 @@ class MenuItem {
   final String? category;
   final String? merchantId;
   final bool isAvailable;
+  final String? imageUrl;
 
   factory MenuItem.fromJson(Map<String, dynamic> j) => MenuItem(
         id: j['id'] as String,
@@ -71,9 +73,18 @@ class MenuItem {
         price: asDouble(j['price']),
         description: j['description'] as String?,
         category: j['category'] as String?,
-    merchantId: j['merchant_id'] as String?,
-    isAvailable: (j['is_available'] as bool?) ?? true,
+        merchantId: j['merchant_id'] as String?,
+        isAvailable: (j['is_available'] as bool?) ?? true,
+        imageUrl: _asImageUrl(j['image_key']),
       );
+}
+
+/// Treats an `image_key` that is already an absolute URL as the image source.
+/// (Object-storage keys would be resolved against a media base later.)
+String? _asImageUrl(Object? key) {
+  final s = key as String?;
+  if (s == null || s.isEmpty) return null;
+  return s.startsWith('http') ? s : null;
 }
 
 class OrderItem {

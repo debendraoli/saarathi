@@ -37,27 +37,29 @@ class MerchantScreen extends ConsumerWidget {
           for (final it in items) {
             grouped.putIfAbsent(it.category ?? l.merchantMenu, () => []).add(it);
           }
-          return CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(child: _Header(merchant: merchant)),
-              if (items.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: Center(child: Text(l.comingSoonBody)),
-                ),
-              for (final entry in grouped.entries) ...[
-                SliverToBoxAdapter(child: _CategoryHeader(entry.key)),
-                SliverList.builder(
-                  itemCount: entry.value.length,
-                  itemBuilder: (_, i) => _ItemRow(
-                    merchant: merchant,
-                    item: entry.value[i],
-                    qty: cartForThis.lines[entry.value[i].id]?.qty ?? 0,
-                  ),
-                ),
-              ],
-              const SliverToBoxAdapter(child: SizedBox(height: 96)),
-            ],
+          // Flatten header + category sections + items into one bounded list.
+          final rows = <Widget>[_Header(merchant: merchant)];
+          if (items.isEmpty) {
+            rows.add(Padding(
+              padding: const EdgeInsets.all(40),
+              child: Center(child: Text(l.comingSoonBody)),
+            ));
+          }
+          for (final entry in grouped.entries) {
+            rows.add(_CategoryHeader(entry.key));
+            for (final it in entry.value) {
+              rows.add(_ItemCard(
+                merchant: merchant,
+                item: it,
+                qty: cartForThis.lines[it.id]?.qty ?? 0,
+              ));
+            }
+          }
+          rows.add(const SizedBox(height: 24));
+          return ListView.builder(
+            padding: EdgeInsets.zero,
+            itemCount: rows.length,
+            itemBuilder: (_, i) => rows[i],
           );
         },
       ),
@@ -219,8 +221,8 @@ class _CategoryHeader extends StatelessWidget {
   }
 }
 
-class _ItemRow extends ConsumerWidget {
-  const _ItemRow(
+class _ItemCard extends ConsumerWidget {
+  const _ItemCard(
       {required this.merchant, required this.item, required this.qty});
   final Merchant merchant;
   final MenuItem item;
@@ -230,75 +232,105 @@ class _ItemRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cart = ref.read(cartControllerProvider.notifier);
     final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(Icons.restaurant_menu_rounded,
-                color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(item.name,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700, fontSize: 15)),
-                if (item.description != null &&
-                    item.description!.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(item.description!,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall),
+    void add() =>
+        cart.add(item, merchantId: merchant.id, merchantName: merchant.name);
+
+    return InkWell(
+      onTap: qty == 0 ? add : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _ItemThumb(imageUrl: item.imageUrl, vertical: merchant.vertical),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(item.name,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 15)),
+                  if (item.description != null &&
+                      item.description!.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(item.description!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                  const SizedBox(height: 8),
+                  Text('NPR ${item.price.toStringAsFixed(0)}',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w800, color: scheme.primary)),
                 ],
-                const SizedBox(height: 6),
-                Text('NPR ${item.price.toStringAsFixed(0)}',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w700, color: scheme.primary)),
-              ],
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          _QtyControl(merchant: merchant, item: item, qty: qty, cart: cart),
-        ],
+            const SizedBox(width: 10),
+            _QtyControl(qty: qty, onAdd: add, onRemove: () => cart.decrement(item.id)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Square item photo with a graceful icon fallback while/if the image fails.
+class _ItemThumb extends StatelessWidget {
+  const _ItemThumb({required this.imageUrl, required this.vertical});
+  final String? imageUrl;
+  final String vertical;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fallbackIcon = vertical == 'grocery'
+        ? Icons.local_grocery_store_rounded
+        : Icons.restaurant_menu_rounded;
+    final placeholder = Container(
+      color: scheme.surfaceContainerHighest,
+      alignment: Alignment.center,
+      child: Icon(fallbackIcon, color: scheme.onSurfaceVariant),
+    );
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        width: 64,
+        height: 64,
+        child: imageUrl == null
+            ? placeholder
+            : Image.network(
+                imageUrl!,
+                fit: BoxFit.cover,
+                loadingBuilder: (_, child, progress) =>
+                    progress == null ? child : placeholder,
+                errorBuilder: (_, __, ___) => placeholder,
+              ),
       ),
     );
   }
 }
 
 class _QtyControl extends StatelessWidget {
-  const _QtyControl({
-    required this.merchant,
-    required this.item,
-    required this.qty,
-    required this.cart,
-  });
-  final Merchant merchant;
-  final MenuItem item;
+  const _QtyControl(
+      {required this.qty, required this.onAdd, required this.onRemove});
   final int qty;
-  final CartController cart;
+  final VoidCallback onAdd;
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
-    final l = AppL10n.of(context);
+    final scheme = Theme.of(context).colorScheme;
     if (qty == 0) {
       return OutlinedButton(
-        onPressed: () =>
-            cart.add(item, merchantId: merchant.id, merchantName: merchant.name),
-        child: Text(l.addToCart),
+        onPressed: onAdd,
+        style: OutlinedButton.styleFrom(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        ),
+        child: Text(AppL10n.of(context).addToCart),
       );
     }
-    final scheme = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
         color: scheme.primaryContainer,
@@ -309,14 +341,13 @@ class _QtyControl extends StatelessWidget {
         children: [
           IconButton(
             visualDensity: VisualDensity.compact,
-            onPressed: () => cart.decrement(item.id),
+            onPressed: onRemove,
             icon: const Icon(Icons.remove_rounded),
           ),
           Text('$qty', style: const TextStyle(fontWeight: FontWeight.w800)),
           IconButton(
             visualDensity: VisualDensity.compact,
-            onPressed: () => cart.add(item,
-                merchantId: merchant.id, merchantName: merchant.name),
+            onPressed: onAdd,
             icon: const Icon(Icons.add_rounded),
           ),
         ],

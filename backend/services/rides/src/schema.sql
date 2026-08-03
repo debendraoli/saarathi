@@ -505,3 +505,22 @@ INSERT INTO menu_items (id, merchant_id, name, description, category, price) VAL
     ('a2222222-2222-2222-2222-222222222202', '22222222-2222-2222-2222-222222222222', 'Cooking Oil 1L', 'Sunflower', 'Staples', 250),
     ('a2222222-2222-2222-2222-222222222203', '22222222-2222-2222-2222-222222222222', 'Eggs (30)', 'Farm fresh tray', 'Dairy', 480)
 ON CONFLICT (id) DO NOTHING;
+
+-- Demo photos for the seed menu (idempotent; real merchants upload their own).
+UPDATE menu_items SET image_key = CASE id
+    WHEN 'a1111111-1111-1111-1111-111111111101' THEN 'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?w=400&q=60&auto=format&fit=crop'
+    WHEN 'a1111111-1111-1111-1111-111111111102' THEN 'https://images.unsplash.com/photo-1585032226651-759b368d7246?w=400&q=60&auto=format&fit=crop'
+    WHEN 'a1111111-1111-1111-1111-111111111103' THEN 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=400&q=60&auto=format&fit=crop'
+    WHEN 'a2222222-2222-2222-2222-222222222201' THEN 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=400&q=60&auto=format&fit=crop'
+    WHEN 'a2222222-2222-2222-2222-222222222202' THEN 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=400&q=60&auto=format&fit=crop'
+    WHEN 'a2222222-2222-2222-2222-222222222203' THEN 'https://images.unsplash.com/photo-1518569656558-1f25e69d93d7?w=400&q=60&auto=format&fit=crop'
+    ELSE image_key
+END
+WHERE id IN (
+    'a1111111-1111-1111-1111-111111111101',
+    'a1111111-1111-1111-1111-111111111102',
+    'a1111111-1111-1111-1111-111111111103',
+    'a2222222-2222-2222-2222-222222222201',
+    'a2222222-2222-2222-2222-222222222202',
+    'a2222222-2222-2222-2222-222222222203'
+);
