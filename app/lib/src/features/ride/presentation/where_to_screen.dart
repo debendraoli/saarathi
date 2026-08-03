@@ -28,6 +28,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   final _mapController = MapController();
   final _destLabel = TextEditingController();
   LatLng? _pickup;
+  String? _pickupLabel; // null → current location
   LatLng? _dest;
   VehicleClass _vehicle = VehicleClass.twoWheeler;
 
@@ -57,24 +58,33 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     _mapController.move(_dest ?? here, 15);
   }
 
-  Future<void> _openSearch() async {
+  Future<void> _openSearch({required bool forPickup}) async {
     final pick = await Navigator.of(context).push<AddressPick>(
       MaterialPageRoute(
         builder: (_) => const AddressSearchScreen(allowMap: false),
       ),
     );
     if (pick?.hit == null || !mounted) return;
+    final hit = pick!.hit!;
     setState(() {
-      _dest = pick!.hit!.point;
-      _destLabel.text = pick.hit!.label;
+      if (forPickup) {
+        _pickup = hit.point;
+        _pickupLabel = hit.label;
+      } else {
+        _dest = hit.point;
+        _destLabel.text = hit.label;
+      }
     });
-    _mapController.move(pick!.hit!.point, 15);
+    _mapController.move(hit.point, 15);
   }
 
   void _continue() {
     if (_pickup == null || _dest == null) return;
     final draft = RideDraft(
-      pickup: Place(point: _pickup!, label: 'Current location'),
+      pickup: Place(
+        point: _pickup!,
+        label: _pickupLabel ?? AppL10n.of(context).useCurrentLocation,
+      ),
       destination: Place(point: _dest!, label: _destLabel.text.trim()),
       vehicleClass: _vehicle,
     );
@@ -157,14 +167,18 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
           ),
           Align(
             alignment: Alignment.bottomCenter,
-            child: _Sheet(
-              destLabel: _destLabel,
-              hasDest: _dest != null,
-              vehicle: _vehicle,
-              onSearch: _openSearch,
-              onVehicle: (v) => setState(() => _vehicle = v),
-              onContinue: _dest == null ? null : _continue,
-              onSave: _dest == null ? null : _saveDest,
+            child: SafeArea(
+              top: false,
+              child: _Sheet(
+                pickupText: _pickupLabel ?? l.useCurrentLocation,
+                destText: _dest == null ? null : _destLabel.text,
+                vehicle: _vehicle,
+                onPickupTap: () => _openSearch(forPickup: true),
+                onDestTap: () => _openSearch(forPickup: false),
+                onVehicle: (v) => setState(() => _vehicle = v),
+                onContinue: _dest == null ? null : _continue,
+                onSave: _dest == null ? null : _saveDest,
+              ),
             ),
           ),
         ],
@@ -175,19 +189,21 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
 
 class _Sheet extends StatelessWidget {
   const _Sheet({
-    required this.destLabel,
-    required this.hasDest,
+    required this.pickupText,
+    required this.destText,
     required this.vehicle,
-    required this.onSearch,
+    required this.onPickupTap,
+    required this.onDestTap,
     required this.onVehicle,
     required this.onContinue,
     required this.onSave,
   });
 
-  final TextEditingController destLabel;
-  final bool hasDest;
+  final String pickupText;
+  final String? destText;
   final VehicleClass vehicle;
-  final VoidCallback onSearch;
+  final VoidCallback onPickupTap;
+  final VoidCallback onDestTap;
   final ValueChanged<VehicleClass> onVehicle;
   final VoidCallback? onContinue;
   final VoidCallback? onSave;
@@ -195,62 +211,59 @@ class _Sheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
+    final scheme = Theme.of(context).colorScheme;
     return Card(
       margin: const EdgeInsets.all(12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                const Icon(Icons.trip_origin, size: 18),
-                const SizedBox(width: 10),
-                Expanded(child: Text(l.useCurrentLocation)),
-              ],
-            ),
-            const Divider(height: 20),
-            InkWell(
-              onTap: onSearch,
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.location_on_rounded,
-                      size: 18,
-                      color: Theme.of(context).colorScheme.secondary,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        hasDest ? destLabel.text : l.searchAddressHint,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: hasDest
-                            ? null
-                            : TextStyle(
-                                color: Theme.of(context).hintColor,
-                              ),
-                      ),
-                    ),
-                    if (onSave != null)
-                      IconButton(
-                        icon: const Icon(Icons.bookmark_add_outlined),
-                        onPressed: onSave,
-                      )
-                    else
-                      Icon(
-                        Icons.search_rounded,
-                        color: Theme.of(context).colorScheme.outline,
-                      ),
-                  ],
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: scheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            Container(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                children: [
+                  _LocationRow(
+                    dotColor: scheme.primary,
+                    icon: Icons.trip_origin,
+                    text: pickupText,
+                    isPlaceholder: false,
+                    onTap: onPickupTap,
+                  ),
+                  Divider(height: 1, indent: 48, color: scheme.outlineVariant),
+                  _LocationRow(
+                    dotColor: scheme.secondary,
+                    icon: Icons.location_on_rounded,
+                    text: destText ?? l.searchAddressHint,
+                    isPlaceholder: destText == null,
+                    onTap: onDestTap,
+                    trailing: onSave == null
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.bookmark_add_outlined),
+                            onPressed: onSave,
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
             SegmentedButton<VehicleClass>(
               segments: [
                 ButtonSegment(
@@ -267,11 +280,61 @@ class _Sheet extends StatelessWidget {
               selected: {vehicle},
               onSelectionChanged: (s) => onVehicle(s.first),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+              ),
               onPressed: onContinue,
               child: Text(l.fareEstimate),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One tappable pickup/destination row inside the ride sheet.
+class _LocationRow extends StatelessWidget {
+  const _LocationRow({
+    required this.dotColor,
+    required this.icon,
+    required this.text,
+    required this.isPlaceholder,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final Color dotColor;
+  final IconData icon;
+  final String text;
+  final bool isPlaceholder;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: dotColor),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: isPlaceholder
+                    ? TextStyle(color: Theme.of(context).hintColor)
+                    : const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (trailing != null) trailing!,
           ],
         ),
       ),

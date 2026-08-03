@@ -75,6 +75,28 @@ class TripScreen extends ConsumerWidget {
                 _DriverLocationPublisher(tripId: tripId),
               SafeArea(
                 child: Align(
+                  alignment: Alignment.topLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _MapCircleButton(
+                          icon: Icons.arrow_back_rounded,
+                          onTap: () => context.go(Routes.home),
+                        ),
+                        if (canComms) ...[
+                          const SizedBox(height: 8),
+                          _CommsBar(tripId: tripId, isRider: !iAmDriver),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              SafeArea(
+                child: Align(
                   alignment: Alignment.topRight,
                   child: Padding(
                     padding: const EdgeInsets.all(12),
@@ -89,19 +111,12 @@ class TripScreen extends ConsumerWidget {
                   ),
                 ),
               ),
-              if (canComms)
-                SafeArea(
-                  child: Align(
-                    alignment: Alignment.topLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: _CommsBar(tripId: tripId, isRider: !iAmDriver),
-                    ),
-                  ),
-                ),
               Align(
                 alignment: Alignment.bottomCenter,
-                child: _StatusSheet(trip: trip),
+                child: SafeArea(
+                  top: false,
+                  child: _StatusSheet(trip: trip),
+                ),
               ),
             ],
           );
@@ -296,6 +311,23 @@ class _ShareTripButton extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+/// A round, elevated map overlay button (back, etc.).
+class _MapCircleButton extends StatelessWidget {
+  const _MapCircleButton({required this.icon, required this.onTap});
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      shape: const CircleBorder(),
+      elevation: 2,
+      child: IconButton(icon: Icon(icon), onPressed: onTap),
     );
   }
 }

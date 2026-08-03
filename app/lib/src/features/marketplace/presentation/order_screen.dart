@@ -26,7 +26,13 @@ class OrderScreen extends ConsumerWidget {
     final order = ref.watch(orderProvider(orderId));
 
     return Scaffold(
-      appBar: AppBar(title: Text(l.yourOrder)),
+      appBar: AppBar(
+        title: Text(l.yourOrder),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => context.go(Routes.home),
+        ),
+      ),
       body: order.when(
         loading: () => const LoadingView(),
         error: (_, __) => ErrorRetry(
