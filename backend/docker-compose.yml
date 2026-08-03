@@ -51,7 +51,7 @@ services:
 
   nats:
     image: nats:2-alpine
-    command: ["-js", "-sd", "/data"]
+    command: ["-js", "-sd", "/data", "-m", "8222"]
     ports:
       - "4222:4222"   # client
       - "8222:8222"   # monitoring
@@ -137,6 +137,7 @@ services:
       <<: *svc-env
       RIDES_PORT: 8082
       ROUTING_SERVICE_URL: http://routing:8084
+      GEOCODER_URL: ${GEOCODER_URL:-https://photon.komoot.io}
       # WebRTC ICE — set these in prod to your Coturn; blank = public STUN only.
       TURN_SECRET: ${TURN_SECRET:-}
       TURN_URLS: ${TURN_URLS:-}

@@ -23,6 +23,7 @@ import '../../features/merchant/presentation/merchant_orders_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/onboarding/presentation/intro_screen.dart';
 import '../../features/onboarding/presentation/splash_screen.dart';
+import '../../features/places/data/places_repository.dart';
 import '../../features/ride/domain/models.dart';
 import '../../features/ride/presentation/confirm_ride_screen.dart';
 import '../../features/ride/presentation/trip_screen.dart';
@@ -98,7 +99,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, state) => OtpScreen(phone: state.extra as String? ?? ''),
       ),
       GoRoute(path: Routes.home, builder: (_, __) => const HomeShell()),
-      GoRoute(path: Routes.whereTo, builder: (_, __) => const WhereToScreen()),
+      GoRoute(
+        path: Routes.whereTo,
+        builder: (_, state) =>
+            WhereToScreen(initialDest: state.extra as PlaceHit?),
+      ),
       GoRoute(
         path: Routes.confirm,
         builder: (_, state) =>

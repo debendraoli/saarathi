@@ -24,7 +24,7 @@ subprojects {
         val androidExt = extensions.findByName("android")
         if (androidExt != null) {
             androidExt.withGroovyBuilder {
-                "compileSdkVersion"(37)
+                "compileSdkVersion"(36)
             }
         }
     }

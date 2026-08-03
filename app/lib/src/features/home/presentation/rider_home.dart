@@ -5,6 +5,21 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../places/presentation/address_search_screen.dart';
+
+/// Opens the address search; routes the pick into the ride flow (map picker or
+/// a prefilled destination).
+Future<void> openWhereTo(BuildContext context) async {
+  final pick = await Navigator.of(context).push<AddressPick>(
+    MaterialPageRoute(builder: (_) => const AddressSearchScreen()),
+  );
+  if (pick == null || !context.mounted) return;
+  if (pick.chooseOnMap) {
+    context.push(Routes.whereTo);
+  } else if (pick.hit != null) {
+    context.push(Routes.whereTo, extra: pick.hit);
+  }
+}
 
 /// Rider home: a prominent "Where to?" entry into the ride flow, the service
 /// grid (rides live; delivery verticals staged), and a become-a-driver nudge.
@@ -19,7 +34,7 @@ class RiderHome extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _WhereToCard(onTap: () => context.push(Routes.whereTo)),
+        _WhereToCard(onTap: () => openWhereTo(context)),
         const SizedBox(height: 20),
         GridView.count(
           crossAxisCount: 4,
@@ -31,7 +46,7 @@ class RiderHome extends ConsumerWidget {
             _Service(
               icon: Icons.two_wheeler_rounded,
               label: l.modeRider,
-              onTap: () => context.push(Routes.whereTo),
+              onTap: () => openWhereTo(context),
             ),
             _Service(
               icon: Icons.restaurant_rounded,

@@ -5,6 +5,7 @@ pub mod delivery;
 pub mod dispatch;
 pub mod feedback;
 pub mod flags;
+pub mod geo;
 pub mod insights;
 pub mod ledger;
 pub mod marketplace;
@@ -47,6 +48,7 @@ pub fn router(state: AppState) -> Router {
         .merge(subscription::routes())
         .merge(rtc::routes())
         .merge(marketplace::routes())
+        .merge(geo::routes())
         .merge(plans::routes())
         .merge(insights::routes())
         .layer(TraceLayer::new_for_http())

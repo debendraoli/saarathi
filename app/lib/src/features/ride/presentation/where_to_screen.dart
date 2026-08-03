@@ -8,13 +8,17 @@ import 'package:saarathi/l10n/app_localizations.dart';
 import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
 import '../../places/data/places_repository.dart';
+import '../../places/presentation/address_search_screen.dart';
 import '../domain/models.dart';
 import 'widgets/map_view.dart';
 
-/// Pick pickup (defaults to current location) + destination (tap the map or type
-/// a landmark), choose bike/car, then estimate. Landmark-friendly for Dang.
+/// Pick pickup (defaults to current location) + destination (search, tap the map,
+/// or a saved place), choose bike/car, then estimate. Landmark-friendly for Dang.
 class WhereToScreen extends ConsumerStatefulWidget {
-  const WhereToScreen({super.key});
+  const WhereToScreen({super.key, this.initialDest});
+
+  /// Destination chosen upstream (from the home address search), if any.
+  final PlaceHit? initialDest;
 
   @override
   ConsumerState<WhereToScreen> createState() => _WhereToScreenState();
@@ -30,6 +34,11 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   @override
   void initState() {
     super.initState();
+    final d = widget.initialDest;
+    if (d != null) {
+      _dest = d.point;
+      _destLabel.text = d.label;
+    }
     _loadLocation();
   }
 
@@ -40,10 +49,26 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   }
 
   Future<void> _loadLocation() async {
+    await ensureLocationPermission();
     final here = await currentLatLng();
     if (!mounted) return;
     setState(() => _pickup = here);
-    _mapController.move(here, 15);
+    // Keep an upstream-chosen destination centred; otherwise centre on pickup.
+    _mapController.move(_dest ?? here, 15);
+  }
+
+  Future<void> _openSearch() async {
+    final pick = await Navigator.of(context).push<AddressPick>(
+      MaterialPageRoute(
+        builder: (_) => const AddressSearchScreen(allowMap: false),
+      ),
+    );
+    if (pick?.hit == null || !mounted) return;
+    setState(() {
+      _dest = pick!.hit!.point;
+      _destLabel.text = pick.hit!.label;
+    });
+    _mapController.move(pick!.hit!.point, 15);
   }
 
   void _continue() {
@@ -136,6 +161,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
               destLabel: _destLabel,
               hasDest: _dest != null,
               vehicle: _vehicle,
+              onSearch: _openSearch,
               onVehicle: (v) => setState(() => _vehicle = v),
               onContinue: _dest == null ? null : _continue,
               onSave: _dest == null ? null : _saveDest,
@@ -152,6 +178,7 @@ class _Sheet extends StatelessWidget {
     required this.destLabel,
     required this.hasDest,
     required this.vehicle,
+    required this.onSearch,
     required this.onVehicle,
     required this.onContinue,
     required this.onSave,
@@ -160,6 +187,7 @@ class _Sheet extends StatelessWidget {
   final TextEditingController destLabel;
   final bool hasDest;
   final VehicleClass vehicle;
+  final VoidCallback onSearch;
   final ValueChanged<VehicleClass> onVehicle;
   final VoidCallback? onContinue;
   final VoidCallback? onSave;
@@ -183,30 +211,44 @@ class _Sheet extends StatelessWidget {
               ],
             ),
             const Divider(height: 20),
-            Row(
-              children: [
-                Icon(
-                  Icons.location_on_rounded,
-                  size: 18,
-                  color: Theme.of(context).colorScheme.secondary,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: destLabel,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      border: InputBorder.none,
-                      hintText: hasDest ? l.landmarkHint : l.chooseOnMap,
+            InkWell(
+              onTap: onSearch,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.location_on_rounded,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.secondary,
                     ),
-                  ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        hasDest ? destLabel.text : l.searchAddressHint,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: hasDest
+                            ? null
+                            : TextStyle(
+                                color: Theme.of(context).hintColor,
+                              ),
+                      ),
+                    ),
+                    if (onSave != null)
+                      IconButton(
+                        icon: const Icon(Icons.bookmark_add_outlined),
+                        onPressed: onSave,
+                      )
+                    else
+                      Icon(
+                        Icons.search_rounded,
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                  ],
                 ),
-                if (onSave != null)
-                  IconButton(
-                    icon: const Icon(Icons.bookmark_add_outlined),
-                    onPressed: onSave,
-                  ),
-              ],
+              ),
             ),
             const SizedBox(height: 12),
             SegmentedButton<VehicleClass>(
