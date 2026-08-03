@@ -89,6 +89,8 @@
 
   "goOnline": "Go online",
   "goOffline": "Go offline",
+  "batteryExclusion": "Keep me online in the background",
+  "batteryExclusionDone": "Battery optimisation settings opened",
   "youAreOnline": "You're online",
   "youAreOffline": "You're offline",
   "onlineBody": "You'll receive nearby ride and delivery offers.",

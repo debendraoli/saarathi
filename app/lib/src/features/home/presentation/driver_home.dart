@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../core/foreground/driver_foreground_service.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
 import '../../driver/application/driver_controller.dart';
@@ -173,6 +174,18 @@ class _OnlineCard extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2.4),
                     )
                   : Text(online ? l.goOffline : l.goOnline),
+            ),
+            TextButton.icon(
+              onPressed: () async {
+                await DriverForegroundService.requestBatteryExclusion();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(l.batteryExclusionDone)),
+                  );
+                }
+              },
+              icon: const Icon(Icons.battery_saver_rounded, size: 18),
+              label: Text(l.batteryExclusion),
             ),
           ],
         ),

@@ -63,9 +63,13 @@ The generated runners need these to actually run:
 
 - **Android** (`android/app/src/main/AndroidManifest.xml` + `build.gradle`):
   permissions `INTERNET`, `ACCESS_FINE_LOCATION`, `CAMERA`, `RECORD_AUDIO`,
-  `POST_NOTIFICATIONS`; `minSdkVersion 21+` (flutter_webrtc); for dev against a
-  plaintext gateway add `android:usesCleartextTraffic="true"`; a deep-link
-  `<intent-filter>` for scheme `saarathi`.
+  `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`,
+  `WAKE_LOCK`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`; declare the
+  flutter_foreground_task service
+  (`com.pravera.flutter_foreground_task.service.ForegroundService`,
+  `android:foregroundServiceType="location"`); `minSdkVersion 21+`; for dev
+  against a plaintext gateway add `android:usesCleartextTraffic="true"`; a
+  deep-link `<intent-filter>` for scheme `saarathi`.
 - **iOS** (`ios/Runner/Info.plist`): `NSLocationWhenInUseUsageDescription`,
   `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`,
   `NSPhotoLibraryUsageDescription`; a `CFBundleURLTypes` entry for scheme

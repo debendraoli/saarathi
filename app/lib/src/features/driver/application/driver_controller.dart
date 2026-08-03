@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/foreground/driver_foreground_service.dart';
 import '../../../core/location.dart';
 import '../data/driver_repository.dart';
 import '../domain/models.dart';
@@ -46,6 +47,8 @@ class DriverController extends Notifier<DriverStatus> {
       // Presence keep-alive (backend TTL is ~60s; beat well inside it).
       _heartbeat?.cancel();
       _heartbeat = Timer.periodic(const Duration(seconds: 20), (_) => _beat());
+      // Sticky foreground notification keeps us alive to receive offers.
+      await DriverForegroundService.start();
     } catch (_) {
       state = state.copyWith(busy: false);
       rethrow;
@@ -55,6 +58,7 @@ class DriverController extends Notifier<DriverStatus> {
   Future<void> goOffline() async {
     state = state.copyWith(busy: true);
     _heartbeat?.cancel();
+    await DriverForegroundService.stop();
     try {
       await _repo.goOffline();
     } finally {

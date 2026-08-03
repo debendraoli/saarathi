@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
@@ -30,6 +31,8 @@ class SaarathiApp extends ConsumerWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       routerConfig: router,
+      builder: (context, child) =>
+          WithForegroundTask(child: child ?? const SizedBox.shrink()),
     );
   }
 }
