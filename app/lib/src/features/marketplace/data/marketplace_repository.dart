@@ -94,6 +94,11 @@ final merchantsProvider =
   return ref.watch(marketplaceRepositoryProvider).merchants(vertical, null);
 });
 
+final myOrdersProvider =
+    FutureProvider.autoDispose<List<CustomerOrder>>((ref) {
+  return ref.watch(marketplaceRepositoryProvider).myOrders();
+});
+
 final merchantDetailProvider = FutureProvider.autoDispose
     .family<(Merchant, List<MenuItem>), String>((ref, id) {
   return ref.watch(marketplaceRepositoryProvider).detail(id);

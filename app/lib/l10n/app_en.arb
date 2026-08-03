@@ -175,6 +175,7 @@
   "cartEmpty": "Your cart is empty",
   "deliveryFeeNote": "Delivery fee is added at checkout based on distance",
   "deliveryNote": "Delivery note (optional)",
+  "deliverTo": "Deliver to",
   "placeOrder": "Place order",
   "yourOrder": "Your order",
   "trackCourier": "Track courier",

@@ -240,6 +240,7 @@ class _Sheet extends StatelessWidget {
               child: Column(
                 children: [
                   _LocationRow(
+                    label: l.pickup,
                     dotColor: scheme.primary,
                     icon: Icons.trip_origin,
                     text: pickupText,
@@ -248,6 +249,7 @@ class _Sheet extends StatelessWidget {
                   ),
                   Divider(height: 1, indent: 48, color: scheme.outlineVariant),
                   _LocationRow(
+                    label: l.destination,
                     dotColor: scheme.secondary,
                     icon: Icons.location_on_rounded,
                     text: destText ?? l.searchAddressHint,
@@ -298,6 +300,7 @@ class _Sheet extends StatelessWidget {
 /// One tappable pickup/destination row inside the ride sheet.
 class _LocationRow extends StatelessWidget {
   const _LocationRow({
+    required this.label,
     required this.dotColor,
     required this.icon,
     required this.text,
@@ -306,6 +309,7 @@ class _LocationRow extends StatelessWidget {
     this.trailing,
   });
 
+  final String label;
   final Color dotColor;
   final IconData icon;
   final String text;
@@ -315,23 +319,38 @@ class _LocationRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           children: [
             Icon(icon, size: 20, color: dotColor),
             const SizedBox(width: 14),
             Expanded(
-              child: Text(
-                text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: isPlaceholder
-                    ? TextStyle(color: Theme.of(context).hintColor)
-                    : const TextStyle(fontWeight: FontWeight.w600),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label.toUpperCase(),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: scheme.outline,
+                          letterSpacing: 0.6,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    text,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: isPlaceholder
+                        ? TextStyle(color: Theme.of(context).hintColor)
+                        : const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
               ),
             ),
             if (trailing != null) trailing!,

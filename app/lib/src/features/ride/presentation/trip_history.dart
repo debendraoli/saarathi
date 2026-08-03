@@ -33,7 +33,7 @@ class TripHistoryList extends ConsumerWidget {
             padding: const EdgeInsets.all(12),
             itemCount: list.length,
             separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (_, i) => _TripTile(trip: list[i]),
+            itemBuilder: (_, i) => TripTile(trip: list[i]),
           ),
         );
       },
@@ -41,8 +41,8 @@ class TripHistoryList extends ConsumerWidget {
   }
 }
 
-class _TripTile extends StatelessWidget {
-  const _TripTile({required this.trip});
+class TripTile extends StatelessWidget {
+  const TripTile({super.key, required this.trip});
   final Trip trip;
 
   @override

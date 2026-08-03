@@ -235,41 +235,37 @@ class _ItemCard extends ConsumerWidget {
     void add() =>
         cart.add(item, merchantId: merchant.id, merchantName: merchant.name);
 
-    return InkWell(
+    return ListTile(
       onTap: qty == 0 ? add : null,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _ItemThumb(imageUrl: item.imageUrl, vertical: merchant.vertical),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(item.name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 15)),
-                  if (item.description != null &&
-                      item.description!.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(item.description!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall),
-                  ],
-                  const SizedBox(height: 8),
-                  Text('NPR ${item.price.toStringAsFixed(0)}',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w800, color: scheme.primary)),
-                ],
-              ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      leading: _ItemThumb(imageUrl: item.imageUrl, vertical: merchant.vertical),
+      title: Text(
+        item.name,
+        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (item.description != null && item.description!.isNotEmpty)
+            Text(
+              item.description!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall,
             ),
-            const SizedBox(width: 10),
-            _QtyControl(qty: qty, onAdd: add, onRemove: () => cart.decrement(item.id)),
-          ],
-        ),
+          const SizedBox(height: 4),
+          Text(
+            'NPR ${item.price.toStringAsFixed(0)}',
+            style:
+                TextStyle(fontWeight: FontWeight.w800, color: scheme.primary),
+          ),
+        ],
+      ),
+      trailing: _QtyControl(
+        qty: qty,
+        onAdd: add,
+        onRemove: () => cart.decrement(item.id),
       ),
     );
   }
@@ -341,14 +337,18 @@ class _QtyControl extends StatelessWidget {
         children: [
           IconButton(
             visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            padding: EdgeInsets.zero,
             onPressed: onRemove,
-            icon: const Icon(Icons.remove_rounded),
+            icon: const Icon(Icons.remove_rounded, size: 20),
           ),
           Text('$qty', style: const TextStyle(fontWeight: FontWeight.w800)),
           IconButton(
             visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            padding: EdgeInsets.zero,
             onPressed: onAdd,
-            icon: const Icon(Icons.add_rounded),
+            icon: const Icon(Icons.add_rounded, size: 20),
           ),
         ],
       ),

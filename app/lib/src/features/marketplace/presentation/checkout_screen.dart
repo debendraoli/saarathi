@@ -6,6 +6,8 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
+import '../../places/data/places_repository.dart';
+import '../../places/presentation/address_search_screen.dart';
 import '../application/cart_controller.dart';
 import '../data/marketplace_repository.dart';
 
@@ -20,13 +22,38 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   final _note = TextEditingController();
   String _payment = 'cash';
   LatLng? _delivery;
+  String? _deliveryLabel;
   bool _busy = false;
 
   @override
   void initState() {
     super.initState();
-    currentLatLng().then((p) {
-      if (mounted) setState(() => _delivery = p);
+    _initDelivery();
+  }
+
+  Future<void> _initDelivery() async {
+    await ensureLocationPermission();
+    final p = await currentLatLng();
+    if (!mounted) return;
+    setState(() => _delivery = p);
+    // Best-effort address for the default (current) drop point.
+    final hit = await ref
+        .read(placesRepositoryProvider)
+        .reverse(p)
+        .catchError((_) => null);
+    if (mounted && hit != null) setState(() => _deliveryLabel = hit.label);
+  }
+
+  Future<void> _pickDelivery() async {
+    final pick = await Navigator.of(context).push<AddressPick>(
+      MaterialPageRoute(
+        builder: (_) => const AddressSearchScreen(allowMap: false),
+      ),
+    );
+    if (pick?.hit == null || !mounted) return;
+    setState(() {
+      _delivery = pick!.hit!.point;
+      _deliveryLabel = pick.hit!.label;
     });
   }
 
@@ -107,6 +134,21 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  margin: EdgeInsets.zero,
+                  child: ListTile(
+                    leading: const Icon(Icons.location_on_rounded),
+                    title: Text(l.deliverTo),
+                    subtitle: Text(
+                      _deliveryLabel ?? l.useCurrentLocation,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: const Icon(Icons.edit_location_alt_rounded),
+                    onTap: _pickDelivery,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextField(

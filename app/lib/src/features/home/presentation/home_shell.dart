@@ -4,14 +4,15 @@ import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/offline/connectivity.dart';
+import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/models.dart';
 import '../../notifications/data/notifications_repository.dart';
 import '../../places/data/places_repository.dart';
 import '../../ride/application/ride_controller.dart';
-import '../../ride/presentation/trip_history.dart';
 import 'account_tab.dart';
+import 'activity_tab.dart';
 import 'driver_home.dart';
 import 'rider_home.dart';
 
@@ -27,6 +28,15 @@ class HomeShell extends ConsumerStatefulWidget {
 
 class _HomeShellState extends ConsumerState<HomeShell> {
   int _tab = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Ask for location up front so pickup/search have a real position.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ensureLocationPermission();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +55,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final online = ref.watch(connectivityProvider).valueOrNull ?? true;
 
     final home = isDriverMode ? const DriverHome() : const RiderHome();
-    final body = [home, const TripHistoryList(), const AccountTab()][_tab];
+    final body = [home, const ActivityTab(), const AccountTab()][_tab];
 
     return Scaffold(
       appBar: AppBar(
