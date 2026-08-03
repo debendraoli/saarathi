@@ -185,6 +185,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   const Spacer(),
                   if (next != null)
                     FilledButton(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 44),
+                      ),
                       onPressed: _busy ? null : () => _advance(next.$1),
                       child: _busy
                           ? const SizedBox(

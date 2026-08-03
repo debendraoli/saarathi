@@ -19,6 +19,7 @@ import '../../features/marketplace/presentation/merchant_screen.dart';
 import '../../features/marketplace/presentation/order_screen.dart';
 import '../../features/merchant/presentation/merchant_dashboard_screen.dart';
 import '../../features/merchant/presentation/merchant_menu_screen.dart';
+import '../../features/merchant/presentation/merchant_onboarding_screen.dart';
 import '../../features/merchant/presentation/merchant_orders_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/onboarding/presentation/intro_screen.dart';
@@ -51,6 +52,7 @@ class Routes {
   static const checkout = '/marketplace/checkout';
   static const order = '/marketplace/order'; // /marketplace/order/:id
   static const merchantDashboard = '/store';
+  static const merchantOnboarding = '/store/apply';
   static const merchantOrders = '/store/orders';
   static const merchantMenu = '/store/menu';
 }
@@ -155,6 +157,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.merchantDashboard,
         builder: (_, __) => const MerchantDashboardScreen(),
+      ),
+      GoRoute(
+        path: Routes.merchantOnboarding,
+        builder: (_, __) => const MerchantOnboardingScreen(),
       ),
       GoRoute(
         path: Routes.merchantOrders,

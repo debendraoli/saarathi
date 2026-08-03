@@ -16,12 +16,17 @@ use serde::{Deserialize, Serialize};
 pub enum VehicleClass {
     /// Two-wheeler (motorbike / scooter).
     TwoWheeler,
+    /// Three-wheeler (auto-rickshaw / tempo).
+    ThreeWheeler,
     /// Four-wheeler (car).
     FourWheeler,
 }
 
 /// Maximum fare per kilometre, in NPR, by vehicle class.
 pub const TWO_WHEELER_PER_KM_CAP: Decimal = dec!(25);
+/// NOTE: the 2082 standard lists two- and four-wheeler caps; the three-wheeler
+/// ceiling here is an interim value (between the two) pending the DoTM figure.
+pub const THREE_WHEELER_PER_KM_CAP: Decimal = dec!(40);
 pub const FOUR_WHEELER_PER_KM_CAP: Decimal = dec!(55);
 
 /// Minimum billable distance: fares are computed for at least a 2 km ride.
@@ -42,6 +47,7 @@ impl VehicleClass {
     pub const fn per_km_cap(self) -> Decimal {
         match self {
             VehicleClass::TwoWheeler => TWO_WHEELER_PER_KM_CAP,
+            VehicleClass::ThreeWheeler => THREE_WHEELER_PER_KM_CAP,
             VehicleClass::FourWheeler => FOUR_WHEELER_PER_KM_CAP,
         }
     }

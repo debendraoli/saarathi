@@ -52,7 +52,9 @@ class AppTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size.fromHeight(54),
+          // Content width (not full-width) so inline actions don't crush their
+          // neighbours; primary CTAs use FilledButton which stays full-width.
+          minimumSize: const Size(64, 48),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),

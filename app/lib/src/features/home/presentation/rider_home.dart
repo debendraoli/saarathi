@@ -67,6 +67,8 @@ class RiderHome extends ConsumerWidget {
         ),
         const SizedBox(height: 20),
         if (!isDriver) const _BecomeDriverCard(),
+        const SizedBox(height: 12),
+        const _BecomeMerchantCard(),
       ],
     );
   }
@@ -171,6 +173,31 @@ class _BecomeDriverCard extends ConsumerWidget {
         subtitle: Text(l.becomeDriverBody),
         trailing: const Icon(Icons.chevron_right_rounded),
         onTap: () => context.push(Routes.becomeDriver),
+      ),
+    );
+  }
+}
+
+class _BecomeMerchantCard extends StatelessWidget {
+  const _BecomeMerchantCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppL10n.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(12),
+        leading: CircleAvatar(
+          backgroundColor: scheme.tertiaryContainer,
+          child: Icon(Icons.storefront_rounded,
+              color: scheme.onTertiaryContainer),
+        ),
+        title: Text(l.becomeMerchant,
+            style: const TextStyle(fontWeight: FontWeight.w700)),
+        subtitle: Text(l.becomeMerchantBody),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => context.push(Routes.merchantOnboarding),
       ),
     );
   }

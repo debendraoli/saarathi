@@ -102,6 +102,11 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
                 label: Text(l.vehicleTwoWheeler),
               ),
               ButtonSegment(
+                value: VehicleClass.threeWheeler,
+                icon: const Icon(Icons.electric_rickshaw_rounded),
+                label: Text(l.vehicleThreeWheeler),
+              ),
+              ButtonSegment(
                 value: VehicleClass.fourWheeler,
                 icon: const Icon(Icons.directions_car_rounded),
                 label: Text(l.vehicleFourWheeler),

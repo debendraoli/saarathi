@@ -1,23 +1,27 @@
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'config/app_config.dart';
 
-/// Prompts for location permission (and service) as needed. Returns true when
-/// the app may read a live position. Safe to call on screen entry — it triggers
-/// the native permission dialog the first time.
-Future<bool> ensureLocationPermission() async {
+// Dedupe concurrent requests — the plugins throw if a second request starts
+// while one is pending (e.g. home boot + tapping "Where to" at once).
+Future<bool>? _pending;
+
+/// Prompts for location permission via permission_handler (reliable across
+/// OEMs incl. MIUI/Xiaomi). Returns true when the app may read a live position.
+/// Safe to call repeatedly and from several places simultaneously.
+Future<bool> ensureLocationPermission() {
+  return _pending ??= _request().whenComplete(() => _pending = null);
+}
+
+Future<bool> _request() async {
   try {
-    // Ask for permission first so the OS dialog shows even if GPS is off.
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
-    }
-    if (perm == LocationPermission.denied ||
-        perm == LocationPermission.deniedForever) {
-      return false;
-    }
-    return await Geolocator.isLocationServiceEnabled();
+    final status = await Permission.locationWhenInUse.status;
+    if (status.isGranted || status.isLimited) return true;
+    if (status.isPermanentlyDenied) return false;
+    final result = await Permission.locationWhenInUse.request();
+    return result.isGranted || result.isLimited;
   } catch (_) {
     return false;
   }
@@ -28,15 +32,8 @@ Future<bool> ensureLocationPermission() async {
 Future<LatLng> currentLatLng() async {
   const fallback = LatLng(AppConfig.defaultLat, AppConfig.defaultLng);
   try {
+    if (!await ensureLocationPermission()) return fallback;
     if (!await Geolocator.isLocationServiceEnabled()) return fallback;
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
-    }
-    if (perm == LocationPermission.denied ||
-        perm == LocationPermission.deniedForever) {
-      return fallback;
-    }
     final pos = await Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
     );

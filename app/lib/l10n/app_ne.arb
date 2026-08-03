@@ -47,6 +47,14 @@
   "modeDriver": "चलाउनुहोस्",
   "becomeDriver": "चालक बन्नुहोस्",
   "becomeDriverBody": "आफ्नै समयमा कमाउनुहोस्। काम लिन KYC पूरा गर्नुहोस्।",
+  "becomeMerchant": "मर्चेन्ट बन्नुहोस्",
+  "becomeMerchantBody": "आफ्नो रेस्टुरेन्ट वा पसल सूचीबद्ध गरी अर्डर प्राप्त गर्नुहोस्।",
+  "storeType": "पसलको प्रकार",
+  "merchantStoreName": "पसलको नाम",
+  "phoneNumber": "फोन नम्बर",
+  "panVat": "PAN / VAT नम्बर",
+  "addressOptional": "ठेगाना (वैकल्पिक)",
+  "registerStore": "पसल दर्ता गर्नुहोस्",
 
   "whereTo": "कहाँ जाने?",
   "pickup": "पिकअप",
@@ -61,6 +69,7 @@
   "recentSearches": "हालसालका",
 
   "vehicleTwoWheeler": "बाइक",
+  "vehicleThreeWheeler": "अटो",
   "vehicleFourWheeler": "कार",
   "estimating": "भाडा आकलन गर्दै…",
   "fareEstimate": "भाडा अनुमान",

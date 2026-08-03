@@ -55,6 +55,7 @@ pub struct Estimate {
 pub fn parse_vehicle_class(s: &str) -> AppResult<VehicleClass> {
     match s {
         "two_wheeler" => Ok(VehicleClass::TwoWheeler),
+        "three_wheeler" => Ok(VehicleClass::ThreeWheeler),
         "four_wheeler" => Ok(VehicleClass::FourWheeler),
         other => Err(AppError::bad(
             ErrorCode::InvalidVehicleClass,
@@ -66,6 +67,7 @@ pub fn parse_vehicle_class(s: &str) -> AppResult<VehicleClass> {
 fn class_str(v: VehicleClass) -> &'static str {
     match v {
         VehicleClass::TwoWheeler => "two_wheeler",
+        VehicleClass::ThreeWheeler => "three_wheeler",
         VehicleClass::FourWheeler => "four_wheeler",
     }
 }
@@ -87,12 +89,14 @@ pub async fn estimate(
     path.push(dest);
     let profile = match vclass {
         VehicleClass::TwoWheeler => crate::routing::RouteProfile::Motorcycle,
+        VehicleClass::ThreeWheeler => crate::routing::RouteProfile::Auto,
         VehicleClass::FourWheeler => crate::routing::RouteProfile::Auto,
     };
     let route = st.router.route_path(&path, profile).await;
 
     let per_km = match vclass {
         VehicleClass::TwoWheeler => st.config.two_wheeler_per_km,
+        VehicleClass::ThreeWheeler => st.config.three_wheeler_per_km,
         VehicleClass::FourWheeler => st.config.four_wheeler_per_km,
     };
     // Dynamic surge (time windows + supply scarcity); the core clamps it to +20%.

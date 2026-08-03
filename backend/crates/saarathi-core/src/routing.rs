@@ -32,7 +32,7 @@ impl RouteProfile {
 
     pub fn from_wire(s: &str) -> Self {
         match s {
-            "auto" | "car" | "four_wheeler" => RouteProfile::Auto,
+            "auto" | "car" | "four_wheeler" | "three_wheeler" => RouteProfile::Auto,
             _ => RouteProfile::Motorcycle,
         }
     }

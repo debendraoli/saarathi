@@ -47,6 +47,14 @@
   "modeDriver": "Drive",
   "becomeDriver": "Become a driver",
   "becomeDriverBody": "Earn on your schedule. Complete KYC to start accepting jobs.",
+  "becomeMerchant": "Become a merchant",
+  "becomeMerchantBody": "List your restaurant or store and receive orders.",
+  "storeType": "Store type",
+  "merchantStoreName": "Store name",
+  "phoneNumber": "Phone number",
+  "panVat": "PAN / VAT number",
+  "addressOptional": "Address (optional)",
+  "registerStore": "Register store",
 
   "whereTo": "Where to?",
   "pickup": "Pickup",
@@ -61,6 +69,7 @@
   "recentSearches": "Recent",
 
   "vehicleTwoWheeler": "Bike",
+  "vehicleThreeWheeler": "Auto",
   "vehicleFourWheeler": "Car",
   "estimating": "Estimating fare…",
   "fareEstimate": "Fare estimate",

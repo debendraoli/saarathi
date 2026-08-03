@@ -448,6 +448,8 @@ CREATE TABLE IF NOT EXISTS merchants (
 );
 CREATE INDEX IF NOT EXISTS merchants_vertical_idx ON merchants (vertical);
 CREATE INDEX IF NOT EXISTS merchants_geog_idx ON merchants USING GIST (geog);
+-- Tax id captured at self-onboarding (PAN / VAT).
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS pan_vat text;
 
 CREATE TABLE IF NOT EXISTS menu_items (
     id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),

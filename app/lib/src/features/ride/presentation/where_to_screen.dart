@@ -266,21 +266,23 @@ class _Sheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-            SegmentedButton<VehicleClass>(
-              segments: [
-                ButtonSegment(
-                  value: VehicleClass.twoWheeler,
-                  icon: const Icon(Icons.two_wheeler_rounded),
-                  label: Text(l.vehicleTwoWheeler),
-                ),
-                ButtonSegment(
-                  value: VehicleClass.fourWheeler,
-                  icon: const Icon(Icons.directions_car_rounded),
-                  label: Text(l.vehicleFourWheeler),
-                ),
+            Row(
+              children: [
+                for (final v in VehicleClass.values)
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        right: v == VehicleClass.values.last ? 0 : 8,
+                      ),
+                      child: _VehicleCard(
+                        selected: vehicle == v,
+                        icon: _vehicleIcon(v),
+                        label: _vehicleLabel(l, v),
+                        onTap: () => onVehicle(v),
+                      ),
+                    ),
+                  ),
               ],
-              selected: {vehicle},
-              onSelectionChanged: (s) => onVehicle(s.first),
             ),
             const SizedBox(height: 14),
             FilledButton(
@@ -291,6 +293,75 @@ class _Sheet extends StatelessWidget {
               child: Text(l.fareEstimate),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+IconData _vehicleIcon(VehicleClass v) => switch (v) {
+      VehicleClass.twoWheeler => Icons.two_wheeler_rounded,
+      VehicleClass.threeWheeler => Icons.electric_rickshaw_rounded,
+      VehicleClass.fourWheeler => Icons.directions_car_rounded,
+    };
+
+String _vehicleLabel(AppL10n l, VehicleClass v) => switch (v) {
+      VehicleClass.twoWheeler => l.vehicleTwoWheeler,
+      VehicleClass.threeWheeler => l.vehicleThreeWheeler,
+      VehicleClass.fourWheeler => l.vehicleFourWheeler,
+    };
+
+/// A selectable vehicle-class card (icon + label), inDrive/Yango style.
+class _VehicleCard extends StatelessWidget {
+  const _VehicleCard({
+    required this.selected,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: selected ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected ? scheme.primary : Colors.transparent,
+              width: 1.5,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 28,
+                color: selected ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  fontSize: 12.5,
+                  color: selected ? scheme.onPrimaryContainer : scheme.onSurface,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -41,6 +41,8 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
     CREATE TYPE vehicle_class AS ENUM ('two_wheeler', 'four_wheeler');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Three-wheeler (auto / tempo) added later; idempotent.
+ALTER TYPE vehicle_class ADD VALUE IF NOT EXISTS 'three_wheeler';
 
 -- Keep updated_at honest.
 CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$

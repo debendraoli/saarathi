@@ -295,9 +295,9 @@ async fn add_driver(
         return Err(AppError::BadRequest("phone is required".into()));
     }
     if let Some(c) = &body.vehicle_class {
-        if !matches!(c.as_str(), "two_wheeler" | "four_wheeler") {
+        if !matches!(c.as_str(), "two_wheeler" | "three_wheeler" | "four_wheeler") {
             return Err(AppError::BadRequest(
-                "vehicle_class must be 'two_wheeler' or 'four_wheeler'".into(),
+                "vehicle_class must be 'two_wheeler', 'three_wheeler' or 'four_wheeler'".into(),
             ));
         }
     }

@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../marketplace/domain/models.dart';
@@ -8,6 +9,27 @@ import '../../marketplace/domain/models.dart';
 class MerchantRepository {
   MerchantRepository(this._api);
   final ApiClient _api;
+
+  /// Self-service store registration. Returns the new merchant id.
+  Future<String> apply({
+    required String name,
+    required String vertical,
+    required LatLng point,
+    String? address,
+    String? phone,
+    String? panVat,
+  }) async {
+    final res = await _api.post('/v1/merchant/apply', body: {
+      'name': name,
+      'vertical': vertical,
+      'lat': point.latitude,
+      'lng': point.longitude,
+      if (address != null && address.isNotEmpty) 'address': address,
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
+      if (panVat != null && panVat.isNotEmpty) 'pan_vat': panVat,
+    }) as Map<String, dynamic>;
+    return res['id'] as String;
+  }
 
   Future<List<Merchant>> myMerchants() async {
     final res = await _api.get('/v1/merchant/merchants') as List;

@@ -87,6 +87,7 @@ pub enum DocumentStatus {
 #[serde(rename_all = "snake_case")]
 pub enum VehicleClass {
     TwoWheeler,
+    ThreeWheeler,
     FourWheeler,
 }
 

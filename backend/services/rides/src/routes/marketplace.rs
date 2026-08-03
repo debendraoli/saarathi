@@ -33,6 +33,8 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/merchant/menu", post(add_menu_item))
         .route("/v1/merchant/menu/{id}/availability", post(set_item_availability))
         .route("/v1/merchant/open", post(set_open))
+        // Self-service onboarding (any signed-in user can register a store).
+        .route("/v1/merchant/apply", post(apply_merchant))
         // Ops onboarding.
         .route("/v1/admin/merchants", post(create_merchant))
 }
@@ -605,6 +607,48 @@ async fn set_open(
         .execute(&st.db)
         .await?;
     Ok(Json(json!({ "ok": true, "is_open": body.is_open })))
+}
+
+#[derive(Deserialize)]
+struct MerchantApply {
+    name: String,
+    vertical: String,
+    address: Option<String>,
+    phone: Option<String>,
+    pan_vat: Option<String>,
+    lat: f64,
+    lng: f64,
+}
+
+/// Self-service store registration: creates a merchant owned by the caller,
+/// closed until they open it. Tax id (PAN/VAT) captured for compliance.
+async fn apply_merchant(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<MerchantApply>,
+) -> AppResult<Json<Value>> {
+    if !matches!(body.vertical.as_str(), "food" | "grocery") {
+        return Err(AppError::BadRequest("vertical must be 'food' or 'grocery'".into()));
+    }
+    if body.name.trim().is_empty() {
+        return Err(AppError::BadRequest("name is required".into()));
+    }
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO merchants \
+             (owner_user_id, name, vertical, address, phone, pan_vat, lat, lng, is_open, prep_mins) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false,20) RETURNING id",
+    )
+    .bind(claims.sub)
+    .bind(body.name.trim())
+    .bind(&body.vertical)
+    .bind(body.address)
+    .bind(body.phone)
+    .bind(body.pan_vat)
+    .bind(body.lat)
+    .bind(body.lng)
+    .fetch_one(&st.db)
+    .await?;
+    Ok(Json(json!({ "id": id })))
 }
 
 #[derive(Deserialize)]

@@ -18,6 +18,7 @@ pub struct Config {
     pub avg_speed_kmh: Decimal,
     /// Admin-configured per-km rates (clamped to the legal caps by the engine).
     pub two_wheeler_per_km: Decimal,
+    pub three_wheeler_per_km: Decimal,
     pub four_wheeler_per_km: Decimal,
     pub commission_rate: Decimal,
     /// Redis connection for the driver geo-index + dispatch.
@@ -68,6 +69,7 @@ impl Config {
             road_factor: dec_env("ROUTING_ROAD_FACTOR", "1.3"),
             avg_speed_kmh: dec_env("ROUTING_AVG_SPEED_KMH", "22"),
             two_wheeler_per_km: dec_env("FARE_TWO_WHEELER_PER_KM", "20"),
+            three_wheeler_per_km: dec_env("FARE_THREE_WHEELER_PER_KM", "35"),
             four_wheeler_per_km: dec_env("FARE_FOUR_WHEELER_PER_KM", "45"),
             commission_rate: dec_env("FARE_COMMISSION_RATE", "0.10"),
             redis_url: opt("REDIS_URL").unwrap_or_else(|| "redis://localhost:6379".into()),

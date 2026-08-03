@@ -8,6 +8,7 @@ double asDouble(dynamic v) {
 
 enum VehicleClass {
   twoWheeler('two_wheeler', 'motorcycle'),
+  threeWheeler('three_wheeler', 'auto'),
   fourWheeler('four_wheeler', 'auto');
 
   const VehicleClass(this.wire, this.profile);
