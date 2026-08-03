@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
+import '../../places/data/places_repository.dart';
 import '../domain/models.dart';
 import 'widgets/map_view.dart';
 
@@ -55,6 +56,47 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     context.push(Routes.confirm, extra: draft);
   }
 
+  void _pickSaved(SavedPlace place) {
+    setState(() {
+      _dest = place.point;
+      _destLabel.text = place.label;
+    });
+    _mapController.move(place.point, 15);
+  }
+
+  Future<void> _saveDest() async {
+    if (_dest == null) return;
+    final controller = TextEditingController(text: _destLabel.text.trim());
+    final label = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Save place'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Home, Work, …'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(AppL10n.of(context).actionCancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: Text(AppL10n.of(context).saveAction),
+          ),
+        ],
+      ),
+    );
+    if (label == null || label.isEmpty) return;
+    try {
+      await ref
+          .read(placesRepositoryProvider)
+          .add(label, _dest!, address: _destLabel.text.trim());
+      ref.invalidate(savedPlacesProvider);
+    } catch (_) {/* non-blocking */}
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
@@ -82,6 +124,12 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                 ),
             ],
           ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: _SavedPlacesBar(onPick: _pickSaved),
+            ),
+          ),
           Align(
             alignment: Alignment.bottomCenter,
             child: _Sheet(
@@ -90,6 +138,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
               vehicle: _vehicle,
               onVehicle: (v) => setState(() => _vehicle = v),
               onContinue: _dest == null ? null : _continue,
+              onSave: _dest == null ? null : _saveDest,
             ),
           ),
         ],
@@ -105,6 +154,7 @@ class _Sheet extends StatelessWidget {
     required this.vehicle,
     required this.onVehicle,
     required this.onContinue,
+    required this.onSave,
   });
 
   final TextEditingController destLabel;
@@ -112,6 +162,7 @@ class _Sheet extends StatelessWidget {
   final VehicleClass vehicle;
   final ValueChanged<VehicleClass> onVehicle;
   final VoidCallback? onContinue;
+  final VoidCallback? onSave;
 
   @override
   Widget build(BuildContext context) {
@@ -150,6 +201,11 @@ class _Sheet extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (onSave != null)
+                  IconButton(
+                    icon: const Icon(Icons.bookmark_add_outlined),
+                    onPressed: onSave,
+                  ),
               ],
             ),
             const SizedBox(height: 12),
@@ -176,6 +232,43 @@ class _Sheet extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Quick-pick chips for the user's saved places (Home / Work / favourites).
+class _SavedPlacesBar extends ConsumerWidget {
+  const _SavedPlacesBar({required this.onPick});
+  final void Function(SavedPlace) onPick;
+
+  IconData _iconFor(String label) {
+    final l = label.toLowerCase();
+    if (l.contains('home')) return Icons.home_rounded;
+    if (l.contains('work') || l.contains('office')) return Icons.work_rounded;
+    return Icons.bookmark_rounded;
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final places = ref.watch(savedPlacesProvider).valueOrNull ?? const [];
+    if (places.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        children: [
+          for (final p in places)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ActionChip(
+                avatar: Icon(_iconFor(p.label), size: 18),
+                label: Text(p.label),
+                onPressed: () => onPick(p),
+              ),
+            ),
+        ],
       ),
     );
   }

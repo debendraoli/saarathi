@@ -12,6 +12,7 @@ import '../../features/delivery/presentation/parcel_screen.dart';
 import '../../features/driver/presentation/become_driver_screen.dart';
 import '../../features/driver/presentation/kyc_documents_screen.dart';
 import '../../features/home/presentation/home_shell.dart';
+import '../../features/marketplace/presentation/marketplace_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/onboarding/presentation/intro_screen.dart';
 import '../../features/onboarding/presentation/splash_screen.dart';
@@ -36,6 +37,8 @@ class Routes {
   static const chat = '/ride/chat';
   static const call = '/ride/call';
   static const notifications = '/notifications';
+  static const food = '/food';
+  static const grocery = '/grocery';
 }
 
 /// Bridges Riverpod state changes to go_router's redirect re-evaluation.
@@ -108,6 +111,15 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
           path: Routes.notifications,
           builder: (_, __) => const NotificationsScreen()),
+      GoRoute(
+        path: Routes.food,
+        builder: (_, __) => const MarketplaceScreen(kind: MarketplaceKind.food),
+      ),
+      GoRoute(
+        path: Routes.grocery,
+        builder: (_, __) =>
+            const MarketplaceScreen(kind: MarketplaceKind.grocery),
+      ),
     ],
   );
 });

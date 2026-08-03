@@ -21,6 +21,7 @@ pub fn routes() -> Router<AppState> {
             axum::routing::delete(delete_location),
         )
         .route("/v1/me/location-ping", post(location_ping))
+        .route("/v1/me/push-token", post(save_push_token))
         .route(
             "/v1/me/preferences",
             get(get_preferences).put(update_preferences),
@@ -142,6 +143,36 @@ async fn location_ping(
     .bind(body.accuracy_m)
     .bind(body.heading_deg)
     .bind(body.speed_mps)
+    .execute(&st.db)
+    .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct PushToken {
+    token: String,
+    platform: Option<String>,
+}
+
+/// Register (or refresh) an FCM/APNs device token so the notify service can
+/// target this device with push. Keyed by token; re-owns it for this user.
+async fn save_push_token(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<PushToken>,
+) -> AppResult<Json<Value>> {
+    let token = body.token.trim();
+    if token.is_empty() {
+        return Ok(Json(json!({ "ok": false })));
+    }
+    sqlx::query(
+        "INSERT INTO device_tokens (token, user_id, platform) VALUES ($1, $2, $3) \
+         ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, \
+             platform = EXCLUDED.platform, updated_at = now()",
+    )
+    .bind(token)
+    .bind(claims.sub)
+    .bind(body.platform)
     .execute(&st.db)
     .await?;
     Ok(Json(json!({ "ok": true })))

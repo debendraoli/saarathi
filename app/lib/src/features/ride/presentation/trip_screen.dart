@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
@@ -13,7 +13,6 @@ import '../../comms/application/call_controller.dart';
 import '../../comms/presentation/call_screen.dart';
 import '../../safety/presentation/qr_scan_screen.dart';
 import '../application/ride_controller.dart';
-
 import '../application/trip_ws.dart';
 import '../data/ride_repository.dart';
 import '../domain/models.dart';

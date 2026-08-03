@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
 import '../../driver/application/driver_controller.dart';
 import '../../driver/data/driver_kyc_repository.dart';
-import '../../driver/domain/models.dart';
 import '../../driver/data/driver_repository.dart';
+import '../../driver/domain/models.dart';
 
 /// Driver home: one big online/offline control (presence heartbeat runs while
 /// online) and incoming job offers with transparent net earnings. Gated on KYC

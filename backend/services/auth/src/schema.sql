@@ -183,6 +183,15 @@ CREATE TABLE IF NOT EXISTS location_pings (
 CREATE INDEX IF NOT EXISTS location_pings_user_time_idx ON location_pings (user_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS location_pings_geog_idx ON location_pings USING GIST (geog);
 
+-- ── Push device tokens (FCM / APNs) ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS device_tokens (
+    token      text        PRIMARY KEY,
+    user_id    uuid        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    platform   text,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS device_tokens_user_idx ON device_tokens (user_id);
+
 -- ── Audit log (every privileged staff action) ──────────────────────────────
 CREATE TABLE IF NOT EXISTS audit_log (
     id            bigserial   PRIMARY KEY,

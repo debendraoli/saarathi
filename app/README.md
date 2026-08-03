@@ -70,14 +70,15 @@ The generated runners need these to actually run:
   `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`,
   `NSPhotoLibraryUsageDescription`; a `CFBundleURLTypes` entry for scheme
   `saarathi`; for localhost dev, an `NSAppTransportSecurity` exception.
-- **WebRTC**: set a Coturn relay via
-  `--dart-define=SAARATHI_TURN_URL=turn:… --dart-define=SAARATHI_TURN_USER=… --dart-define=SAARATHI_TURN_PASS=…`.
-- **Push**: local/foreground notifications work out of the box; production
-  FCM/APNs needs `google-services.json` / `GoogleService-Info.plist` — then call
-  `NotificationService.show` from the FCM handler.
+- **WebRTC**: point at Coturn via
+  `--dart-define=SAARATHI_TURN_URL=…` (or the app fetches ephemeral creds from
+  the backend `/v1/rtc/ice`, which are minted from the Coturn `TURN_SECRET`).
+- **Push (FCM)**: run `flutterfire configure` to generate
+  `firebase_options.dart` + `google-services.json` / `GoogleService-Info.plist`,
+  then push works end-to-end (`PushService` is already wired and registers the
+  device token via `POST /v1/me/push-token`). Until then push is auto-disabled.
 
 ## Not yet built (next passes)
 
-Food/grocery verticals · saved places · offline cache/reconcile · trickle-ICE
-candidate queueing · production FCM wiring.
-
+Merchant catalogue backend (food/grocery ordering) · trip-share deep link ·
+notify-service FCM sender · saved-place management screen.

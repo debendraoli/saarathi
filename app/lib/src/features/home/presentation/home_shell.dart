@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../core/offline/connectivity.dart';
 import '../../../core/router/app_router.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/models.dart';
 import '../../notifications/data/notifications_repository.dart';
+import '../../places/data/places_repository.dart';
+import '../../ride/application/ride_controller.dart';
 import '../../ride/presentation/trip_history.dart';
 import 'account_tab.dart';
 import 'driver_home.dart';
@@ -31,6 +34,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final auth = ref.watch(authControllerProvider);
     final isDriverMode = auth.mode == AppMode.driver;
 
+    // Reconcile cached data when connectivity is restored.
+    ref.listen(connectivityProvider, (prev, next) {
+      if (prev?.valueOrNull == false && next.valueOrNull == true) {
+        ref.invalidate(myTripsProvider);
+        ref.invalidate(inboxProvider);
+        ref.invalidate(savedPlacesProvider);
+      }
+    });
+    final online = ref.watch(connectivityProvider).valueOrNull ?? true;
+
     final home = isDriverMode ? const DriverHome() : const RiderHome();
     final body = [home, const TripHistoryList(), const AccountTab()][_tab];
 
@@ -43,7 +56,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           const SizedBox(width: 4),
         ],
       ),
-      body: body,
+      body: Column(
+        children: [
+          if (!online) const _OfflineBar(),
+          Expanded(child: body),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
@@ -71,6 +89,29 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   String _greeting(AppL10n l, AppUser? user) {
     final name = user?.fullName;
     return l.greeting(name == null || name.isEmpty ? '' : ', $name');
+  }
+}
+
+class _OfflineBar extends StatelessWidget {
+  const _OfflineBar();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.errorContainer,
+      child: SizedBox(
+        width: double.infinity,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Text(
+            AppL10n.of(context).offlineBanner,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: scheme.onErrorContainer, fontSize: 12.5),
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -4,9 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
-import '../../../core/config/app_config.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../ride/application/trip_channel.dart';
+import '../data/rtc_repository.dart';
 
 enum CallStatus { idle, calling, incoming, connected, ended }
 
@@ -14,12 +14,13 @@ enum CallStatus { idle, calling, incoming, connected, ended }
 /// direct fails); only SDP/ICE signaling is relayed through the trip channel.
 /// Masked — no real phone numbers involved.
 class CallController extends ChangeNotifier {
-  CallController(this._channel, this._myId) {
+  CallController(this._channel, this._myId, this._rtc) {
     _sub = _channel.ofType('signal').listen(_onSignal);
   }
 
   final TripChannel _channel;
   final String? _myId;
+  final RtcRepository _rtc;
 
   final RTCVideoRenderer localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
@@ -28,6 +29,11 @@ class CallController extends ChangeNotifier {
   MediaStream? _localStream;
   StreamSubscription<Map<String, dynamic>>? _sub;
   Map<String, dynamic>? _pendingOffer;
+
+  // Trickle-ICE: remote candidates that arrive before the remote description
+  // is applied are queued, then flushed once it's set.
+  final List<RTCIceCandidate> _queuedCandidates = [];
+  bool _remoteReady = false;
 
   CallStatus status = CallStatus.idle;
   bool video = false;
@@ -46,7 +52,8 @@ class CallController extends ChangeNotifier {
   Future<void> _setup(bool withVideo) async {
     await _ensureRenderers();
     video = withVideo;
-    _pc = await createPeerConnection({'iceServers': AppConfig.iceServers});
+    final iceServers = await _rtc.iceServers();
+    _pc = await createPeerConnection({'iceServers': iceServers});
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
       'video': withVideo ? {'facingMode': 'user'} : false,
@@ -96,10 +103,19 @@ class CallController extends ChangeNotifier {
     await _pc!.setRemoteDescription(
       RTCSessionDescription(offer['sdp'] as String, offer['type'] as String),
     );
+    await _flushCandidates();
     final answer = await _pc!.createAnswer();
     await _pc!.setLocalDescription(answer);
     _channel.sendSignal('answer', {'sdp': answer.sdp, 'type': answer.type});
     _pendingOffer = null;
+  }
+
+  Future<void> _flushCandidates() async {
+    _remoteReady = true;
+    for (final c in _queuedCandidates) {
+      await _pc?.addCandidate(c);
+    }
+    _queuedCandidates.clear();
   }
 
   void toggleMute() {
@@ -134,15 +150,19 @@ class CallController extends ChangeNotifier {
         await _pc?.setRemoteDescription(
           RTCSessionDescription(data['sdp'] as String, data['type'] as String),
         );
+        await _flushCandidates();
       case 'ice':
         final c = (data as Map).cast<String, dynamic>();
-        await _pc?.addCandidate(
-          RTCIceCandidate(
-            c['candidate'] as String?,
-            c['sdpMid'] as String?,
-            c['sdpMLineIndex'] as int?,
-          ),
+        final candidate = RTCIceCandidate(
+          c['candidate'] as String?,
+          c['sdpMid'] as String?,
+          c['sdpMLineIndex'] as int?,
         );
+        if (_pc != null && _remoteReady) {
+          await _pc!.addCandidate(candidate);
+        } else {
+          _queuedCandidates.add(candidate); // apply after remote description
+        }
       case 'bye':
         _end(local: false);
     }
@@ -154,6 +174,8 @@ class CallController extends ChangeNotifier {
     _localStream = null;
     await _pc?.close();
     _pc = null;
+    _queuedCandidates.clear();
+    _remoteReady = false;
     remoteRenderer.srcObject = null;
     localRenderer.srcObject = null;
     _pendingOffer = null;
@@ -172,10 +194,14 @@ class CallController extends ChangeNotifier {
 }
 
 final callControllerProvider =
-    Provider.autoDispose.family<CallController, String>((ref, tripId) {
+    Provider.autoDispose.family<CallController, String>((
+  ref,
+  tripId,
+) {
   final channel = ref.watch(tripChannelProvider(tripId));
   final myId = ref.read(authControllerProvider).user?.id;
-  final controller = CallController(channel, myId);
+  final controller =
+      CallController(channel, myId, ref.read(rtcRepositoryProvider));
   ref.onDispose(controller.disposeAll);
   return controller;
 });

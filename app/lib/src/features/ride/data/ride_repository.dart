@@ -1,12 +1,16 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/offline/json_cache.dart';
+import '../../../core/prefs.dart';
 import '../domain/models.dart';
 
 class RideRepository {
-  RideRepository(this._api);
+  RideRepository(this._api, this._prefs);
 
   final ApiClient _api;
+  final SharedPreferences _prefs;
 
   Future<FareEstimate> estimate(RideDraft draft) async {
     final res = await _api.post(
@@ -38,11 +42,12 @@ class RideRepository {
     return Trip.fromJson(res as Map<String, dynamic>);
   }
 
-  Future<List<Trip>> myTrips() async {
-    final res = await _api.get('/v1/rides');
-    final list = (res as List).cast<Map<String, dynamic>>();
-    return list.map(Trip.fromJson).toList();
-  }
+  Future<List<Trip>> myTrips() => cacheThroughList(
+        prefs: _prefs,
+        key: 'cache.rides.mytrips',
+        fetch: () => _api.get('/v1/rides'),
+        parse: Trip.fromJson,
+      );
 
   Future<void> cancel(String id) =>
       _api.post('/v1/rides/$id/status', body: {'status': 'cancelled'});
@@ -71,5 +76,8 @@ class RideRepository {
 }
 
 final rideRepositoryProvider = Provider<RideRepository>((ref) {
-  return RideRepository(ref.watch(apiClientProvider));
+  return RideRepository(
+    ref.watch(apiClientProvider),
+    ref.watch(sharedPreferencesProvider),
+  );
 });

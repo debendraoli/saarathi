@@ -121,6 +121,9 @@ class ApiClient {
   Future<dynamic> put(String path, {Object? body}) =>
       _send(() => _dio.put<dynamic>(path, data: body));
 
+  Future<dynamic> delete(String path) =>
+      _send(() => _dio.delete<dynamic>(path));
+
   /// Multipart upload (KYC documents). Lets dio set the multipart boundary.
   Future<dynamic> upload(String path, FormData form) => _send(
         () => _dio.post<dynamic>(

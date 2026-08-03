@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/prefs.dart';
 
 class AppNotification {
   const AppNotification({
@@ -36,11 +40,22 @@ class Inbox {
 }
 
 class NotificationsRepository {
-  NotificationsRepository(this._api);
+  NotificationsRepository(this._api, this._prefs);
   final ApiClient _api;
+  final SharedPreferences _prefs;
+
+  static const _cacheKey = 'cache.notifications';
 
   Future<Inbox> inbox() async {
-    final res = await _api.get('/v1/notifications') as Map<String, dynamic>;
+    Map<String, dynamic> res;
+    try {
+      res = await _api.get('/v1/notifications') as Map<String, dynamic>;
+      await _prefs.setString(_cacheKey, jsonEncode(res));
+    } catch (e) {
+      final cached = _prefs.getString(_cacheKey);
+      if (cached == null) rethrow;
+      res = jsonDecode(cached) as Map<String, dynamic>;
+    }
     final items =
         (res['items'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
     return Inbox(
@@ -55,7 +70,10 @@ class NotificationsRepository {
 
 final notificationsRepositoryProvider =
     Provider<NotificationsRepository>((ref) {
-  return NotificationsRepository(ref.watch(apiClientProvider));
+  return NotificationsRepository(
+    ref.watch(apiClientProvider),
+    ref.watch(sharedPreferencesProvider),
+  );
 });
 
 final inboxProvider = FutureProvider.autoDispose<Inbox>((ref) {

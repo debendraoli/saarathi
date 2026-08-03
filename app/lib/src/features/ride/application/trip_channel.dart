@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/storage/token_store.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// One WebSocket per trip (`/v1/ws?token&trip`) multiplexing every message type
 /// the backend fans out: `location`, `status`, `chat`, `presence`, and WebRTC

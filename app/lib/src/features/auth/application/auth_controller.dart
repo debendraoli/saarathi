@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/notifications/push_service.dart';
 import '../../../core/storage/token_store.dart';
 import '../data/auth_repository.dart';
 import '../domain/models.dart';
@@ -30,10 +31,15 @@ class AuthController extends Notifier<AuthState> {
         user: user,
         mode: user.isDriver ? AppMode.driver : AppMode.rider,
       );
+      _registerPush();
     } catch (_) {
       await _tokens.clear();
       state = state.copyWith(status: AuthStatus.unauthenticated);
     }
+  }
+
+  void _registerPush() {
+    PushService.instance.register(ref.read(apiClientProvider));
   }
 
   Future<String?> requestOtp(String phone) => _repo.requestOtp(phone);
@@ -47,6 +53,7 @@ class AuthController extends Notifier<AuthState> {
       user: session.user,
       mode: session.user.isDriver ? AppMode.driver : AppMode.rider,
     );
+    _registerPush();
   }
 
   void setMode(AppMode mode) => state = state.copyWith(mode: mode);

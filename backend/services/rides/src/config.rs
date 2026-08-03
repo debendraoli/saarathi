@@ -47,6 +47,12 @@ pub struct Config {
     pub delivery_tier_small: Decimal,
     pub delivery_tier_medium: Decimal,
     pub delivery_fragile_surcharge: Decimal,
+    /// WebRTC ICE: self-hosted Coturn. When `turn_secret` is set, `/v1/rtc/ice`
+    /// mints short-lived TURN credentials (Coturn `use-auth-secret` REST scheme).
+    pub turn_urls: Vec<String>,
+    pub turn_stun_url: String,
+    pub turn_secret: String,
+    pub turn_ttl_secs: i64,
 }
 
 impl Config {
@@ -80,6 +86,18 @@ impl Config {
             delivery_tier_small: dec_env("DELIVERY_TIER_SMALL_SURCHARGE", "10"),
             delivery_tier_medium: dec_env("DELIVERY_TIER_MEDIUM_SURCHARGE", "25"),
             delivery_fragile_surcharge: dec_env("DELIVERY_FRAGILE_SURCHARGE", "20"),
+            turn_urls: opt("TURN_URLS")
+                .map(|s| {
+                    s.split(',')
+                        .map(|x| x.trim().to_string())
+                        .filter(|x| !x.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            turn_stun_url: opt("TURN_STUN_URL")
+                .unwrap_or_else(|| "stun:stun.l.google.com:19302".into()),
+            turn_secret: opt("TURN_SECRET").unwrap_or_default(),
+            turn_ttl_secs: int_env("TURN_TTL_SECS", 86_400),
         })
     }
 }

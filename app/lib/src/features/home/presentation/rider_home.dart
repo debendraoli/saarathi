@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../auth/application/auth_controller.dart';
@@ -33,17 +33,21 @@ class RiderHome extends ConsumerWidget {
               label: l.modeRider,
               onTap: () => context.push(Routes.whereTo),
             ),
-            const _Service(
-                icon: Icons.restaurant_rounded, label: 'Food', soon: true),
+            _Service(
+              icon: Icons.restaurant_rounded,
+              label: l.food,
+              onTap: () => context.push(Routes.food),
+            ),
             _Service(
               icon: Icons.inventory_2_rounded,
               label: 'Parcel',
               onTap: () => context.push(Routes.parcel),
             ),
-            const _Service(
-                icon: Icons.local_grocery_store_rounded,
-                label: 'Grocery',
-                soon: true),
+            _Service(
+              icon: Icons.local_grocery_store_rounded,
+              label: l.grocery,
+              onTap: () => context.push(Routes.grocery),
+            ),
           ],
         ),
         const SizedBox(height: 20),
@@ -92,8 +96,8 @@ class _WhereToCard extends StatelessWidget {
 }
 
 class _Service extends StatelessWidget {
-  const _Service(
-      {required this.icon, required this.label, this.onTap, this.soon = false});
+  const _Service({required this.icon, required this.label, this.onTap})
+      : soon = false;
 
   final IconData icon;
   final String label;

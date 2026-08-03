@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/prefs.dart';
 import '../../auth/application/auth_controller.dart';
