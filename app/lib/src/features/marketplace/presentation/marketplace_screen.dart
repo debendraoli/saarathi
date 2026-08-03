@@ -1,87 +1,160 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
-/// Food & grocery discovery. The merchant catalogue backend isn't live yet, so
-/// this is an honest "launching soon in your area" state with a waitlist CTA —
-/// structured so the merchant list/menu/cart slots straight in when it lands.
+import '../../../core/router/app_router.dart';
+import '../../../shared/widgets/common.dart';
+import '../data/marketplace_repository.dart';
+import '../domain/models.dart';
+
 enum MarketplaceKind { food, grocery }
 
-class MarketplaceScreen extends StatefulWidget {
+/// Merchant discovery for a vertical (food / grocery), nearest first.
+class MarketplaceScreen extends ConsumerWidget {
   const MarketplaceScreen({super.key, required this.kind});
   final MarketplaceKind kind;
 
+  String get _vertical => kind == MarketplaceKind.food ? 'food' : 'grocery';
+
   @override
-  State<MarketplaceScreen> createState() => _MarketplaceScreenState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppL10n.of(context);
+    final title = kind == MarketplaceKind.food ? l.food : l.grocery;
+    final merchants = ref.watch(merchantsProvider(_vertical));
+
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: merchants.when(
+        loading: () => const LoadingView(),
+        error: (_, __) => ErrorRetry(
+          message: l.errorNetwork,
+          onRetry: () => ref.invalidate(merchantsProvider(_vertical)),
+        ),
+        data: (list) {
+          if (list.isEmpty) {
+            return _EmptyMerchants(kind: kind);
+          }
+          return RefreshIndicator(
+            onRefresh: () async => ref.invalidate(merchantsProvider(_vertical)),
+            child: ListView.separated(
+              padding: const EdgeInsets.all(12),
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (_, i) => _MerchantCard(merchant: list[i]),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
 
-class _MarketplaceScreenState extends State<MarketplaceScreen> {
-  bool _joined = false;
+class _MerchantCard extends StatelessWidget {
+  const _MerchantCard({required this.merchant});
+  final Merchant merchant;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => context.push(Routes.merchant, extra: merchant),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 28,
+                backgroundColor: scheme.primaryContainer,
+                child: Icon(
+                  merchant.vertical == 'grocery'
+                      ? Icons.local_grocery_store_rounded
+                      : Icons.restaurant_rounded,
+                  color: scheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      merchant.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.star_rounded,
+                            size: 15, color: Colors.amber),
+                        Text(' ${merchant.rating.toStringAsFixed(1)}  ·  '),
+                        Icon(
+                          Icons.schedule_rounded,
+                          size: 14,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        Text(' ${merchant.prepMins}m'),
+                        if (merchant.distanceKm != null)
+                          Text(
+                              '  ·  ${merchant.distanceKm!.toStringAsFixed(1)} km'),
+                      ],
+                    ),
+                    if (!merchant.isOpen)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Closed',
+                          style: TextStyle(color: scheme.error, fontSize: 12),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyMerchants extends StatelessWidget {
+  const _EmptyMerchants({required this.kind});
+  final MarketplaceKind kind;
 
   @override
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final isFood = widget.kind == MarketplaceKind.food;
-    final title = isFood ? l.food : l.grocery;
-
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                height: 120,
-                width: 120,
-                decoration: BoxDecoration(
-                  color: scheme.primaryContainer,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  isFood
-                      ? Icons.restaurant_rounded
-                      : Icons.local_grocery_store_rounded,
-                  size: 56,
-                  color: scheme.onPrimaryContainer,
-                ),
-              ),
-              const SizedBox(height: 28),
-              Text(
-                l.comingSoonTitle,
-                textAlign: TextAlign.center,
-                style: Theme.of(
-                  context,
-                )
-                    .textTheme
-                    .headlineSmall
-                    ?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                l.comingSoonBody,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: scheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: 28),
-              if (_joined)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.check_circle_rounded, color: scheme.primary),
-                    const SizedBox(width: 8),
-                    Text(l.waitlistJoined),
-                  ],
-                )
-              else
-                FilledButton.icon(
-                  onPressed: () => setState(() => _joined = true),
-                  icon: const Icon(Icons.notifications_active_rounded),
-                  label: Text(l.notifyMe),
-                ),
-            ],
-          ),
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              kind == MarketplaceKind.food
+                  ? Icons.restaurant_rounded
+                  : Icons.local_grocery_store_rounded,
+              size: 56,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              l.comingSoonTitle,
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            Text(l.comingSoonBody, textAlign: TextAlign.center),
+          ],
         ),
       ),
     );

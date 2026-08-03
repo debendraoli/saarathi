@@ -7,6 +7,7 @@ pub mod feedback;
 pub mod flags;
 pub mod insights;
 pub mod ledger;
+pub mod marketplace;
 pub mod metrics;
 pub mod plans;
 pub mod rides;
@@ -45,6 +46,7 @@ pub fn router(state: AppState) -> Router {
         .merge(analytics::routes())
         .merge(subscription::routes())
         .merge(rtc::routes())
+        .merge(marketplace::routes())
         .merge(plans::routes())
         .merge(insights::routes())
         .layer(TraceLayer::new_for_http())

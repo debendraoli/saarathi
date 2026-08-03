@@ -12,7 +12,11 @@ import '../../features/delivery/presentation/parcel_screen.dart';
 import '../../features/driver/presentation/become_driver_screen.dart';
 import '../../features/driver/presentation/kyc_documents_screen.dart';
 import '../../features/home/presentation/home_shell.dart';
+import '../../features/marketplace/domain/models.dart';
+import '../../features/marketplace/presentation/checkout_screen.dart';
 import '../../features/marketplace/presentation/marketplace_screen.dart';
+import '../../features/marketplace/presentation/merchant_screen.dart';
+import '../../features/marketplace/presentation/order_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/onboarding/presentation/intro_screen.dart';
 import '../../features/onboarding/presentation/splash_screen.dart';
@@ -39,6 +43,9 @@ class Routes {
   static const notifications = '/notifications';
   static const food = '/food';
   static const grocery = '/grocery';
+  static const merchant = '/marketplace/merchant';
+  static const checkout = '/marketplace/checkout';
+  static const order = '/marketplace/order'; // /marketplace/order/:id
 }
 
 /// Bridges Riverpod state changes to go_router's redirect re-evaluation.
@@ -119,6 +126,20 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: Routes.grocery,
         builder: (_, __) =>
             const MarketplaceScreen(kind: MarketplaceKind.grocery),
+      ),
+      GoRoute(
+        path: Routes.merchant,
+        builder: (_, state) =>
+            MerchantScreen(merchant: state.extra as Merchant),
+      ),
+      GoRoute(
+        path: Routes.checkout,
+        builder: (_, __) => const CheckoutScreen(),
+      ),
+      GoRoute(
+        path: '${Routes.order}/:id',
+        builder: (_, state) =>
+            OrderScreen(orderId: state.pathParameters['id']!),
       ),
     ],
   );
