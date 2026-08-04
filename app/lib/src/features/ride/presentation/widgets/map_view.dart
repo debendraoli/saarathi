@@ -60,10 +60,13 @@ class MapView extends StatelessWidget {
         if (route.length >= 2)
           PolylineLayer(
             polylines: [
+              // Blue route line — the brand saffron collides with OSM road/POI colors.
               Polyline(
                 points: route,
-                strokeWidth: 4,
-                color: Theme.of(context).colorScheme.primary,
+                strokeWidth: 5,
+                color: const Color(0xFF1A73E8),
+                borderStrokeWidth: 1.5,
+                borderColor: Colors.white,
               ),
             ],
           ),
