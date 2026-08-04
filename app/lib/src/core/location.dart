@@ -1,8 +1,17 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:permission_handler/permission_handler.dart' hide ServiceStatus;
 
 import 'config/app_config.dart';
+
+/// Live location-service (GPS) status: emits the current value, then updates
+/// whenever the user toggles GPS. `false` = off.
+final locationServiceProvider = StreamProvider<bool>((ref) async* {
+  yield await isLocationServiceEnabled();
+  yield* Geolocator.getServiceStatusStream()
+      .map((s) => s == ServiceStatus.enabled);
+});
 
 // Dedupe concurrent requests — the plugins throw if a second request starts
 // while one is pending (e.g. home boot + tapping "Where to" at once).

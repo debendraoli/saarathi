@@ -78,6 +78,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       }
     });
     final online = ref.watch(connectivityProvider).valueOrNull ?? true;
+    final gpsOff = ref.watch(locationServiceProvider).valueOrNull == false;
 
     final home = isDriverMode ? const DriverHome() : const RiderHome();
     final body = [home, const ActivityTab(), const AccountTab()][_tab];
@@ -94,6 +95,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       body: Column(
         children: [
           if (!online) const _OfflineBar(),
+          if (gpsOff) const _LocationOffBar(),
           Expanded(child: body),
         ],
       ),
@@ -124,6 +126,59 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   String _greeting(AppL10n l, AppUser? user) {
     final name = user?.fullName;
     return l.greeting(name == null || name.isEmpty ? '' : ', $name');
+  }
+}
+
+/// A prominent tap-to-enable banner shown while the device GPS is off.
+class _LocationOffBar extends StatelessWidget {
+  const _LocationOffBar();
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppL10n.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.tertiaryContainer,
+      child: InkWell(
+        onTap: openLocationSettings,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(Icons.location_off_rounded,
+                  size: 20, color: scheme.onTertiaryContainer),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l.locationOffTitle,
+                      style: TextStyle(
+                        color: scheme.onTertiaryContainer,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                    Text(
+                      l.locationOffShort,
+                      style: TextStyle(
+                        color: scheme.onTertiaryContainer,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: openLocationSettings,
+                child: Text(l.enable),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
