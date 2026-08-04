@@ -68,13 +68,13 @@ class RiderHome extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 20),
-        const _PromoBanner(),
-        const SizedBox(height: 16),
-        const _InfoSlider(),
-        const SizedBox(height: 20),
         if (!isDriver) const _BecomeDriverCard(),
         const SizedBox(height: 12),
         const _BecomeMerchantCard(),
+        const SizedBox(height: 20),
+        const _PromoBanner(),
+        const SizedBox(height: 16),
+        const _InfoSlider(),
       ],
     );
   }

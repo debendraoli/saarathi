@@ -7,6 +7,7 @@ import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
 import '../data/marketplace_repository.dart';
 import '../domain/models.dart';
+import 'item_search_screen.dart';
 
 enum MarketplaceKind { food, grocery }
 
@@ -24,7 +25,19 @@ class MarketplaceScreen extends ConsumerWidget {
     final merchants = ref.watch(merchantsProvider(_vertical));
 
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(
+        title: Text(title),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search_rounded),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ItemSearchScreen(vertical: _vertical),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: merchants.when(
         loading: () => const LoadingView(),
         error: (_, __) => ErrorRetry(

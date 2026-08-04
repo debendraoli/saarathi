@@ -40,27 +40,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final granted = await ensureLocationPermission();
     if (!mounted || !granted) return;
     if (await isLocationServiceEnabled()) return;
-    if (!mounted) return;
-    final l = AppL10n.of(context);
-    final enable = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        icon: const Icon(Icons.location_off_rounded),
-        title: Text(l.locationOffTitle),
-        content: Text(l.locationOffBody),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(l.actionCancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(l.enable),
-          ),
-        ],
-      ),
-    );
-    if (enable == true) await openLocationSettings();
+    // Native Google Play Services "turn on location" dialog (no app exit).
+    await requestLocationService();
   }
 
   @override
@@ -140,7 +121,7 @@ class _LocationOffBar extends StatelessWidget {
     return Material(
       color: scheme.tertiaryContainer,
       child: InkWell(
-        onTap: openLocationSettings,
+        onTap: requestLocationService,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
@@ -171,7 +152,7 @@ class _LocationOffBar extends StatelessWidget {
                 ),
               ),
               TextButton(
-                onPressed: openLocationSettings,
+                onPressed: requestLocationService,
                 child: Text(l.enable),
               ),
             ],

@@ -37,6 +37,24 @@ class MarketplaceRepository {
     return (merchant, items);
   }
 
+  /// Search items across all open merchants. [sort]: nearest | cheapest | rating.
+  Future<List<ItemResult>> searchItems(
+    String query, {
+    LatLng? at,
+    String? vertical,
+    String sort = 'nearest',
+  }) async {
+    if (query.trim().length < 2) return const [];
+    final res = await _api.get('/v1/items/search', query: {
+      'q': query.trim(),
+      'sort': sort,
+      if (vertical != null) 'vertical': vertical,
+      if (at != null) 'lat': at.latitude,
+      if (at != null) 'lng': at.longitude,
+    }) as List;
+    return res.cast<Map<String, dynamic>>().map(ItemResult.fromJson).toList();
+  }
+
   Future<CustomerOrder> placeOrder({
     required String merchantId,
     required Map<String, int> lines, // menu_item_id -> qty

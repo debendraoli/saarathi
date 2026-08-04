@@ -87,6 +87,48 @@ String? _asImageUrl(Object? key) {
   return s.startsWith('http') ? s : null;
 }
 
+/// A cross-merchant item search hit (item + its merchant + distance).
+class ItemResult {
+  const ItemResult({
+    required this.id,
+    required this.merchantId,
+    required this.merchantName,
+    required this.vertical,
+    required this.name,
+    required this.price,
+    required this.rating,
+    this.description,
+    this.imageUrl,
+    this.distanceKm,
+  });
+
+  final String id;
+  final String merchantId;
+  final String merchantName;
+  final String vertical;
+  final String name;
+  final double price;
+  final double rating;
+  final String? description;
+  final String? imageUrl;
+  final double? distanceKm;
+
+  factory ItemResult.fromJson(Map<String, dynamic> j) => ItemResult(
+        id: j['id'] as String,
+        merchantId: j['merchant_id'] as String,
+        merchantName: (j['merchant_name'] as String?) ?? '',
+        vertical: (j['vertical'] as String?) ?? 'food',
+        name: (j['name'] as String?) ?? '',
+        price: asDouble(j['price']),
+        rating: asDouble(j['rating']),
+        description: j['description'] as String?,
+        imageUrl: _asImageUrl(j['image_key']),
+        distanceKm: j['distance_m'] == null
+            ? null
+            : asDouble(j['distance_m']) / 1000.0,
+      );
+}
+
 class OrderItem {
   const OrderItem(
       {required this.name, required this.unitPrice, required this.qty});

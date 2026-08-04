@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:location/location.dart' as loc;
 import 'package:permission_handler/permission_handler.dart' hide ServiceStatus;
 
 import 'config/app_config.dart';
@@ -50,6 +51,16 @@ Future<void> openLocationSettings() async {
   try {
     await Geolocator.openLocationSettings();
   } catch (_) {/* best effort */}
+}
+
+/// Triggers the native (Google Play Services) "turn on location" dialog so the
+/// user can enable GPS without leaving the app. Returns true if it ends up on.
+Future<bool> requestLocationService() async {
+  try {
+    return await loc.Location().requestService();
+  } catch (_) {
+    return false;
+  }
 }
 
 /// Best-effort current position, degrading to the Dang district centre when

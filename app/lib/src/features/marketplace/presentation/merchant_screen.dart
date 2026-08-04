@@ -32,13 +32,14 @@ class MerchantScreen extends ConsumerWidget {
           onRetry: () => ref.invalidate(merchantDetailProvider(merchant.id)),
         ),
         data: (data) {
+          final loaded = data.$1;
           final items = data.$2;
           final grouped = <String, List<MenuItem>>{};
           for (final it in items) {
             grouped.putIfAbsent(it.category ?? l.merchantMenu, () => []).add(it);
           }
           // Flatten header + category sections + items into one bounded list.
-          final rows = <Widget>[_Header(merchant: merchant)];
+          final rows = <Widget>[_Header(merchant: loaded)];
           if (items.isEmpty) {
             rows.add(Padding(
               padding: const EdgeInsets.all(40),
@@ -49,7 +50,7 @@ class MerchantScreen extends ConsumerWidget {
             rows.add(_CategoryHeader(entry.key));
             for (final it in entry.value) {
               rows.add(_ItemCard(
-                merchant: merchant,
+                merchant: loaded,
                 item: it,
                 qty: cartForThis.lines[it.id]?.qty ?? 0,
               ));

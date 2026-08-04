@@ -27,6 +27,7 @@ dependencies:
   flutter_map: ^8.3.1
   latlong2: ^0.9.1
   geolocator: ^14.0.3
+  location: ^8.0.1
 
   # Platform integration
   app_links: ^7.2.1

@@ -28,7 +28,7 @@ http:
         || PathPrefix(`/v1/rtc`)
         || PathPrefix(`/v1/merchants`) || PathPrefix(`/v1/orders`)
         || PathPrefix(`/v1/merchant`) || PathPrefix(`/v1/admin/merchants`)
-        || PathPrefix(`/v1/geo`)
+        || PathPrefix(`/v1/geo`) || PathPrefix(`/v1/items`)
         || PathPrefix(`/v1/ws`) || PathPrefix(`/v1/events`) || PathPrefix(`/v1/flags`)
         || PathPrefix(`/v1/reports`) || PathPrefix(`/v1/credit-plans`) || PathPrefix(`/v1/drivers`)
         || PathPrefix(`/v1/driver/analytics`) || PathPrefix(`/v1/driver/credits`)

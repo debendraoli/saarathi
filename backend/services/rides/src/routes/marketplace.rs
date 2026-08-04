@@ -23,6 +23,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/merchants", get(list_merchants))
         .route("/v1/merchants/{id}", get(merchant_detail))
+        .route("/v1/items/search", get(search_items))
         .route("/v1/orders", get(my_orders).post(place_order))
         .route("/v1/orders/{id}", get(order_detail))
         .route("/v1/orders/{id}/status", post(update_order_status))
@@ -108,6 +109,71 @@ async fn list_merchants(
     .bind(q.vertical)
     .fetch_all(&st.db)
     .await?;
+    Ok(Json(rows))
+}
+
+// ── Cross-merchant item search ───────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ItemSearchQuery {
+    q: String,
+    lat: Option<f64>,
+    lng: Option<f64>,
+    vertical: Option<String>,
+    /// nearest (default) | cheapest | rating
+    sort: Option<String>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+struct ItemHit {
+    id: Uuid,
+    merchant_id: Uuid,
+    merchant_name: String,
+    vertical: String,
+    name: String,
+    description: Option<String>,
+    category: Option<String>,
+    price: Decimal,
+    image_key: Option<String>,
+    rating: Decimal,
+    distance_m: f64,
+}
+
+/// Search available items across all open merchants, sorted by nearest /
+/// cheapest / top-rated.
+async fn search_items(
+    State(st): State<AppState>,
+    _auth: AuthUser,
+    Query(q): Query<ItemSearchQuery>,
+) -> AppResult<Json<Vec<ItemHit>>> {
+    let term = q.q.trim();
+    if term.chars().count() < 2 {
+        return Ok(Json(vec![]));
+    }
+    let lat = q.lat.unwrap_or(28.033);
+    let lng = q.lng.unwrap_or(82.484);
+    // Whitelisted sort — never interpolate user input into SQL.
+    let order = match q.sort.as_deref() {
+        Some("cheapest") => "mi.price ASC, distance_m ASC",
+        Some("rating") => "m.rating DESC, distance_m ASC",
+        _ => "distance_m ASC",
+    };
+    let sql = format!(
+        "SELECT mi.id, mi.merchant_id, m.name AS merchant_name, m.vertical, mi.name, \
+                mi.description, mi.category, mi.price, mi.image_key, m.rating, \
+                ST_Distance(m.geog, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography) AS distance_m \
+         FROM menu_items mi JOIN merchants m ON m.id = mi.merchant_id \
+         WHERE mi.is_available AND m.is_open AND mi.name ILIKE $3 \
+               AND ($4::text IS NULL OR m.vertical = $4) \
+         ORDER BY {order} LIMIT 40"
+    );
+    let rows: Vec<ItemHit> = sqlx::query_as(&sql)
+        .bind(lat)
+        .bind(lng)
+        .bind(format!("%{term}%"))
+        .bind(q.vertical)
+        .fetch_all(&st.db)
+        .await?;
     Ok(Json(rows))
 }
 
