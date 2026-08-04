@@ -9,6 +9,7 @@ import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
+import '../application/ride_controller.dart';
 import '../domain/models.dart';
 import 'widgets/map_view.dart';
 
@@ -30,6 +31,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   LatLng? _pickup;
   String? _pickupLabel; // null → current location
   LatLng? _dest;
+  final List<Place> _stops = [];
   VehicleClass _vehicle = VehicleClass.twoWheeler;
 
   @override
@@ -78,14 +80,39 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     _mapController.move(hit.point, 15);
   }
 
+  Future<void> _addStop() async {
+    final pick = await Navigator.of(context).push<AddressPick>(
+      MaterialPageRoute(
+        builder: (_) => const AddressSearchScreen(allowMap: false),
+      ),
+    );
+    if (pick?.hit == null || !mounted) return;
+    final hit = pick!.hit!;
+    setState(() =>
+        _stops.add(Place(point: hit.point, label: hit.label)));
+    _mapController.move(hit.point, 15);
+  }
+
+  void _removeStop(int index) {
+    setState(() => _stops.removeAt(index));
+  }
+
   void _continue() {
     if (_pickup == null || _dest == null) return;
+    // Pickup and drop must be distinct — reject near-identical points.
+    if (const Distance().as(LengthUnit.Meter, _pickup!, _dest!) < 30) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppL10n.of(context).samePickupDrop)),
+      );
+      return;
+    }
     final draft = RideDraft(
       pickup: Place(
         point: _pickup!,
         label: _pickupLabel ?? AppL10n.of(context).useCurrentLocation,
       ),
       destination: Place(point: _dest!, label: _destLabel.text.trim()),
+      stops: List.unmodifiable(_stops),
       vehicleClass: _vehicle,
     );
     context.push(Routes.confirm, extra: draft);
@@ -136,6 +163,15 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final center = _pickup ?? const LatLng(28.033, 82.484);
+    // Draw the road route as soon as pickup + destination are both chosen.
+    final path = [
+      if (_pickup != null) _pickup!,
+      for (final s in _stops) s.point,
+      if (_dest != null) _dest!,
+    ];
+    final route = (_pickup != null && _dest != null)
+        ? ref.watch(routeGeometryProvider(RouteQuery(path, _vehicle.wire)))
+        : null;
     return Scaffold(
       appBar: AppBar(title: Text(l.whereTo)),
       body: Stack(
@@ -143,6 +179,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
           MapView(
             controller: _mapController,
             center: center,
+            route: route?.valueOrNull ?? (path.length >= 2 ? path : const []),
             onTap: (p) => setState(() => _dest = p),
             pins: [
               if (_pickup != null)
@@ -150,6 +187,12 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                   _pickup!,
                   Icons.my_location_rounded,
                   Theme.of(context).colorScheme.primary,
+                ),
+              for (final s in _stops)
+                MapPin(
+                  s.point,
+                  Icons.adjust_rounded,
+                  Theme.of(context).colorScheme.tertiary,
                 ),
               if (_dest != null)
                 MapPin(
@@ -172,9 +215,12 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
               child: _Sheet(
                 pickupText: _pickupLabel ?? l.useCurrentLocation,
                 destText: _dest == null ? null : _destLabel.text,
+                stops: [for (final s in _stops) s.label],
                 vehicle: _vehicle,
                 onPickupTap: () => _openSearch(forPickup: true),
                 onDestTap: () => _openSearch(forPickup: false),
+                onAddStop: _stops.length >= 3 ? null : _addStop,
+                onRemoveStop: _removeStop,
                 onVehicle: (v) => setState(() => _vehicle = v),
                 onContinue: _dest == null ? null : _continue,
                 onSave: _dest == null ? null : _saveDest,
@@ -191,9 +237,12 @@ class _Sheet extends StatelessWidget {
   const _Sheet({
     required this.pickupText,
     required this.destText,
+    required this.stops,
     required this.vehicle,
     required this.onPickupTap,
     required this.onDestTap,
+    required this.onAddStop,
+    required this.onRemoveStop,
     required this.onVehicle,
     required this.onContinue,
     required this.onSave,
@@ -201,9 +250,12 @@ class _Sheet extends StatelessWidget {
 
   final String pickupText;
   final String? destText;
+  final List<String> stops;
   final VehicleClass vehicle;
   final VoidCallback onPickupTap;
   final VoidCallback onDestTap;
+  final VoidCallback? onAddStop;
+  final ValueChanged<int> onRemoveStop;
   final ValueChanged<VehicleClass> onVehicle;
   final VoidCallback? onContinue;
   final VoidCallback? onSave;
@@ -247,6 +299,22 @@ class _Sheet extends StatelessWidget {
                     isPlaceholder: false,
                     onTap: onPickupTap,
                   ),
+                  for (var i = 0; i < stops.length; i++) ...[
+                    Divider(
+                        height: 1, indent: 48, color: scheme.outlineVariant),
+                    _LocationRow(
+                      label: l.stopLabel,
+                      dotColor: scheme.tertiary,
+                      icon: Icons.adjust_rounded,
+                      text: stops[i],
+                      isPlaceholder: false,
+                      onTap: onAddStop ?? () {},
+                      trailing: IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => onRemoveStop(i),
+                      ),
+                    ),
+                  ],
                   Divider(height: 1, indent: 48, color: scheme.outlineVariant),
                   _LocationRow(
                     label: l.destination,
@@ -265,6 +333,15 @@ class _Sheet extends StatelessWidget {
                 ],
               ),
             ),
+            if (onAddStop != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: onAddStop,
+                  icon: const Icon(Icons.add_location_alt_outlined, size: 20),
+                  label: Text(l.addStop),
+                ),
+              ),
             const SizedBox(height: 14),
             Row(
               children: [

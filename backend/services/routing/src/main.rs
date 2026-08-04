@@ -123,6 +123,7 @@ async fn route(
         return Ok(Json(RouteResult {
             distance_km: Decimal::ZERO,
             duration_secs: 0,
+            geometry: Vec::new(),
             source: "none".into(),
         }));
     }
@@ -215,6 +216,15 @@ struct ValhallaTrip {
     #[serde(default)]
     status: i32,
     summary: ValhallaSummary,
+    #[serde(default)]
+    legs: Vec<ValhallaLeg>,
+}
+
+#[derive(Deserialize)]
+struct ValhallaLeg {
+    /// Encoded polyline (Valhalla uses precision 1e6) of this leg's shape.
+    #[serde(default)]
+    shape: String,
 }
 
 #[derive(Deserialize)]
@@ -233,6 +243,62 @@ struct OsrmResponse {
 struct OsrmRoute {
     distance: f64, // metres
     duration: f64, // seconds
+    #[serde(default)]
+    geometry: OsrmGeometry,
+}
+
+#[derive(Deserialize, Default)]
+struct OsrmGeometry {
+    /// GeoJSON LineString coordinates as [lng, lat] pairs.
+    #[serde(default)]
+    coordinates: Vec<[f64; 2]>,
+}
+
+/// Decode an encoded polyline (Google/Valhalla algorithm). `precision` is the
+/// coordinate scale (1e5 for OSRM `polyline`, 1e6 for Valhalla).
+fn decode_polyline(encoded: &str, precision: f64) -> Vec<LatLng> {
+    let mut lat = 0i64;
+    let mut lng = 0i64;
+    let mut out = Vec::new();
+    let bytes = encoded.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let mut shift = 0u32;
+        let mut result = 0i64;
+        loop {
+            if i >= bytes.len() {
+                return out;
+            }
+            let b = bytes[i] as i64 - 63;
+            i += 1;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+            if b < 0x20 {
+                break;
+            }
+        }
+        lat += if result & 1 != 0 { !(result >> 1) } else { result >> 1 };
+        shift = 0;
+        result = 0;
+        loop {
+            if i >= bytes.len() {
+                return out;
+            }
+            let b = bytes[i] as i64 - 63;
+            i += 1;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+            if b < 0x20 {
+                break;
+            }
+        }
+        lng += if result & 1 != 0 { !(result >> 1) } else { result >> 1 };
+        out.push(LatLng {
+            lat: lat as f64 / precision,
+            lng: lng as f64 / precision,
+        });
+    }
+    out
 }
 
 impl Inner {
@@ -267,11 +333,20 @@ impl Inner {
         if resp.trip.status != 0 {
             anyhow::bail!("valhalla trip status {}", resp.trip.status);
         }
+        // Valhalla returns one encoded polyline per leg (precision 1e6); stitch
+        // them into a single ordered path for the map.
+        let mut geometry = Vec::new();
+        for leg in &resp.trip.legs {
+            if !leg.shape.is_empty() {
+                geometry.extend(decode_polyline(&leg.shape, 1e6));
+            }
+        }
         Ok(RouteResult {
             distance_km: Decimal::from_f64(resp.trip.summary.length)
                 .unwrap_or_default()
                 .round_dp(3),
             duration_secs: resp.trip.summary.time.round() as i32,
+            geometry,
             source: "valhalla".into(),
         })
     }
@@ -280,22 +355,25 @@ impl Inner {
     async fn osrm_path(&self, points: &[LatLng]) -> anyhow::Result<RouteResult> {
         let mut distance_km = Decimal::ZERO;
         let mut duration_secs = 0i32;
+        let mut geometry = Vec::new();
         for leg in points.windows(2) {
             let r = self.osrm(leg[0], leg[1]).await?;
             distance_km += r.distance_km;
             duration_secs += r.duration_secs;
+            geometry.extend(r.geometry);
         }
         Ok(RouteResult {
             distance_km,
             duration_secs,
+            geometry,
             source: "osrm".into(),
         })
     }
 
     async fn osrm(&self, o: LatLng, d: LatLng) -> anyhow::Result<RouteResult> {
-        // OSRM expects lng,lat order.
+        // OSRM expects lng,lat order. Ask for the full route geometry as GeoJSON.
         let url = format!(
-            "{}/route/v1/driving/{},{};{},{}?overview=false",
+            "{}/route/v1/driving/{},{};{},{}?overview=full&geometries=geojson",
             self.url, o.lng, o.lat, d.lng, d.lat
         );
         let resp: OsrmResponse = self
@@ -314,9 +392,16 @@ impl Inner {
         let km = Decimal::from_f64(route.distance / 1000.0)
             .unwrap_or_default()
             .round_dp(3);
+        let geometry = route
+            .geometry
+            .coordinates
+            .into_iter()
+            .map(|c| LatLng { lat: c[1], lng: c[0] })
+            .collect();
         Ok(RouteResult {
             distance_km: km,
             duration_secs: route.duration.round() as i32,
+            geometry,
             source: "osrm".into(),
         })
     }

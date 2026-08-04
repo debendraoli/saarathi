@@ -4,7 +4,7 @@ use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::models::{Trip, TRIP_COLS};
 use crate::pricing::{self, Estimate};
-use crate::routing::LatLng;
+use crate::routing::{LatLng, RouteProfile};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
@@ -15,6 +15,7 @@ use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
 use saarathi_core::domain::roles;
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -35,6 +36,7 @@ struct TripMoney {
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/rides/estimate", post(estimate))
+        .route("/v1/rides/route", post(route_geometry))
         .route("/v1/rides", post(create).get(list_mine))
         .route("/v1/rides/{id}", get(get_trip))
         .route("/v1/rides/{id}/accept", post(accept))
@@ -75,6 +77,47 @@ async fn estimate(
     )
     .await?;
     Ok(Json(est))
+}
+
+#[derive(Deserialize)]
+struct RouteReq {
+    origin: LatLng,
+    dest: LatLng,
+    #[serde(default)]
+    stops: Vec<LatLng>,
+    #[serde(default)]
+    vehicle_class: Option<String>,
+}
+
+#[derive(Serialize)]
+struct RouteResp {
+    distance_km: Decimal,
+    duration_secs: i32,
+    /// Ordered road-shape points for drawing the route polyline on the map.
+    geometry: Vec<LatLng>,
+}
+
+/// Road-following route geometry for the map (pickup → stops → destination).
+/// Falls back to a straight line when the routing engine is unreachable.
+async fn route_geometry(
+    State(st): State<AppState>,
+    AuthUser(_claims): AuthUser,
+    Json(body): Json<RouteReq>,
+) -> AppResult<Json<RouteResp>> {
+    let profile = match body.vehicle_class.as_deref() {
+        Some(v) => RouteProfile::from_wire(v),
+        None => RouteProfile::Motorcycle,
+    };
+    let mut path = Vec::with_capacity(body.stops.len() + 2);
+    path.push(body.origin);
+    path.extend_from_slice(&body.stops);
+    path.push(body.dest);
+    let route = st.router.route_path(&path, profile).await;
+    Ok(Json(RouteResp {
+        distance_km: route.distance_km,
+        duration_secs: route.duration_secs,
+        geometry: route.geometry,
+    }))
 }
 
 async fn create(

@@ -17,7 +17,7 @@ class NotificationService {
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       iOS: DarwinInitializationSettings(),
     );
-    await _plugin.initialize(settings);
+    await _plugin.initialize(settings: settings);
     _ready = true;
   }
 
@@ -34,10 +34,10 @@ class NotificationService {
       iOS: DarwinNotificationDetails(),
     );
     await _plugin.show(
-      DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      title,
-      body,
-      details,
+      id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      title: title,
+      body: body,
+      notificationDetails: details,
     );
   }
 }

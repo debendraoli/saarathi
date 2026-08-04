@@ -39,6 +39,7 @@ impl Router {
             return RouteResult {
                 distance_km: Decimal::ZERO,
                 duration_secs: 0,
+                geometry: Vec::new(),
                 source: "none".into(),
             };
         }

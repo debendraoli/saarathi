@@ -32,19 +32,28 @@ class RideDraft {
   const RideDraft({
     required this.pickup,
     required this.destination,
+    this.stops = const [],
     this.vehicleClass = VehicleClass.twoWheeler,
     this.paymentMethod = 'cash',
   });
 
   final Place pickup;
   final Place destination;
+
+  /// Optional intermediate stops (multi-stop rides), in visiting order.
+  final List<Place> stops;
   final VehicleClass vehicleClass;
   final String paymentMethod;
+
+  /// Ordered path pickup → stops → destination (for maps and routing).
+  List<LatLng> get path =>
+      [pickup.point, for (final s in stops) s.point, destination.point];
 
   RideDraft copyWith({VehicleClass? vehicleClass, String? paymentMethod}) =>
       RideDraft(
         pickup: pickup,
         destination: destination,
+        stops: stops,
         vehicleClass: vehicleClass ?? this.vehicleClass,
         paymentMethod: paymentMethod ?? this.paymentMethod,
       );

@@ -8,8 +8,8 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
-import '../domain/models.dart';
 import '../data/marketplace_repository.dart';
+import '../domain/models.dart';
 
 /// Search items across every open merchant, sorted by nearest / cheapest / top
 /// rated. Tapping a hit opens its merchant so the user can add it to a cart.

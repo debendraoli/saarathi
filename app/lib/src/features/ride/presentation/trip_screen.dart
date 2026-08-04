@@ -44,11 +44,17 @@ class TripScreen extends ConsumerWidget {
           final myId = ref.watch(authControllerProvider).user?.id;
           final iAmDriver = myId != null && myId == trip.driverId;
           final canComms = trip.driverId != null && trip.isActive;
+          final route = ref.watch(routeGeometryProvider(
+            RouteQuery(
+              [trip.origin, trip.dest],
+              trip.vehicleClass ?? 'two_wheeler',
+            ),
+          ));
           return Stack(
             children: [
               MapView(
                 center: driverLoc ?? trip.origin,
-                route: [trip.origin, trip.dest],
+                route: route.valueOrNull ?? [trip.origin, trip.dest],
                 pins: [
                   MapPin(
                     trip.origin,

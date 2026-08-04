@@ -50,6 +50,10 @@ pub struct RouteRequest {
 pub struct RouteResult {
     pub distance_km: Decimal,
     pub duration_secs: i32,
+    /// Ordered road-shape geometry for drawing the route on a map. Empty when
+    /// unavailable (e.g. the engine returned only a summary).
+    #[serde(default)]
+    pub geometry: Vec<LatLng>,
     /// Which method produced this: "valhalla" | "osrm" | "haversine" | "none".
     pub source: String,
 }
@@ -62,6 +66,7 @@ pub fn haversine_path(points: &[LatLng], road_factor: f64, avg_speed_kmh: f64) -
         return RouteResult {
             distance_km: Decimal::ZERO,
             duration_secs: 0,
+            geometry: Vec::new(),
             source: "none".into(),
         };
     }
@@ -77,6 +82,9 @@ pub fn haversine_path(points: &[LatLng], road_factor: f64, avg_speed_kmh: f64) -
     RouteResult {
         distance_km: Decimal::from_f64(road).unwrap_or_default().round_dp(3),
         duration_secs: secs,
+        // No road shape offline — fall back to the straight-line path so the map
+        // still draws something sensible.
+        geometry: points.to_vec(),
         source: "haversine".into(),
     }
 }

@@ -44,6 +44,9 @@ class _ConfirmRideScreenState extends ConsumerState<ConfirmRideScreen> {
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final estimate = ref.watch(fareEstimateProvider(widget.draft));
+    final route = ref.watch(routeGeometryProvider(
+      RouteQuery(widget.draft.path, widget.draft.vehicleClass.wire),
+    ));
 
     return Scaffold(
       appBar: AppBar(title: Text(l.confirmRide)),
@@ -52,16 +55,19 @@ class _ConfirmRideScreenState extends ConsumerState<ConfirmRideScreen> {
           Expanded(
             child: MapView(
               center: widget.draft.pickup.point,
-              route: [
-                widget.draft.pickup.point,
-                widget.draft.destination.point
-              ],
+              route: route.valueOrNull ?? widget.draft.path,
               pins: [
                 MapPin(
                   widget.draft.pickup.point,
                   Icons.trip_origin,
                   Theme.of(context).colorScheme.primary,
                 ),
+                for (final s in widget.draft.stops)
+                  MapPin(
+                    s.point,
+                    Icons.adjust_rounded,
+                    Theme.of(context).colorScheme.tertiary,
+                  ),
                 MapPin(
                   widget.draft.destination.point,
                   Icons.location_on_rounded,

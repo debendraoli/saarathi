@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/network/api_client.dart';
@@ -18,6 +19,7 @@ class RideRepository {
       body: {
         'origin': draft.pickup.toJson(),
         'dest': draft.destination.toJson(),
+        'stops': [for (final s in draft.stops) s.toJson()],
         'vehicle_class': draft.vehicleClass.wire,
       },
     );
@@ -30,6 +32,7 @@ class RideRepository {
       body: {
         'origin': draft.pickup.toJson(),
         'dest': draft.destination.toJson(),
+        'stops': [for (final s in draft.stops) s.toJson()],
         'vehicle_class': draft.vehicleClass.wire,
         'payment_method': draft.paymentMethod,
       },
@@ -40,6 +43,37 @@ class RideRepository {
   Future<Trip> trip(String id) async {
     final res = await _api.get('/v1/rides/$id');
     return Trip.fromJson(res as Map<String, dynamic>);
+  }
+
+  /// Road-following route geometry for the map polyline. [points] is the ordered
+  /// path (pickup, stops…, destination). Returns a straight line when the routing
+  /// engine is unreachable.
+  Future<List<LatLng>> routeGeometry(
+    List<LatLng> points, {
+    String vehicleClass = 'two_wheeler',
+  }) async {
+    if (points.length < 2) return points;
+    final res = await _api.post(
+      '/v1/rides/route',
+      body: {
+        'origin': {
+          'lat': points.first.latitude,
+          'lng': points.first.longitude
+        },
+        'dest': {'lat': points.last.latitude, 'lng': points.last.longitude},
+        'stops': [
+          for (final p in points.sublist(1, points.length - 1))
+            {'lat': p.latitude, 'lng': p.longitude},
+        ],
+        'vehicle_class': vehicleClass,
+      },
+    );
+    final geom =
+        ((res as Map<String, dynamic>)['geometry'] as List?) ?? const [];
+    return [
+      for (final p in geom)
+        LatLng(asDouble((p as Map)['lat']), asDouble(p['lng'])),
+    ];
   }
 
   Future<List<Trip>> myTrips() => cacheThroughList(
