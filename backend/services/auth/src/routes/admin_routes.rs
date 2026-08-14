@@ -3,7 +3,7 @@
 
 use crate::audit;
 use crate::error::{AppError, AppResult};
-use crate::models::{DocumentKind, Driver, DriverDocument, User, Vehicle, VehicleClass};
+use crate::models::{DocumentKind, Driver, DriverDocument, User, Vehicle, VehicleWheelerClass};
 use crate::state::{AppState, StaffUser};
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::header;
@@ -224,7 +224,7 @@ async fn reject_driver(
 
 #[derive(Deserialize)]
 struct OnboardVehicle {
-    class: VehicleClass,
+    class: VehicleWheelerClass,
     make: Option<String>,
     model: Option<String>,
     year: Option<i32>,

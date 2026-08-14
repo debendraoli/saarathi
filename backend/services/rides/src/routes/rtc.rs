@@ -29,7 +29,8 @@ async fn ice(State(st): State<AppState>, AuthUser(claims): AuthUser) -> Json<Val
         let mut mac = HmacSha1::new_from_slice(cfg.turn_secret.as_bytes())
             .expect("HMAC accepts any key length");
         mac.update(username.as_bytes());
-        let credential = base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+        let credential =
+            base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
         servers.push(json!({
             "urls": cfg.turn_urls,
             "username": username,

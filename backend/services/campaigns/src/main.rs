@@ -15,7 +15,7 @@ use sqlx::postgres::PgPoolOptions;
 use state::AppState;
 use std::sync::Arc;
 use std::time::Duration;
-use tower_http::trace::TraceLayer;
+use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key)
@@ -51,6 +51,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .merge(routes::routes())
+        .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

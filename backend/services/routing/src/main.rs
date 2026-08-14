@@ -13,7 +13,7 @@ use saarathi_core::routing::{haversine_path, LatLng, RouteProfile, RouteRequest,
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use tower_http::trace::TraceLayer;
+use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Engine {
@@ -101,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/v1/route", post(route))
+        .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -277,7 +278,11 @@ fn decode_polyline(encoded: &str, precision: f64) -> Vec<LatLng> {
                 break;
             }
         }
-        lat += if result & 1 != 0 { !(result >> 1) } else { result >> 1 };
+        lat += if result & 1 != 0 {
+            !(result >> 1)
+        } else {
+            result >> 1
+        };
         shift = 0;
         result = 0;
         loop {
@@ -292,7 +297,11 @@ fn decode_polyline(encoded: &str, precision: f64) -> Vec<LatLng> {
                 break;
             }
         }
-        lng += if result & 1 != 0 { !(result >> 1) } else { result >> 1 };
+        lng += if result & 1 != 0 {
+            !(result >> 1)
+        } else {
+            result >> 1
+        };
         out.push(LatLng {
             lat: lat as f64 / precision,
             lng: lng as f64 / precision,
@@ -396,7 +405,10 @@ impl Inner {
             .geometry
             .coordinates
             .into_iter()
-            .map(|c| LatLng { lat: c[1], lng: c[0] })
+            .map(|c| LatLng {
+                lat: c[1],
+                lng: c[0],
+            })
             .collect();
         Ok(RouteResult {
             distance_km: km,

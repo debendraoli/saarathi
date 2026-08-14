@@ -32,7 +32,10 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/merchant/merchants/{id}/menu", get(merchant_menu))
         .route("/v1/merchant/orders", get(merchant_orders))
         .route("/v1/merchant/menu", post(add_menu_item))
-        .route("/v1/merchant/menu/{id}/availability", post(set_item_availability))
+        .route(
+            "/v1/merchant/menu/{id}/availability",
+            post(set_item_availability),
+        )
         .route("/v1/merchant/open", post(set_open))
         // Self-service onboarding (any signed-in user can register a store).
         .route("/v1/merchant/apply", post(apply_merchant))
@@ -41,7 +44,12 @@ pub fn routes() -> Router<AppState> {
 }
 
 /// True when the user owns the merchant (or is staff).
-async fn owns_or_staff(st: &AppState, uid: Uuid, is_staff: bool, merchant_id: Uuid) -> AppResult<bool> {
+async fn owns_or_staff(
+    st: &AppState,
+    uid: Uuid,
+    is_staff: bool,
+    merchant_id: Uuid,
+) -> AppResult<bool> {
     if is_staff {
         return Ok(true);
     }
@@ -481,10 +489,7 @@ async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()> {
                     lat: merchant_lat,
                     lng: merchant_lng,
                 },
-                LatLng {
-                    lat: o.4,
-                    lng: o.5,
-                },
+                LatLng { lat: o.4, lng: o.5 },
             ],
             RouteProfile::Motorcycle,
         )
@@ -593,7 +598,9 @@ async fn set_item_availability(
         .bind(body.is_available)
         .execute(&st.db)
         .await?;
-    Ok(Json(json!({ "ok": true, "is_available": body.is_available })))
+    Ok(Json(
+        json!({ "ok": true, "is_available": body.is_available }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -694,7 +701,9 @@ async fn apply_merchant(
     Json(body): Json<MerchantApply>,
 ) -> AppResult<Json<Value>> {
     if !matches!(body.vertical.as_str(), "food" | "grocery") {
-        return Err(AppError::BadRequest("vertical must be 'food' or 'grocery'".into()));
+        return Err(AppError::BadRequest(
+            "vertical must be 'food' or 'grocery'".into(),
+        ));
     }
     if body.name.trim().is_empty() {
         return Err(AppError::BadRequest("name is required".into()));
@@ -736,7 +745,9 @@ async fn create_merchant(
     Json(body): Json<CreateMerchant>,
 ) -> AppResult<Json<Value>> {
     if !matches!(body.vertical.as_str(), "food" | "grocery") {
-        return Err(AppError::BadRequest("vertical must be 'food' or 'grocery'".into()));
+        return Err(AppError::BadRequest(
+            "vertical must be 'food' or 'grocery'".into(),
+        ));
     }
     let owner = body.owner_user_id.unwrap_or(claims.sub);
     let id: Uuid = sqlx::query_scalar(

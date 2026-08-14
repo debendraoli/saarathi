@@ -1,7 +1,7 @@
 //! Driver registration + KYC document submission.
 
 use crate::error::{AppError, AppResult};
-use crate::models::{DocumentKind, Driver, DriverDocument, Vehicle, VehicleClass};
+use crate::models::{DocumentKind, Driver, DriverDocument, Vehicle, VehicleWheelerClass};
 use crate::state::{AppState, AuthUser};
 use axum::extract::{Multipart, State};
 use axum::{
@@ -22,7 +22,7 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct VehicleInput {
-    class: VehicleClass,
+    class: VehicleWheelerClass,
     make: Option<String>,
     model: Option<String>,
     year: Option<i32>,

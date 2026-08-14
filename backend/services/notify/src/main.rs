@@ -22,7 +22,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use tower_http::trace::TraceLayer;
+use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use uuid::Uuid;
 
 mod fcm;
@@ -113,6 +113,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/notifications", get(inbox))
         .route("/v1/notifications/{id}/read", post(mark_read))
         .route("/v1/notifications/read-all", post(read_all))
+        .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -124,11 +125,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// NATS consumer loop: durable inbox row + push/SMS escalation for critical classes.
-async fn consume(
-    client: async_nats::Client,
-    pool: PgPool,
-    fcm: Option<Arc<fcm::FcmSender>>,
-) {
+async fn consume(client: async_nats::Client, pool: PgPool, fcm: Option<Arc<fcm::FcmSender>>) {
     let mut sub = match client.subscribe(NOTIFY_SUBJECT).await {
         Ok(s) => s,
         Err(e) => {
@@ -148,7 +145,11 @@ async fn consume(
     }
 }
 
-async fn deliver(pool: &PgPool, req: &NotifyRequest, fcm: Option<&fcm::FcmSender>) -> anyhow::Result<()> {
+async fn deliver(
+    pool: &PgPool,
+    req: &NotifyRequest,
+    fcm: Option<&fcm::FcmSender>,
+) -> anyhow::Result<()> {
     sqlx::query("INSERT INTO notifications (user_id, class, title, body) VALUES ($1, $2, $3, $4)")
         .bind(req.user_id)
         .bind(&req.class)

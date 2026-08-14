@@ -83,12 +83,12 @@ pub enum DocumentStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "vehicle_class", rename_all = "snake_case")]
+#[sqlx(type_name = "vehicle_wheeler_class", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
-pub enum VehicleClass {
-    TwoWheeler,
-    ThreeWheeler,
-    FourWheeler,
+pub enum VehicleWheelerClass {
+    Two,
+    Three,
+    Four,
 }
 
 // ── Partnership / fleet enums (doc 14) ──────────────────────────────────────
@@ -189,7 +189,7 @@ pub struct Driver {
 pub struct Vehicle {
     pub id: Uuid,
     pub driver_id: Uuid,
-    pub class: VehicleClass,
+    pub class: VehicleWheelerClass,
     pub make: Option<String>,
     pub model: Option<String>,
     pub year: Option<i32>,

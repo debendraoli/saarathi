@@ -16,7 +16,7 @@ version = "0.1.0"
 edition = "2021"
 license = "UNLICENSED"
 authors = ["Debendra Oli"]
-rust-version = "1.85"
+rust-version = "1.97"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -44,7 +44,7 @@ hex = "0.4"
 dotenvy = "0.15"
 async-trait = "0.1"
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "catch-panic"] }
 
 # internal
 saarathi-core = { path = "crates/saarathi-core" }

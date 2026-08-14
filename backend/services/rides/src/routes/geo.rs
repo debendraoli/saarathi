@@ -52,10 +52,7 @@ struct SearchQuery {
     lng: Option<f64>,
 }
 
-async fn search(
-    _auth: AuthUser,
-    Query(q): Query<SearchQuery>,
-) -> AppResult<Json<Vec<GeoPlace>>> {
+async fn search(_auth: AuthUser, Query(q): Query<SearchQuery>) -> AppResult<Json<Vec<GeoPlace>>> {
     let query = q.q.trim();
     if query.chars().count() < 2 {
         return Ok(Json(vec![]));
@@ -88,8 +85,7 @@ async fn reverse(
     _auth: AuthUser,
     Query(q): Query<ReverseQuery>,
 ) -> AppResult<Json<Option<GeoPlace>>> {
-    let params: Vec<(&str, String)> =
-        vec![("lat", q.lat.to_string()), ("lon", q.lng.to_string())];
+    let params: Vec<(&str, String)> = vec![("lat", q.lat.to_string()), ("lon", q.lng.to_string())];
     let place = fetch(&format!("{}/reverse", geocoder_url()), &params)
         .await
         .unwrap_or_default()
@@ -141,7 +137,10 @@ fn feature_to_place(f: &Value) -> Option<GeoPlace> {
 
     // Address = everything except the label, de-duplicated in order.
     let mut parts: Vec<String> = Vec::new();
-    for part in [street_line.clone(), city, state, country].into_iter().flatten() {
+    for part in [street_line.clone(), city, state, country]
+        .into_iter()
+        .flatten()
+    {
         if part != label && !parts.contains(&part) {
             parts.push(part);
         }

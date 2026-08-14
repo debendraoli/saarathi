@@ -22,7 +22,7 @@ use crate::state::AppState;
 use crate::ws;
 use axum::{routing::get, Json, Router};
 use serde_json::json;
-use tower_http::trace::TraceLayer;
+use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 
 async fn health() -> Json<serde_json::Value> {
     Json(
@@ -31,7 +31,7 @@ async fn health() -> Json<serde_json::Value> {
 }
 
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    Router::<AppState>::new()
         .route("/health", get(health))
         .route("/v1/ws", get(ws::ws_handler))
         .merge(rides::routes())
@@ -51,6 +51,7 @@ pub fn router(state: AppState) -> Router {
         .merge(geo::routes())
         .merge(plans::routes())
         .merge(insights::routes())
+        .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
