@@ -84,5 +84,7 @@ The generated runners need these to actually run:
 
 ## Not yet built (next passes)
 
-Merchant catalogue backend (food/grocery ordering) · trip-share deep link ·
-notify-service FCM sender · saved-place management screen.
+Nothing tracked here right now — this list had drifted stale (merchant
+catalogue backend, trip-share deep link, notify FCM sender, and saved-place
+management were all already done or just finished). Check `git log` / the
+phase brief for what's actually next.

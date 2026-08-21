@@ -15,8 +15,6 @@ pub enum AppError {
     Coded(StatusCode, ErrorCode, String),
     #[error("{0}")]
     BadRequest(String),
-    #[error("unauthorized")]
-    Unauthorized,
     #[error("forbidden")]
     Forbidden,
     #[error("not found")]
@@ -29,6 +27,9 @@ impl AppError {
     pub fn bad(code: ErrorCode, msg: impl Into<String>) -> Self {
         AppError::Coded(StatusCode::BAD_REQUEST, code, msg.into())
     }
+    pub fn conflict(code: ErrorCode, msg: impl Into<String>) -> Self {
+        AppError::Coded(StatusCode::CONFLICT, code, msg.into())
+    }
 }
 
 impl IntoResponse for AppError {
@@ -36,11 +37,6 @@ impl IntoResponse for AppError {
         let (status, code, message) = match self {
             AppError::Coded(s, c, m) => (s, c, m),
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, ErrorCode::Validation, m),
-            AppError::Unauthorized => (
-                StatusCode::UNAUTHORIZED,
-                ErrorCode::Unauthorized,
-                "unauthorized".into(),
-            ),
             AppError::Forbidden => (
                 StatusCode::FORBIDDEN,
                 ErrorCode::Forbidden,
@@ -80,5 +76,26 @@ impl From<saarathi_core::wallet::WalletError> for AppError {
                 AppError::bad(code, other.to_string())
             }
         }
+    }
+}
+
+impl From<saarathi_core::idempotency::IdempotencyError> for AppError {
+    fn from(e: saarathi_core::idempotency::IdempotencyError) -> Self {
+        use saarathi_core::idempotency::IdempotencyError;
+        match e {
+            IdempotencyError::Db(db) => AppError::Db(db),
+            IdempotencyError::InFlight => AppError::conflict(ErrorCode::Conflict, e.to_string()),
+        }
+    }
+}
+
+impl From<saarathi_core::payments::ProviderError> for AppError {
+    fn from(e: saarathi_core::payments::ProviderError) -> Self {
+        tracing::error!(error = %e, "payment provider error");
+        AppError::Coded(
+            StatusCode::BAD_GATEWAY,
+            ErrorCode::Internal,
+            "payment provider is unavailable".into(),
+        )
     }
 }

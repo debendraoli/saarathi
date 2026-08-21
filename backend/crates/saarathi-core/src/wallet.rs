@@ -15,8 +15,6 @@ use uuid::Uuid;
 pub enum WalletError {
     #[error("insufficient credits")]
     InsufficientRiderCredits,
-    #[error("insufficient driver credits")]
-    InsufficientDriverCredits,
     #[error(transparent)]
     Db(#[from] sqlx::Error),
 }
@@ -26,7 +24,6 @@ impl WalletError {
     pub fn code(&self) -> Option<ErrorCode> {
         match self {
             WalletError::InsufficientRiderCredits => Some(ErrorCode::InsufficientCredits),
-            WalletError::InsufficientDriverCredits => Some(ErrorCode::InsufficientDriverCredits),
             WalletError::Db(_) => None,
         }
     }
@@ -125,43 +122,41 @@ pub async fn credit_driver(
     Ok(balance)
 }
 
-/// Debit a driver's prepaid credits (e.g. buying a subscription). Fails if short.
-pub async fn debit_driver(
+/// Draw the platform's per-ride cut (commission + accident fund) from a
+/// driver's prepaid credit balance on a cash trip — the credit-funded
+/// alternative to the old cash-owed-on-wallet debt (doc 13 §4.1). Unlike
+/// [`credit_driver`]'s voluntary-spend sibling, this always succeeds and may
+/// take the balance negative: the ride already happened, so settlement can't
+/// fail on it. The dispatch-time credit floor (accept_offer) is what keeps
+/// this the uncommon case, not a hard block here.
+pub async fn settle_driver_fee(
     tx: &mut Transaction<'_, Postgres>,
-    user_id: Uuid,
+    driver_id: Uuid,
     amount: Decimal,
-    txn_type: &str,
+    trip_id: Uuid,
 ) -> Result<Decimal> {
-    let current: Option<(Decimal,)> = sqlx::query_as(
-        "SELECT balance FROM credit_accounts WHERE user_id = $1 AND kind = 'driver' FOR UPDATE",
+    let (balance,): (Decimal,) = sqlx::query_as(
+        "INSERT INTO credit_accounts (user_id, kind, balance, updated_at) \
+         VALUES ($1, 'driver', -$2, now()) \
+         ON CONFLICT (user_id, kind) DO UPDATE SET balance = credit_accounts.balance - $2, updated_at = now() \
+         RETURNING balance",
     )
-    .bind(user_id)
-    .fetch_optional(&mut **tx)
-    .await?;
-    let balance = current.map(|b| b.0).unwrap_or(Decimal::ZERO);
-    if balance < amount {
-        return Err(WalletError::InsufficientDriverCredits);
-    }
-    let (new_balance,): (Decimal,) = sqlx::query_as(
-        "UPDATE credit_accounts SET balance = balance - $2, updated_at = now() \
-         WHERE user_id = $1 AND kind = 'driver' RETURNING balance",
-    )
-    .bind(user_id)
+    .bind(driver_id)
     .bind(amount)
     .fetch_one(&mut **tx)
     .await?;
     log_txn(
         tx,
-        user_id,
+        driver_id,
         "driver",
-        txn_type,
+        "fee",
         -amount,
-        new_balance,
+        balance,
         None,
-        None,
+        Some(trip_id),
     )
     .await?;
-    Ok(new_balance)
+    Ok(balance)
 }
 
 /// Credit a driver's earnings wallet (withdrawable). Used for platform-funded
@@ -317,13 +312,3 @@ pub async fn driver_credit_balance(pool: &PgPool, user_id: Uuid) -> Result<Decim
     Ok(bal.map(|b| b.0).unwrap_or(Decimal::ZERO))
 }
 
-/// Is there a currently-active subscription pass for this driver?
-pub async fn has_active_pass(tx: &mut Transaction<'_, Postgres>, driver_id: Uuid) -> Result<bool> {
-    let row: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT id FROM subscription_passes WHERE driver_id = $1 AND status = 'active' AND ends_at > now() LIMIT 1",
-    )
-    .bind(driver_id)
-    .fetch_optional(&mut **tx)
-    .await?;
-    Ok(row.is_some())
-}

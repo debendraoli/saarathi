@@ -1,19 +1,26 @@
-//! JWT access tokens and opaque refresh tokens.
+//! JWT access token issuance + opaque refresh tokens. Verification is the
+//! shared `saarathi_core::authn::verify_access` (see `crate::auth`) — this
+//! module only signs, since only the issuer needs to.
 
 use crate::models::UserRole;
 use chrono::Utc;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{encode, EncodingKey, Header};
 use rand::RngCore;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Claims {
-    pub sub: Uuid,
-    pub role: UserRole,
-    pub iat: i64,
-    pub exp: i64,
+/// Issuance-only shape — `role` is the typed `UserRole` so callers can't pass
+/// a bogus string; it serializes to the same snake_case string that
+/// `saarathi_core::authn::Claims::role` (plain `String`) decodes on the
+/// verification side, since `UserRole` derives `#[serde(rename_all =
+/// "snake_case")]` matching `saarathi_core::domain::roles`'s constants.
+#[derive(Debug, Clone, Serialize)]
+struct Claims {
+    sub: Uuid,
+    role: UserRole,
+    iat: i64,
+    exp: i64,
 }
 
 pub fn issue_access(
@@ -35,15 +42,6 @@ pub fn issue_access(
         &EncodingKey::from_secret(secret.as_bytes()),
     )?;
     Ok(token)
-}
-
-pub fn verify_access(secret: &str, token: &str) -> anyhow::Result<Claims> {
-    let data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &Validation::default(),
-    )?;
-    Ok(data.claims)
 }
 
 /// A high-entropy opaque refresh token (returned to the client once).

@@ -7,14 +7,16 @@
 //! `rides` owns the money-table schema, this service reads/writes it.
 
 mod auth;
+mod disputes;
 mod error;
+mod payout_accounts;
 mod routes;
 mod state;
+mod trip_payments;
 mod wallet;
 
 use axum::{routing::get, Json, Router};
 use rust_decimal::Decimal;
-use saarathi_core::payments::MockProvider;
 use sqlx::postgres::PgPoolOptions;
 use state::AppState;
 use std::sync::Arc;
@@ -51,13 +53,16 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         db,
         jwt_secret: Arc::new(jwt_secret),
-        payments: Arc::new(MockProvider),
+        payments: saarathi_core::payments::provider_from_env(),
         tds_rate,
     };
 
     let app = Router::new()
         .route("/health", get(health))
         .merge(routes::routes())
+        .merge(payout_accounts::routes())
+        .merge(disputes::routes())
+        .merge(trip_payments::routes())
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

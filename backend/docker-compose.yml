@@ -4,7 +4,7 @@
 
 name: saarathi
 
-# Shared config for the seven Rust services. Each is built from its own
+# Shared config for the eight Rust services. Each is built from its own
 # services/<name>/Dockerfile against the workspace root context, and reaches its
 # dependencies by compose DNS name (postgres/redis/nats), not localhost.
 x-svc-base: &svc-base
@@ -17,6 +17,9 @@ x-svc-env: &svc-env
   # Every service verifies the same JWT — keep this identical across all of them.
   # Override in backend/.env (generate with: openssl rand -hex 32).
   JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-with-openssl-rand-hex-32}
+  # Shared between rides (issuer of /v1/internal/*) and merchant (its only
+  # caller) — never exposed via the gateway. Override in backend/.env.
+  INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-dev-internal-secret-change-me}
   RUST_LOG: ${RUST_LOG:-info}
 
 services:
@@ -111,6 +114,11 @@ services:
       <<: *svc-env
       PORT: 8081
       OTP_DEV_MODE: ${OTP_DEV_MODE:-true}
+      # Local/CI traffic all arrives from one unpredictable Docker-bridge
+      # address shared by every simulated user — exempt it from the OTP
+      # token-bucket's IP layer (the phone layer still fully applies).
+      # Never set this in a real deployment.
+      OTP_RATE_LIMIT_IP_ALLOWLIST: ${OTP_RATE_LIMIT_IP_ALLOWLIST:-*}
       KYC_STORAGE_DIR: /data/kyc
       SEED_DEV_ADMIN_PHONE: ${SEED_DEV_ADMIN_PHONE:-+9779800000000}
     ports:
@@ -250,6 +258,35 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8086/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  # Merchant/marketplace domain: merchants, menus, orders, delivery geofences.
+  # Calls rides' internal API (never the gateway) to spawn the courier leg —
+  # see services/rides/src/routes/internal.rs.
+  merchant:
+    <<: *svc-base
+    build:
+      context: .
+      dockerfile: services/merchant/Dockerfile
+    environment:
+      <<: *svc-env
+      MERCHANT_PORT: 8088
+      ROUTING_SERVICE_URL: http://routing:8084
+      RIDES_SERVICE_URL: http://rides:8082
+    ports:
+      - "8088:8088"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rides:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8088/health"]
       interval: 10s
       timeout: 3s
       retries: 5

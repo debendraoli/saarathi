@@ -31,18 +31,10 @@ pub async fn on_completion(
     trip_id: Uuid,
     m: &Completion,
 ) -> AppResult<()> {
-    // A driver on an active subscription pass pays 0% commission (keeps 100%,
-    // minus the legally-mandatory 1% accident fund).
-    let (commission, driver_payout) = match m.driver_id {
-        Some(did) if crate::payments::has_active_pass(&mut *tx, did).await? => {
-            (Decimal::ZERO, m.gross_fare - m.accident_fund)
-        }
-        _ => (m.commission, m.driver_payout),
-    };
     sqlx::query("UPDATE trips SET commission = $2, driver_payout = $3 WHERE id = $1")
         .bind(trip_id)
-        .bind(commission)
-        .bind(driver_payout)
+        .bind(m.commission)
+        .bind(m.driver_payout)
         .execute(&mut **tx)
         .await?;
     crate::ledger::append(
@@ -51,9 +43,9 @@ pub async fn on_completion(
             trip_id,
             driver_id: m.driver_id,
             gross: m.gross_fare,
-            commission,
+            commission: m.commission,
             accident_fund: m.accident_fund,
-            driver_payout,
+            driver_payout: m.driver_payout,
             payment_method: m.payment_method.clone(),
         },
     )
@@ -98,7 +90,7 @@ pub async fn on_completion(
             did,
             trip_id,
             m.gross_fare,
-            commission,
+            m.commission,
         )
         .await?;
     }

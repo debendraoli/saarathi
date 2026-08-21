@@ -160,6 +160,13 @@ CREATE INDEX IF NOT EXISTS trip_offers_driver_idx ON trip_offers (driver_id, sta
 CREATE INDEX IF NOT EXISTS trip_offers_active_idx ON trip_offers (status, expires_at);
 
 -- Rider/customer prepaid credit balance (customer pays the platform directly).
+-- Rider balances (kind='rider') may never go negative — enforced here as
+-- defense-in-depth alongside debit_rider's application-level check (Phase 1
+-- acceptance: a race can't push it negative). Driver balances (kind='driver')
+-- are deliberately exempt: settle_driver_fee draws the platform's per-ride cut
+-- from them and may dip negative if a driver's balance ran out between the
+-- dispatch-time credit-floor check and trip completion — that's a short-lived
+-- debt, not a bug, and the floor check keeps it the uncommon case.
 CREATE TABLE IF NOT EXISTS credit_accounts (
     user_id    uuid        NOT NULL,
     kind       text        NOT NULL DEFAULT 'rider',
@@ -167,6 +174,12 @@ CREATE TABLE IF NOT EXISTS credit_accounts (
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, kind)
 );
+-- Postgres has no ADD CONSTRAINT IF NOT EXISTS, so guard it explicitly for
+-- databases where this table already existed pre-constraint.
+DO $$ BEGIN
+    ALTER TABLE credit_accounts ADD CONSTRAINT credit_accounts_rider_balance_nonneg
+        CHECK (kind <> 'rider' OR balance >= 0);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Append-only money movements: top-ups, ride payments, payouts, bonuses, refunds.
 CREATE TABLE IF NOT EXISTS credit_transactions (
@@ -207,6 +220,59 @@ CREATE INDEX IF NOT EXISTS payout_requests_driver_idx ON payout_requests (driver
 -- TDS withholding: the recipient nets `net_amount`; `tds_amount` is remitted.
 ALTER TABLE payout_requests ADD COLUMN IF NOT EXISTS tds_amount numeric NOT NULL DEFAULT 0;
 ALTER TABLE payout_requests ADD COLUMN IF NOT EXISTS net_amount numeric;
+-- Weekly withdrawal fee (1 free per Nepal calendar week, 2% after) + which
+-- saved payout account it was sent to.
+ALTER TABLE payout_requests ADD COLUMN IF NOT EXISTS weekly_fee numeric NOT NULL DEFAULT 0;
+ALTER TABLE payout_requests ADD COLUMN IF NOT EXISTS payout_account_id uuid;
+
+-- Direct gateway payment for a specific trip's fare — e.g. a cash-designated
+-- ride settled via Khalti instead of physical cash. The immutable
+-- ledger_entries row from ride completion is never touched (append-only, per
+-- AGENTS.md); on confirmation this credits the driver's wallet with the
+-- trip's driver_payout share as its own credit_transaction, exactly as if it
+-- had been a digital payment.
+CREATE TABLE IF NOT EXISTS trip_gateway_payments (
+    trip_id      uuid        PRIMARY KEY,
+    reference    text        NOT NULL,
+    provider     text        NOT NULL,
+    amount       numeric     NOT NULL,
+    status       text        NOT NULL DEFAULT 'pending',  -- pending | confirmed | failed
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    confirmed_at timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS trip_gateway_payments_reference_idx ON trip_gateway_payments (reference);
+
+-- Saved payout destinations (bank account or e-wallet). Exactly one default
+-- per user is enforced at the DB level by the partial unique index below;
+-- "at least one once any exist" is an application-level rule (see
+-- routes::payout_accounts) since a partial unique index can't require presence.
+CREATE TABLE IF NOT EXISTS payout_accounts (
+    id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    uuid        NOT NULL,
+    kind       text        NOT NULL,   -- bank | wallet
+    label      text        NOT NULL,   -- display label, e.g. "NIC Asia ****1234"
+    details    jsonb       NOT NULL,   -- bank_name/account_number/holder_name, or wallet provider/id
+    is_default boolean     NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS payout_accounts_user_idx ON payout_accounts (user_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS payout_accounts_one_default_idx ON payout_accounts (user_id) WHERE is_default;
+
+-- Idempotency keys for client-initiated money-moving requests (top-up,
+-- withdrawal). Persisted (not in-memory) so a retry is safe across pod
+-- restarts. `response` is filled in only once the mutation has committed
+-- successfully, so a request that failed validation leaves no dangling
+-- reservation and a retry with the same key just runs fresh.
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    key         text        NOT NULL,
+    user_id     uuid        NOT NULL,
+    endpoint    text        NOT NULL,
+    status_code smallint,
+    response    jsonb,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (key, user_id, endpoint)
+);
+CREATE INDEX IF NOT EXISTS idempotency_keys_created_idx ON idempotency_keys (created_at);
 
 -- Two-sided ratings (rider↔driver), tag-based (one per rater per trip).
 CREATE TABLE IF NOT EXISTS ratings (
@@ -239,6 +305,12 @@ CREATE TABLE IF NOT EXISTS reports (
     resolved_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS reports_status_idx ON reports (status, created_at DESC);
+-- Payment disputes reuse this table+lifecycle (see saarathi-payments
+-- routes::disputes) rather than a parallel schema; `reference` links the
+-- report to a specific money-moving transaction (payout/topup reference,
+-- or a credit_transaction id) instead of just a trip.
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS reference text;
+CREATE INDEX IF NOT EXISTS reports_reference_idx ON reports (reference) WHERE reference IS NOT NULL;
 
 -- SOS / emergency incidents (rider or driver), audit-grade.
 CREATE TABLE IF NOT EXISTS sos_incidents (
@@ -256,8 +328,14 @@ CREATE TABLE IF NOT EXISTS sos_incidents (
 );
 CREATE INDEX IF NOT EXISTS sos_status_idx ON sos_incidents (status, created_at DESC);
 
--- Driver subscription passes ("unlimited for a period" — keep 100% of fares).
--- The fair-cap reconciliation refunds any driver who paid more than the 10% cap.
+-- DEPRECATED / frozen — the "unlimited for a period" subscription pass model
+-- has been retired in favour of an always-on per-ride credit draw (no fee ever
+-- exceeds the standard commission, so no fair-cap reconciliation is needed).
+-- See docs/research/13-revenue-and-monetization.md and
+-- `db::migrate_off_subscriptions`, which prorate-refunds any pass that was
+-- still active at migration time into the driver's credit balance and flips
+-- it to status = 'migrated'. Table is kept, unwritten, for historical audit —
+-- no code reads or writes it outside that one-time migration.
 CREATE TABLE IF NOT EXISTS subscription_passes (
     id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     driver_id      uuid        NOT NULL,
@@ -265,7 +343,7 @@ CREATE TABLE IF NOT EXISTS subscription_passes (
     price          numeric     NOT NULL,
     starts_at      timestamptz NOT NULL DEFAULT now(),
     ends_at        timestamptz NOT NULL,
-    status         text        NOT NULL DEFAULT 'active',   -- active | expired | reconciled
+    status         text        NOT NULL DEFAULT 'active',   -- active | expired | reconciled | migrated
     fair_cap_refund numeric    NOT NULL DEFAULT 0,
     created_at     timestamptz NOT NULL DEFAULT now()
 );
@@ -425,104 +503,3 @@ ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS partner_id uuid;
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS funded_by text NOT NULL DEFAULT 'platform';  -- platform | partner
 CREATE INDEX IF NOT EXISTS campaigns_partner_idx ON campaigns (partner_id);
 
--- ── Marketplace (food / grocery) ────────────────────────────────────────────
--- Merchants, their menu, and customer orders. When an order is marked 'ready'
--- it spawns a delivery trip (trip_type='delivery') so the courier leg reuses the
--- existing dispatch + settlement machinery.
-CREATE TABLE IF NOT EXISTS merchants (
-    id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_user_id uuid,                                   -- merchant app account (nullable in v0)
-    name          text        NOT NULL,
-    vertical      text        NOT NULL,                   -- food | grocery
-    address       text,
-    phone         text,
-    lat           double precision NOT NULL,
-    lng           double precision NOT NULL,
-    geog          geography(Point, 4326)
-                  GENERATED ALWAYS AS (ST_SetSRID(ST_MakePoint(lng, lat), 4326)::geography) STORED,
-    prep_mins     int         NOT NULL DEFAULT 20,
-    is_open       boolean     NOT NULL DEFAULT true,
-    rating        numeric     NOT NULL DEFAULT 0,
-    image_key     text,
-    created_at    timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS merchants_vertical_idx ON merchants (vertical);
-CREATE INDEX IF NOT EXISTS merchants_geog_idx ON merchants USING GIST (geog);
--- Tax id captured at self-onboarding (PAN / VAT).
-ALTER TABLE merchants ADD COLUMN IF NOT EXISTS pan_vat text;
-
-CREATE TABLE IF NOT EXISTS menu_items (
-    id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-    merchant_id  uuid        NOT NULL REFERENCES merchants (id) ON DELETE CASCADE,
-    name         text        NOT NULL,
-    description  text,
-    category     text,
-    price        numeric     NOT NULL,
-    is_available boolean     NOT NULL DEFAULT true,
-    image_key    text,
-    created_at   timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS menu_items_merchant_idx ON menu_items (merchant_id);
-
-CREATE TABLE IF NOT EXISTS orders (
-    id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id    uuid        NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    merchant_id    uuid        NOT NULL REFERENCES merchants (id),
-    status         text        NOT NULL DEFAULT 'placed',  -- placed|confirmed|preparing|ready|picked_up|delivered|cancelled|rejected
-    subtotal       numeric     NOT NULL,
-    delivery_fee   numeric     NOT NULL DEFAULT 0,
-    total          numeric     NOT NULL,
-    payment_method text        NOT NULL DEFAULT 'cash',    -- cash | wallet
-    delivery_lat   double precision NOT NULL,
-    delivery_lng   double precision NOT NULL,
-    delivery_note  text,
-    trip_id        uuid,                                   -- courier delivery trip once dispatched
-    created_at     timestamptz NOT NULL DEFAULT now(),
-    updated_at     timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS orders_customer_idx ON orders (customer_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS orders_merchant_idx ON orders (merchant_id, status);
-
-CREATE TABLE IF NOT EXISTS order_items (
-    id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-    order_id     uuid        NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
-    menu_item_id uuid        NOT NULL,
-    name         text        NOT NULL,
-    unit_price   numeric     NOT NULL,
-    qty          int         NOT NULL
-);
-CREATE INDEX IF NOT EXISTS order_items_order_idx ON order_items (order_id);
-
--- Dev seed: two demo merchants in Ghorahi so the app has something to browse.
-INSERT INTO merchants (id, name, vertical, address, phone, lat, lng, prep_mins, rating) VALUES
-    ('11111111-1111-1111-1111-111111111111', 'Ghorahi Momo House', 'food', 'Traffic Chowk, Ghorahi', '+9779800000101', 28.0339, 82.4855, 18, 4.6),
-    ('22222222-2222-2222-2222-222222222222', 'Tulsipur Fresh Mart', 'grocery', 'Bus Park, Tulsipur', '+9779800000102', 28.1300, 82.2970, 25, 4.4)
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO menu_items (id, merchant_id, name, description, category, price) VALUES
-    ('a1111111-1111-1111-1111-111111111101', '11111111-1111-1111-1111-111111111111', 'Buff Momo (10 pcs)', 'Steamed, with achar', 'Momo', 160),
-    ('a1111111-1111-1111-1111-111111111102', '11111111-1111-1111-1111-111111111111', 'Veg Chowmein', 'Stir-fried noodles', 'Noodles', 130),
-    ('a1111111-1111-1111-1111-111111111103', '11111111-1111-1111-1111-111111111111', 'Chicken Sekuwa', 'Grilled, 250g', 'Grill', 250),
-    ('a2222222-2222-2222-2222-222222222201', '22222222-2222-2222-2222-222222222222', 'Rice 5kg', 'Sona Mansuli', 'Staples', 480),
-    ('a2222222-2222-2222-2222-222222222202', '22222222-2222-2222-2222-222222222222', 'Cooking Oil 1L', 'Sunflower', 'Staples', 250),
-    ('a2222222-2222-2222-2222-222222222203', '22222222-2222-2222-2222-222222222222', 'Eggs (30)', 'Farm fresh tray', 'Dairy', 480)
-ON CONFLICT (id) DO NOTHING;
-
--- Demo photos for the seed menu (idempotent; real merchants upload their own).
-UPDATE menu_items SET image_key = CASE id
-    WHEN 'a1111111-1111-1111-1111-111111111101' THEN 'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?w=400&q=60&auto=format&fit=crop'
-    WHEN 'a1111111-1111-1111-1111-111111111102' THEN 'https://images.unsplash.com/photo-1585032226651-759b368d7246?w=400&q=60&auto=format&fit=crop'
-    WHEN 'a1111111-1111-1111-1111-111111111103' THEN 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=400&q=60&auto=format&fit=crop'
-    WHEN 'a2222222-2222-2222-2222-222222222201' THEN 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=400&q=60&auto=format&fit=crop'
-    WHEN 'a2222222-2222-2222-2222-222222222202' THEN 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=400&q=60&auto=format&fit=crop'
-    WHEN 'a2222222-2222-2222-2222-222222222203' THEN 'https://images.unsplash.com/photo-1518569656558-1f25e69d93d7?w=400&q=60&auto=format&fit=crop'
-    ELSE image_key
-END
-WHERE id IN (
-    'a1111111-1111-1111-1111-111111111101',
-    'a1111111-1111-1111-1111-111111111102',
-    'a1111111-1111-1111-1111-111111111103',
-    'a2222222-2222-2222-2222-222222222201',
-    'a2222222-2222-2222-2222-222222222202',
-    'a2222222-2222-2222-2222-222222222203'
-);

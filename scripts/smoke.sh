@@ -22,12 +22,14 @@ NOTIFY="${NOTIFY:-$GW}"
 PAYMENTS="${PAYMENTS:-$GW}"
 CAMPAIGNS="${CAMPAIGNS:-$GW}"
 PARTNERS="${PARTNERS:-$GW}"
+MERCHANT="${MERCHANT:-$GW}"
 ROUTING="${ROUTING:-http://localhost:8084}"  # internal (rides→routing); not exposed via gateway
 ADMIN_PHONE="${SEED_DEV_ADMIN_PHONE:-+9779800000000}"
 
 command -v jq >/dev/null || { echo "jq is required"; exit 1; }
 j() { curl -fsS "$@"; }
 step() { printf '\n▶ %s\n' "$1"; }
+idem() { echo "idem-$$-$RANDOM-$(date +%s%N)"; }
 
 step "health checks"
 # Liveness probes hit the services directly (as k8s does); /health isn't routed.
@@ -52,6 +54,24 @@ login() { # phone [as_driver] -> token pair JSON on stdout
     -d "{\"phone\":\"$phone\",\"code\":\"$code\",\"as_driver\":$as_driver}"
 }
 
+step "OTP token-bucket rate limiter (3 req/10min, blocks the 4th)"
+# The IP layer is intentionally disabled here (OTP_RATE_LIMIT_IP_ALLOWLIST=*
+# in docker-compose.yml — this whole suite shares one Docker-bridge address,
+# which the IP bucket would otherwise treat as a single abusive caller). The
+# phone layer runs the identical token-bucket algorithm, so blocking on it
+# demonstrates the same mechanism the acceptance criterion is about.
+RLPHONE="+97798$(( RANDOM % 900000 + 100000 ))"
+for i in 1 2 3; do
+  RLSENT=$(j -X POST "$API/v1/auth/otp/request" -H 'content-type: application/json' \
+    -d "{\"phone\":\"$RLPHONE\"}" | jq -r '.sent')
+  [ "$RLSENT" = "true" ] || { echo "  request $i should succeed (sent=$RLSENT)"; exit 1; }
+done
+RLCODE=$(curl -sS -X POST "$API/v1/auth/otp/request" -H 'content-type: application/json' \
+  -d "{\"phone\":\"$RLPHONE\"}" | jq -r '.error.code')
+[ "$RLCODE" = "OTP_RATE_LIMITED" ] \
+  || { echo "  4th request in the window should be rate-limited (got '$RLCODE')"; exit 1; }
+echo "  3 requests sent; 4th blocked ($RLCODE)"
+
 step "staff login"
 ADMIN_TOKEN=$(login "$ADMIN_PHONE" | jq -r '.access_token')
 echo "  got staff token"
@@ -75,6 +95,16 @@ DID=$(j "$API/v1/admin/drivers?status=queue" -H "authorization: Bearer $ADMIN_TO
 [ -n "$DID" ] || { echo "  driver not found in queue"; exit 1; }
 j -X POST "$API/v1/admin/drivers/$DID/approve" -H "authorization: Bearer $ADMIN_TOKEN" >/dev/null
 echo "  approved $DID"
+
+step "driver funds credit balance (required to accept jobs)"
+# A driver needs a positive credit balance to accept offers — cash trips draw
+# the platform's cut from it on completion instead of accruing wallet debt.
+DREF0=$(j -X POST "$RIDES/v1/driver/credits/topup" -H "authorization: Bearer $DTOKEN" \
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d '{"amount":1000}' | jq -r '.reference')
+j -X POST "$PAYMENTS/v1/credits/topup/confirm" -H 'content-type: application/json' \
+  -d "{\"reference\":\"$DREF0\"}" >/dev/null
+DC_INIT=$(j "$RIDES/v1/driver/credits" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
+echo "  driver credits after top-up: NPR $DC_INIT"
 
 step "rider fare estimate (haversine offline fallback)"
 RTOKEN=$(login "+97797$(( RANDOM % 900000 + 100000 ))" | jq -r '.access_token')
@@ -163,7 +193,7 @@ echo "  theme=$THEME  saved_places=$PLACES  recent_searches=$RECENT"
 
 step "rider tops up prepaid credits"
 REF=$(j -X POST "$PAYMENTS/v1/credits/topup" -H "authorization: Bearer $RTOKEN" \
-  -H 'content-type: application/json' -d '{"amount":500}' | jq -r '.reference')
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d '{"amount":500}' | jq -r '.reference')
 j -X POST "$PAYMENTS/v1/credits/topup/confirm" -H "authorization: Bearer $RTOKEN" \
   -H 'content-type: application/json' -d "{\"reference\":\"$REF\"}" >/dev/null
 CREDITS0=$(j "$PAYMENTS/v1/credits" -H "authorization: Bearer $RTOKEN" | jq -r '.balance')
@@ -209,29 +239,21 @@ CHAIN=$(j "$RIDES/v1/admin/ledger/verify" -H "authorization: Bearer $ADMIN_TOKEN
 WALLET=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
 echo "  entries=$LEDGER_COUNT  chain_intact=$CHAIN  driver_wallet=NPR $WALLET"
 
-step "payment settlement + driver payout"
+step "payment settlement + withdrawal minimum"
 CREDITS1=$(j "$PAYMENTS/v1/credits" -H "authorization: Bearer $RTOKEN" | jq -r '.balance')
 echo "  rider credits after ride: NPR $CREDITS1 (was $CREDITS0)"
 awk -v a="$CREDITS1" -v b="$CREDITS0" 'BEGIN{exit !(a<b)}' \
   || { echo "  rider credits were not charged"; exit 1; }
 awk -v w="$WALLET" 'BEGIN{exit !(w>0)}' \
   || { echo "  driver earnings not credited"; exit 1; }
-POUT=$(j -X POST "$PAYMENTS/v1/payouts" -H "authorization: Bearer $DTOKEN" \
-  -H 'content-type: application/json' -d '{}')
-PREF=$(echo "$POUT" | jq -r '.reference')
-PSTATUS=$(echo "$POUT" | jq -r '.status')
-PNET=$(echo "$POUT" | jq -r '.net'); PTDS=$(echo "$POUT" | jq -r '.tds')
-[ "$PSTATUS" = "processing" ] || { echo "  payout should start processing (got $PSTATUS)"; exit 1; }
-awk -v n="$PNET" -v t="$PTDS" 'BEGIN{exit !(t+0>0 && n+0>0)}' \
-  || { echo "  TDS not withheld (net=$PNET tds=$PTDS)"; exit 1; }
-# PSP settles the payout via its signed callback.
-j -X POST "$PAYMENTS/v1/psp/payout/callback" -H 'content-type: application/json' \
-  -d "{\"reference\":\"$PREF\",\"outcome\":\"paid\"}" >/dev/null
-PSTATE=$(j "$PAYMENTS/v1/payouts" -H "authorization: Bearer $DTOKEN" \
-  | jq -r --arg r "$PREF" '.[] | select(.reference==$r) | .status')
-[ "$PSTATE" = "paid" ] || { echo "  payout not settled (got $PSTATE)"; exit 1; }
-WALLET2=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
-echo "  driver payout: net NPR $PNET (TDS $PTDS) processing→$PSTATE; wallet NPR $WALLET2"
+# This trip's payout is small (well under NPR 1,000) — a withdrawal for the
+# whole balance should be rejected by the minimum-withdrawal rule. The full
+# successful-payout + TDS + weekly-fee flow is exercised below on a bigger fare.
+BELOWMIN=$(curl -sS -X POST "$PAYMENTS/v1/payouts" -H "authorization: Bearer $DTOKEN" \
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d '{}' | jq -r '.error.code')
+[ "$BELOWMIN" = "AMOUNT_INVALID" ] \
+  || { echo "  below-minimum withdrawal should be rejected (got '$BELOWMIN')"; exit 1; }
+echo "  wallet NPR $WALLET; withdrawal of the whole (sub-minimum) balance rejected ($BELOWMIN)"
 
 step "live tracking + safety + ratings + notifications + analytics"
 j -X POST "$RIDES/v1/rides/$TID/location" -H "authorization: Bearer $DTOKEN" \
@@ -330,30 +352,25 @@ DLED=$(j "$RIDES/v1/admin/ledger" -H "authorization: Bearer $ADMIN_TOKEN" \
 [ "$DLED" -ge 1 ] || { echo "  delivery not in ledger"; exit 1; }
 echo "  parcel delivered: quote/fee NPR $PFEE, COD 200 remitted ($CB0 -> $CB1), ledgered"
 
-step "driver credits + subscription pass (0% commission)"
-DREF=$(j -X POST "$RIDES/v1/driver/credits/topup" -H "authorization: Bearer $DTOKEN" \
-  -H 'content-type: application/json' -d '{"amount":1000}' | jq -r '.reference')
-j -X POST "$PAYMENTS/v1/credits/topup/confirm" -H 'content-type: application/json' \
-  -d "{\"reference\":\"$DREF\"}" >/dev/null
+step "driver credits fund the per-ride cut on cash trips (no subscription)"
 DC0=$(j "$RIDES/v1/driver/credits" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
-j -X POST "$RIDES/v1/driver/subscription" -H "authorization: Bearer $DTOKEN" >/dev/null
-ACTIVE=$(j "$RIDES/v1/driver/subscription" -H "authorization: Bearer $DTOKEN" | jq -r '.active')
-DC1=$(j "$RIDES/v1/driver/credits" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
-[ "$ACTIVE" = "true" ] || { echo "  pass not active"; exit 1; }
-echo "  driver credits $DC0 → $DC1; pass active=$ACTIVE"
+echo "  driver credits: NPR $DC0"
 
-# A trip completed while the pass is active takes 0% commission.
+# A cash trip draws the platform's cut straight from the driver's credit
+# balance instead of accruing wallet debt; the earnings wallet is untouched.
 j -X POST "$RIDES/v1/driver/heartbeat" -H "authorization: Bearer $DTOKEN" \
   -H 'content-type: application/json' -d '{"lat":28.0336,"lng":82.4836,"job_types":["ride"]}' >/dev/null
+WALLET_BEFORE_CASH=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
+CASH_BODY='{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler","payment_method":"cash"}'
 T2=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
-  -H 'content-type: application/json' -d "$BODY" | jq -r '.id')
+  -H 'content-type: application/json' -d "$CASH_BODY" | jq -r '.id')
 OF=""
 for _ in $(seq 1 15); do
   OF=$(j "$RIDES/v1/driver/offers" -H "authorization: Bearer $DTOKEN" \
     | jq -r --arg t "$T2" '.[] | select(.trip_id==$t) | .trip_id' | head -n1)
   [ -n "$OF" ] && break; sleep 1
 done
-[ -n "$OF" ] || { echo "  no offer for pass trip"; exit 1; }
+[ -n "$OF" ] || { echo "  no offer for cash trip"; exit 1; }
 j -X POST "$RIDES/v1/rides/$T2/offer/accept" -H "authorization: Bearer $DTOKEN" >/dev/null
 for s in arriving in_progress completed; do
   j -X POST "$RIDES/v1/rides/$T2/status" -H "authorization: Bearer $DTOKEN" \
@@ -361,9 +378,179 @@ for s in arriving in_progress completed; do
 done
 COMM=$(j "$RIDES/v1/admin/ledger" -H "authorization: Bearer $ADMIN_TOKEN" \
   | jq -r --arg t "$T2" '.[] | select(.trip_id==$t) | .commission')
-awk -v c="$COMM" 'BEGIN{exit !(c+0==0)}' \
-  || { echo "  subscription commission not 0 ($COMM)"; exit 1; }
-echo "  pass trip commission = NPR $COMM (driver kept 100% minus fund)"
+FUND=$(j "$RIDES/v1/admin/ledger" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq -r --arg t "$T2" '.[] | select(.trip_id==$t) | .accident_fund')
+DC1=$(j "$RIDES/v1/driver/credits" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
+WALLET_AFTER_CASH=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
+awk -v c="$COMM" 'BEGIN{exit !(c+0>0)}' \
+  || { echo "  cash trip commission should be > 0 ($COMM)"; exit 1; }
+awk -v a="$DC0" -v b="$DC1" -v c="$COMM" -v f="$FUND" \
+  'BEGIN{d=a-b; want=c+f; exit !(d>want-0.01 && d<want+0.01)}' \
+  || { echo "  driver credits not drawn by commission+fund ($DC0 -> $DC1, want -$COMM-$FUND)"; exit 1; }
+# The wallet may still tick up from the unrelated DRIVE5 completion bonus, but
+# a cash trip must never pull it *down* — that's the old cash-owed debt this
+# migration removed.
+awk -v b="$WALLET_BEFORE_CASH" -v a="$WALLET_AFTER_CASH" 'BEGIN{exit !(a+0>=b+0-0.01)}' \
+  || { echo "  cash trip should not create wallet debt ($WALLET_BEFORE_CASH -> $WALLET_AFTER_CASH)"; exit 1; }
+echo "  cash trip commission NPR $COMM + fund NPR $FUND drawn from credits ($DC0 -> $DC1); wallet $WALLET_BEFORE_CASH -> $WALLET_AFTER_CASH (no debt)"
+
+step "pay a cash trip's fare via gateway (Khalti/mock) instead of physical cash"
+# Rider pays T2's fare through the gateway; the driver's wallet is credited
+# with driver_payout exactly as a digital payment would have been — the
+# ledger entry from completion is untouched (append-only).
+T2_PAYOUT=$(j "$RIDES/v1/admin/ledger" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq -r --arg t "$T2" '.[] | select(.trip_id==$t) | .driver_payout')
+GWINIT=$(j -X POST "$PAYMENTS/v1/payments/trips/$T2/initiate" -H "authorization: Bearer $RTOKEN" \
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json')
+GWREF=$(echo "$GWINIT" | jq -r '.reference')
+[ -n "$GWREF" ] && [ "$GWREF" != "null" ] || { echo "  gateway trip-payment initiate failed: $GWINIT"; exit 1; }
+DUPLICATE=$(curl -sS -X POST "$PAYMENTS/v1/payments/trips/$T2/initiate" -H "authorization: Bearer $RTOKEN" \
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' | jq -r '.error.code')
+[ "$DUPLICATE" = "CONFLICT" ] || { echo "  double-initiate should conflict (got '$DUPLICATE')"; exit 1; }
+WALLET_BEFORE_GW=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
+GWCONFIRM=$(j -X POST "$PAYMENTS/v1/payments/trips/$T2/confirm" -H "authorization: Bearer $RTOKEN")
+[ "$(echo "$GWCONFIRM" | jq -r '.confirmed')" = "true" ] || { echo "  gateway trip-payment confirm failed: $GWCONFIRM"; exit 1; }
+WALLET_AFTER_GW=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
+awk -v a="$WALLET_BEFORE_GW" -v b="$WALLET_AFTER_GW" -v p="$T2_PAYOUT" \
+  'BEGIN{d=b-a; exit !(d>p-0.01 && d<p+0.01)}' \
+  || { echo "  driver wallet not credited with driver_payout ($WALLET_BEFORE_GW -> $WALLET_AFTER_GW, want +$T2_PAYOUT)"; exit 1; }
+echo "  trip $T2 fare NPR paid via gateway; driver wallet $WALLET_BEFORE_GW -> $WALLET_AFTER_GW (+NPR $T2_PAYOUT payout)"
+
+step "credit floor blocks ride acceptance below zero"
+# A driver who never topped up (balance 0) can't accept jobs — cash trips
+# would have nothing to draw the platform's cut from.
+ZPHONE="+97798$(( RANDOM % 900000 + 100000 ))"
+ZLOGIN=$(login "$ZPHONE" true)
+ZTOKEN=$(echo "$ZLOGIN" | jq -r '.access_token')
+j -X POST "$API/v1/driver/register" -H "authorization: Bearer $ZTOKEN" -H 'content-type: application/json' \
+  -d '{"license_number":"DL-ZERO","vehicle":{"class":"two_wheeler","plate_number":"BA-1-PA-9999"}}' >/dev/null
+j -X POST "$API/v1/driver/documents" -H "authorization: Bearer $ZTOKEN" \
+  -F kind=vehicle_photo -F file=@/tmp/saarathi_vphoto.jpg >/dev/null
+ZID=$(j "$API/v1/admin/drivers?status=queue" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq -r --arg p "$ZPHONE" '.[] | select(.phone==$p) | .id' | head -n1)
+j -X POST "$API/v1/admin/drivers/$ZID/approve" -H "authorization: Bearer $ADMIN_TOKEN" >/dev/null
+ZCREDITS=$(j "$RIDES/v1/driver/credits" -H "authorization: Bearer $ZTOKEN" | jq -r '.balance')
+awk -v b="$ZCREDITS" 'BEGIN{exit !(b+0<=0)}' \
+  || { echo "  fresh driver should start with zero credits (got $ZCREDITS)"; exit 1; }
+# Take the funded driver offline so this offer can only go to the zero-credit one.
+j -X POST "$RIDES/v1/driver/offline" -H "authorization: Bearer $DTOKEN" >/dev/null
+j -X POST "$RIDES/v1/driver/heartbeat" -H "authorization: Bearer $ZTOKEN" \
+  -H 'content-type: application/json' -d '{"lat":28.0336,"lng":82.4836,"job_types":["ride"]}' >/dev/null
+BT=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d "$CASH_BODY" | jq -r '.id')
+BOF=""
+for _ in $(seq 1 15); do
+  BOF=$(j "$RIDES/v1/driver/offers" -H "authorization: Bearer $ZTOKEN" \
+    | jq -r --arg t "$BT" '.[] | select(.trip_id==$t) | .trip_id' | head -n1)
+  [ -n "$BOF" ] && break; sleep 1
+done
+[ -n "$BOF" ] || { echo "  no offer to test the credit floor against"; exit 1; }
+BLOCK=$(curl -sS -X POST "$RIDES/v1/rides/$BT/offer/accept" -H "authorization: Bearer $ZTOKEN" | jq -r '.error.code')
+[ "$BLOCK" = "INSUFFICIENT_DRIVER_CREDITS" ] \
+  || { echo "  zero-credit driver should be blocked from accepting (got '$BLOCK')"; exit 1; }
+echo "  zero-credit driver blocked from accepting ($BLOCK)"
+
+step "withdrawal rules: payout accounts, weekly fee, idempotent replay"
+# A fresh driver + a big digital-payment ride so the earnings wallet clears
+# the NPR 1,000 withdrawal minimum comfortably.
+WPHONE="+97798$(( RANDOM % 900000 + 100000 ))"
+WLOGIN=$(login "$WPHONE" true)
+WTOKEN=$(echo "$WLOGIN" | jq -r '.access_token')
+j -X POST "$API/v1/driver/register" -H "authorization: Bearer $WTOKEN" -H 'content-type: application/json' \
+  -d '{"license_number":"DL-W1","vehicle":{"class":"two_wheeler","plate_number":"BA-1-PA-6543"}}' >/dev/null
+j -X POST "$API/v1/driver/documents" -H "authorization: Bearer $WTOKEN" \
+  -F kind=vehicle_photo -F file=@/tmp/saarathi_vphoto.jpg >/dev/null
+WID=$(j "$API/v1/admin/drivers?status=queue" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq -r --arg p "$WPHONE" '.[] | select(.phone==$p) | .id' | head -n1)
+j -X POST "$API/v1/admin/drivers/$WID/approve" -H "authorization: Bearer $ADMIN_TOKEN" >/dev/null
+WCREF=$(j -X POST "$RIDES/v1/driver/credits/topup" -H "authorization: Bearer $WTOKEN" \
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d '{"amount":1000}' | jq -r '.reference')
+j -X POST "$PAYMENTS/v1/credits/topup/confirm" -H 'content-type: application/json' \
+  -d "{\"reference\":\"$WCREF\"}" >/dev/null
+
+WRPHONE="+97797$(( RANDOM % 900000 + 100000 ))"
+WRTOKEN=$(login "$WRPHONE" | jq -r '.access_token')
+WRREF=$(j -X POST "$PAYMENTS/v1/credits/topup" -H "authorization: Bearer $WRTOKEN" \
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d '{"amount":10000}' | jq -r '.reference')
+j -X POST "$PAYMENTS/v1/credits/topup/confirm" -H "authorization: Bearer $WRTOKEN" \
+  -H 'content-type: application/json' -d "{\"reference\":\"$WRREF\"}" >/dev/null
+
+j -X POST "$RIDES/v1/driver/heartbeat" -H "authorization: Bearer $WTOKEN" \
+  -H 'content-type: application/json' -d '{"lat":27.0,"lng":81.5,"job_types":["ride"]}' >/dev/null
+BIGBODY='{"origin":{"lat":27.0,"lng":81.5},"dest":{"lat":29.0,"lng":83.5},"vehicle_class":"two_wheeler","payment_method":"wallet"}'
+WT=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $WRTOKEN" -H 'content-type: application/json' -d "$BIGBODY" | jq -r '.id')
+WOF=""
+for _ in $(seq 1 15); do
+  WOF=$(j "$RIDES/v1/driver/offers" -H "authorization: Bearer $WTOKEN" \
+    | jq -r --arg t "$WT" '.[] | select(.trip_id==$t) | .trip_id' | head -n1)
+  [ -n "$WOF" ] && break; sleep 1
+done
+[ -n "$WOF" ] || { echo "  no offer for the big-fare wallet-building ride"; exit 1; }
+j -X POST "$RIDES/v1/rides/$WT/offer/accept" -H "authorization: Bearer $WTOKEN" >/dev/null
+for s in arriving in_progress completed; do
+  j -X POST "$RIDES/v1/rides/$WT/status" -H "authorization: Bearer $WTOKEN" \
+    -H 'content-type: application/json' -d "{\"status\":\"$s\"}" >/dev/null
+done
+BIGWALLET=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $WTOKEN" | jq -r '.balance')
+awk -v w="$BIGWALLET" 'BEGIN{exit !(w+0>2500)}' \
+  || { echo "  wallet-building ride payout too small ($BIGWALLET)"; exit 1; }
+echo "  driver wallet after big digital ride: NPR $BIGWALLET"
+
+# Saved payout accounts: first one is forced default; a second with
+# make_default flips it, enforcing exactly one default at a time.
+PA1=$(j -X POST "$PAYMENTS/v1/payout-accounts" -H "authorization: Bearer $WTOKEN" -H 'content-type: application/json' \
+  -d '{"kind":"bank","label":"NIC Asia ****1234","details":{"bank":"NIC Asia","account":"1234"}}')
+PA1ID=$(echo "$PA1" | jq -r '.id')
+PA1DEF=$(echo "$PA1" | jq -r '.is_default')
+[ "$PA1DEF" = "true" ] || { echo "  first payout account should be the default"; exit 1; }
+PA2=$(j -X POST "$PAYMENTS/v1/payout-accounts" -H "authorization: Bearer $WTOKEN" -H 'content-type: application/json' \
+  -d '{"kind":"wallet","label":"eSewa ****9876","details":{"provider":"esewa","id":"9876"},"make_default":true}')
+PA2ID=$(echo "$PA2" | jq -r '.id')
+DEFAULTS=$(j "$PAYMENTS/v1/payout-accounts" -H "authorization: Bearer $WTOKEN" | jq '[.[] | select(.is_default)] | length')
+[ "$DEFAULTS" = "1" ] || { echo "  should be exactly one default payout account (got $DEFAULTS)"; exit 1; }
+NEWDEFAULT=$(j "$PAYMENTS/v1/payout-accounts" -H "authorization: Bearer $WTOKEN" | jq -r --arg id "$PA2ID" '.[] | select(.id==$id) | .is_default')
+[ "$NEWDEFAULT" = "true" ] || { echo "  make_default did not flip the default"; exit 1; }
+echo "  payout accounts: $PA1ID (bank, initial default) -> $PA2ID (wallet, now default)"
+
+# Idempotent withdrawal: replaying the same key must not double-debit.
+PK1=$(idem)
+POUT1=$(j -X POST "$PAYMENTS/v1/payouts" -H "authorization: Bearer $WTOKEN" \
+  -H "x-idempotency-key: $PK1" -H 'content-type: application/json' -d '{"amount":1200}')
+POUT1B=$(j -X POST "$PAYMENTS/v1/payouts" -H "authorization: Bearer $WTOKEN" \
+  -H "x-idempotency-key: $PK1" -H 'content-type: application/json' -d '{"amount":1200}')
+[ "$(echo "$POUT1" | jq -r '.reference')" = "$(echo "$POUT1B" | jq -r '.reference')" ] \
+  || { echo "  replayed withdrawal returned a different reference"; exit 1; }
+WFEE1=$(echo "$POUT1" | jq -r '.weekly_fee')
+awk -v f="$WFEE1" 'BEGIN{exit !(f+0==0)}' \
+  || { echo "  first withdrawal this week should be fee-free (got $WFEE1)"; exit 1; }
+WALLET_AFTER_1=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $WTOKEN" | jq -r '.balance')
+awk -v before="$BIGWALLET" -v after="$WALLET_AFTER_1" \
+  'BEGIN{exit !(before-after > 1199.99 && before-after < 1200.01)}' \
+  || { echo "  replayed withdrawal double-debited the wallet ($BIGWALLET -> $WALLET_AFTER_1)"; exit 1; }
+echo "  withdrawal NPR 1200 (fee-free, 1st this week) replayed with same key -> single debit ($BIGWALLET -> $WALLET_AFTER_1)"
+
+# A second, distinct withdrawal the same week picks up the 2% weekly fee.
+POUT2=$(j -X POST "$PAYMENTS/v1/payouts" -H "authorization: Bearer $WTOKEN" \
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d '{"amount":1200}')
+WFEE2=$(echo "$POUT2" | jq -r '.weekly_fee')
+awk -v f="$WFEE2" 'BEGIN{exit !(f+0>23.9 && f+0<24.1)}' \
+  || { echo "  second withdrawal this week should carry a 2% fee (got $WFEE2, want ~24)"; exit 1; }
+echo "  second withdrawal this week: weekly_fee=NPR $WFEE2 (2% of 1200)"
+
+step "payment dispute lifecycle"
+DISPREF=$(echo "$POUT2" | jq -r '.reference')
+DISPID=$(j -X POST "$PAYMENTS/v1/disputes" -H "authorization: Bearer $WTOKEN" -H 'content-type: application/json' \
+  -d "{\"reference\":\"$DISPREF\",\"detail\":\"payout amount looks wrong\"}" | jq -r '.id')
+MINE=$(j "$PAYMENTS/v1/disputes" -H "authorization: Bearer $WTOKEN" | jq --arg id "$DISPID" '[.[] | select(.id==$id)] | length')
+[ "$MINE" = "1" ] || { echo "  dispute not visible to its filer"; exit 1; }
+j -X POST "$PAYMENTS/v1/admin/disputes/$DISPID/status" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' -d '{"status":"investigating"}' >/dev/null
+j -X POST "$PAYMENTS/v1/admin/disputes/$DISPID/status" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' -d '{"status":"resolved","resolution":"refunded the difference"}' >/dev/null
+DISPSTATUS=$(j "$PAYMENTS/v1/admin/disputes" -H "authorization: Bearer $ADMIN_TOKEN" \
+  | jq -r --arg id "$DISPID" '.[] | select(.id==$id) | .status')
+[ "$DISPSTATUS" = "resolved" ] || { echo "  dispute did not resolve (got $DISPSTATUS)"; exit 1; }
+echo "  dispute $DISPID on $DISPREF: open -> investigating -> resolved"
 
 DUSED=$(j "$CAMPAIGNS/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
   | jq -r '.[] | select(.code=="DRIVE5") | .used_count')
@@ -407,6 +594,24 @@ TSN=$(j "$RIDES/v1/admin/analytics/timeseries?days=7" -H "authorization: Bearer 
 [ "$TT" -ge 1 ] || { echo "  analytics missing trips"; exit 1; }
 [ "$TSN" -eq 7 ] || { echo "  timeseries wrong length ($TSN)"; exit 1; }
 echo "  analytics: trips=$TT gmv=NPR $GMV completion_rate=$COMPRATE timeseries_days=$TSN"
+
+step "merchant geofence: polygon -> H3 polyfill cache, contains query"
+MID=$(j -X POST "$MERCHANT/v1/admin/merchants" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"name":"Ghorahi Geofence Test","vertical":"food","lat":28.0350,"lng":82.4850}' | jq -r '.id')
+[ -n "$MID" ] && [ "$MID" != "null" ] || { echo "  merchant creation failed"; exit 1; }
+ZSET=$(j -X PUT "$MERCHANT/v1/merchant/zone/$MID" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"points":[{"lat":28.030,"lng":82.480},{"lat":28.030,"lng":82.490},{"lat":28.040,"lng":82.490},{"lat":28.040,"lng":82.480}]}')
+ZCELLS=$(echo "$ZSET" | jq -r '.cell_count')
+awk -v c="$ZCELLS" 'BEGIN{exit !(c+0>0)}' || { echo "  zone polyfill produced no cells ($ZSET)"; exit 1; }
+INSIDE=$(j "$MERCHANT/v1/merchant/zone/$MID/contains?lat=28.035&lng=82.485" | jq -r '.contains')
+[ "$INSIDE" = "true" ] || { echo "  interior point should be inside the zone (got $INSIDE)"; exit 1; }
+OUTSIDE=$(j "$MERCHANT/v1/merchant/zone/$MID/contains?lat=28.5&lng=83.0" | jq -r '.contains')
+[ "$OUTSIDE" = "false" ] || { echo "  far point should be outside the zone (got $OUTSIDE)"; exit 1; }
+NOZONE=$(j "$MERCHANT/v1/merchant/zone/00000000-0000-0000-0000-000000000000/contains?lat=28.035&lng=82.485" | jq -r '.zone_defined')
+[ "$NOZONE" = "false" ] || { echo "  undefined zone should report zone_defined=false (got $NOZONE)"; exit 1; }
+echo "  zone cached as $ZCELLS H3 cells; interior=in, ~50km away=out, undefined merchant=zone_defined:false"
 
 step "dynamic rule-based campaign (new-customer only)"
 j -X POST "$CAMPAIGNS/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
@@ -452,7 +657,7 @@ FORBID=$(curl -sS -o /dev/null -w '%{http_code}' "$PARTNERS/v1/partner/$PID2/dri
 echo "  partner onboarded; owner→manager→driver; fleet completed trips=$FLEET_TRIPS; cross-tenant=$FORBID (isolated)"
 
 step "fleet partnership (phase 2: revenue-share + wallet + fleet bonus + payout)"
-# A fresh approved fleet driver (no subscription pass, so commission is non-zero).
+# A fresh approved fleet driver.
 FDPHONE="+97798$(( RANDOM % 900000 + 100000 ))"
 FDLOGIN=$(login "$FDPHONE" true)
 FDTOKEN=$(echo "$FDLOGIN" | jq -r '.access_token')

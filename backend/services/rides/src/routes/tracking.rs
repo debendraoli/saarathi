@@ -86,11 +86,19 @@ async fn post_location(
         .await
         .map_err(redis_err)?;
 
-    st.hub.publish(
-        id,
-        json!({ "type": "location", "lat": b.lat, "lng": b.lng, "heading": b.heading, "speed": b.speed, "by": claims.sub })
-            .to_string(),
-    );
+    let payload = json!({ "type": "location", "lat": b.lat, "lng": b.lng, "heading": b.heading, "speed": b.speed, "by": claims.sub });
+    // Best-effort breadcrumb persistence (mirrors ws.rs), so the REST posting
+    // path leaves the same durable trip_events trail as the WebSocket path.
+    let _ = sqlx::query(
+        "INSERT INTO trip_events (trip_id, sender_id, kind, payload) VALUES ($1, $2, 'location', $3)",
+    )
+    .bind(id)
+    .bind(claims.sub)
+    .bind(&payload)
+    .execute(&st.db)
+    .await;
+
+    st.hub.publish(id, payload.to_string());
     Ok(Json(json!({ "ok": true })))
 }
 

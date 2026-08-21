@@ -4,6 +4,6 @@
 //! unchanged. `PaymentProvider` lives in `saarathi_core::payments`.
 
 pub use saarathi_core::wallet::{
-    credit_driver, credit_driver_wallet, credit_rider, debit_driver, debit_driver_wallet,
-    debit_rider, driver_credit_balance, has_active_pass, rider_balance,
+    credit_driver_wallet, credit_rider, debit_driver_wallet, debit_rider, driver_credit_balance,
+    rider_balance,
 };

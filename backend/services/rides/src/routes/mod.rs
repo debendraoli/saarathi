@@ -1,20 +1,20 @@
 //! Router assembly + CORS.
 
 pub mod analytics;
+pub mod credits;
 pub mod delivery;
 pub mod dispatch;
 pub mod feedback;
 pub mod flags;
 pub mod geo;
 pub mod insights;
+pub mod internal;
 pub mod ledger;
-pub mod marketplace;
 pub mod metrics;
 pub mod plans;
 pub mod rides;
 pub mod rtc;
 pub mod safety;
-pub mod subscription;
 pub mod surge;
 pub mod tracking;
 
@@ -45,12 +45,12 @@ pub fn router(state: AppState) -> Router {
         .merge(safety::routes())
         .merge(feedback::routes())
         .merge(analytics::routes())
-        .merge(subscription::routes())
+        .merge(credits::routes())
         .merge(rtc::routes())
-        .merge(marketplace::routes())
         .merge(geo::routes())
         .merge(plans::routes())
         .merge(insights::routes())
+        .merge(internal::routes())
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

@@ -14,8 +14,6 @@ pub enum AppError {
     Coded(StatusCode, ErrorCode, String),
     #[error("{0}")]
     BadRequest(String),
-    #[error("unauthorized")]
-    Unauthorized,
     #[error("forbidden")]
     Forbidden,
     #[error("not found")]
@@ -49,16 +47,22 @@ impl From<saarathi_core::wallet::WalletError> for AppError {
     }
 }
 
+impl From<saarathi_core::payments::ProviderError> for AppError {
+    fn from(e: saarathi_core::payments::ProviderError) -> Self {
+        tracing::error!(error = %e, "payment provider error");
+        AppError::Coded(
+            StatusCode::BAD_GATEWAY,
+            ErrorCode::Internal,
+            "payment provider is unavailable".into(),
+        )
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
             AppError::Coded(s, c, m) => (s, c, m),
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, ErrorCode::Validation, m),
-            AppError::Unauthorized => (
-                StatusCode::UNAUTHORIZED,
-                ErrorCode::Unauthorized,
-                "unauthorized".into(),
-            ),
             AppError::Forbidden => (
                 StatusCode::FORBIDDEN,
                 ErrorCode::Forbidden,

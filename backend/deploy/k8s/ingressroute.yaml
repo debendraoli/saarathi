@@ -5,6 +5,9 @@
 #
 # `saarathi-routing` has NO IngressRoute on purpose — it's an internal ClusterIP
 # Service that only `rides` calls (east-west); never publicly reachable.
+# Likewise, rides' own `/v1/internal/*` path (called by `saarathi-merchant`,
+# shared-secret guarded) is deliberately excluded from the rides PathPrefix
+# list below — not just unlisted like routing, but actively not matched.
 #
 # Assumptions: each service is a ClusterIP Service named `saarathi-<svc>` exposing
 # port 80. TLS is terminated here via the `websecure` entrypoint + a cert
@@ -49,8 +52,12 @@ spec:
       middlewares:
         - name: cors
         - name: ratelimit
+      # `/v1/me` is Path + PathPrefix(`/v1/me/`), not a bare PathPrefix(`/v1/me`) —
+      # that would also literal-string-match `/v1/merchant*` (PathPrefix has no
+      # path-segment awareness) and, being the longer/higher-priority rule, steal
+      # every merchant-service request out from under the merchant route below.
       match: >-
-        PathPrefix(`/v1/auth`) || PathPrefix(`/v1/me`)
+        PathPrefix(`/v1/auth`) || Path(`/v1/me`) || PathPrefix(`/v1/me/`)
         || PathPrefix(`/v1/driver/register`) || PathPrefix(`/v1/driver/documents`) || PathPrefix(`/v1/driver/status`)
         || PathPrefix(`/v1/admin/drivers`) || PathPrefix(`/v1/admin/documents`)
       services:
@@ -63,17 +70,18 @@ spec:
         - name: ratelimit
       match: >-
         PathPrefix(`/v1/rides`) || PathPrefix(`/v1/delivery`) || PathPrefix(`/v1/wallet`)
+        || PathPrefix(`/v1/rtc`)
+        || PathPrefix(`/v1/geo`)
         || PathPrefix(`/v1/ws`) || PathPrefix(`/v1/events`) || PathPrefix(`/v1/flags`)
         || PathPrefix(`/v1/reports`) || PathPrefix(`/v1/credit-plans`) || PathPrefix(`/v1/drivers`)
         || PathPrefix(`/v1/driver/analytics`) || PathPrefix(`/v1/driver/credits`)
         || PathPrefix(`/v1/driver/heartbeat`) || PathPrefix(`/v1/driver/offers`)
         || PathPrefix(`/v1/driver/offline`) || PathPrefix(`/v1/driver/online`)
-        || PathPrefix(`/v1/driver/subscription`)
         || PathPrefix(`/v1/admin/analytics`) || PathPrefix(`/v1/admin/cancellations`)
         || PathPrefix(`/v1/admin/credit-plans`) || PathPrefix(`/v1/admin/flags`)
         || PathPrefix(`/v1/admin/leaderboard`) || PathPrefix(`/v1/admin/ledger`)
         || PathPrefix(`/v1/admin/reports`) || PathPrefix(`/v1/admin/rides`)
-        || PathPrefix(`/v1/admin/sos`) || PathPrefix(`/v1/admin/subscriptions`)
+        || PathPrefix(`/v1/admin/sos`)
         || PathPrefix(`/v1/admin/surge`) || PathPrefix(`/v1/admin/trips`)
       services:
         - name: saarathi-rides
@@ -94,7 +102,9 @@ spec:
         - name: ratelimit
       match: >-
         PathPrefix(`/v1/credits`) || PathPrefix(`/v1/payouts`) || PathPrefix(`/v1/psp`)
-        || PathPrefix(`/v1/admin/payouts`)
+        || PathPrefix(`/v1/payout-accounts`) || PathPrefix(`/v1/disputes`)
+        || PathPrefix(`/v1/payments`)
+        || PathPrefix(`/v1/admin/payouts`) || PathPrefix(`/v1/admin/disputes`)
       services:
         - name: saarathi-payments
           port: 80
@@ -106,6 +116,18 @@ spec:
       match: PathPrefix(`/v1/campaigns`) || PathPrefix(`/v1/admin/campaigns`)
       services:
         - name: saarathi-campaigns
+          port: 80
+
+    - kind: Rule
+      middlewares:
+        - name: cors
+        - name: ratelimit
+      match: >-
+        PathPrefix(`/v1/merchants`) || PathPrefix(`/v1/orders`)
+        || PathPrefix(`/v1/merchant`) || PathPrefix(`/v1/admin/merchants`)
+        || PathPrefix(`/v1/items`)
+      services:
+        - name: saarathi-merchant
           port: 80
 
     - kind: Rule

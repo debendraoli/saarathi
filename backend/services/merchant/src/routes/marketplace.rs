@@ -1,12 +1,12 @@
 //! Marketplace (food / grocery): merchants, menus, and customer orders. An
-//! order's courier leg reuses delivery — when it's marked `ready` we spawn a
-//! `trip_type='delivery'` trip so the existing dispatch + settlement plumbing
-//! carries it to the customer.
+//! order's courier leg reuses delivery — when it's marked `ready` we call
+//! rides' internal `/v1/internal/delivery-trips` API (not the gateway; see
+//! that endpoint's docs) so the existing dispatch + settlement plumbing
+//! carries it to the customer, without this service reaching into rides'
+//! internals directly.
 
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
-use crate::models::{Trip, TRIP_COLS};
-use crate::routing::{LatLng, RouteProfile};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::{
@@ -14,7 +14,7 @@ use axum::{
     Json, Router,
 };
 use rust_decimal::Decimal;
-use saarathi_core::money::Money;
+use saarathi_core::routing::{LatLng, RouteProfile};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -44,7 +44,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 /// True when the user owns the merchant (or is staff).
-async fn owns_or_staff(
+pub(crate) async fn owns_or_staff(
     st: &AppState,
     uid: Uuid,
     is_staff: bool,
@@ -454,7 +454,7 @@ async fn update_order_status(
         .execute(&st.db)
         .await?;
 
-    // On 'ready', spawn the courier delivery trip and dispatch it.
+    // On 'ready', spawn the courier delivery trip via rides' internal API.
     if body.status == "ready" {
         spawn_courier(&st, id).await?;
     }
@@ -462,7 +462,23 @@ async fn update_order_status(
     order_json(&st, id, claims.sub, claims.is_staff()).await
 }
 
-/// Create the delivery trip for a ready order and kick dispatch.
+#[derive(Serialize)]
+struct CreateDeliveryTripRequest {
+    rider_id: Uuid,
+    origin: LatLng,
+    dest: LatLng,
+    gross_fare: Decimal,
+    payment_method: String,
+}
+
+#[derive(Deserialize)]
+struct CreateDeliveryTripResponse {
+    trip_id: Uuid,
+}
+
+/// Ask rides to create (and dispatch) the delivery trip for a ready order —
+/// the API boundary this whole extraction exists to enforce: this service
+/// never inserts into `trips` or calls dispatch itself.
 async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()> {
     let o: (Uuid, Uuid, Decimal, String, f64, f64, Option<Uuid>) = sqlx::query_as(
         "SELECT o.customer_id, o.merchant_id, o.delivery_fee, o.payment_method, \
@@ -481,59 +497,41 @@ async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()> {
             .fetch_one(&st.db)
             .await?;
 
-    let route = st
-        .router
-        .route_path(
-            &[
-                LatLng {
-                    lat: merchant_lat,
-                    lng: merchant_lng,
-                },
-                LatLng { lat: o.4, lng: o.5 },
-            ],
-            RouteProfile::Motorcycle,
-        )
-        .await;
-
-    let fee = o.2;
-    let (commission, accident_fund, driver_payout) =
-        saarathi_core::pricing::split_fare(Money::from_decimal(fee), st.config.commission_rate);
-
-    let trip: Trip = sqlx::query_as(&format!(
-        "INSERT INTO trips (rider_id, trip_type, vehicle_class, origin_lat, origin_lng, \
-            dest_lat, dest_lng, distance_km, duration_secs, gross_fare, discount_amount, \
-            final_fare, commission, accident_fund, driver_payout, payment_method) \
-         VALUES ($1,'delivery','two_wheeler',$2,$3,$4,$5,$6,$7,$8,0,$8,$9,$10,$11,$12) \
-         RETURNING {TRIP_COLS}"
-    ))
-    .bind(o.0)
-    .bind(merchant_lat)
-    .bind(merchant_lng)
-    .bind(o.4)
-    .bind(o.5)
-    .bind(route.distance_km)
-    .bind(route.duration_secs)
-    .bind(fee)
-    .bind(commission.amount())
-    .bind(accident_fund.amount())
-    .bind(driver_payout.amount())
-    .bind(&o.3)
-    .fetch_one(&st.db)
-    .await?;
+    let req = CreateDeliveryTripRequest {
+        rider_id: o.0,
+        origin: LatLng {
+            lat: merchant_lat,
+            lng: merchant_lng,
+        },
+        dest: LatLng { lat: o.4, lng: o.5 },
+        gross_fare: o.2,
+        payment_method: o.3,
+    };
+    let resp = st
+        .http
+        .post(format!(
+            "{}/v1/internal/delivery-trips",
+            st.config.rides_service_url
+        ))
+        .header("x-internal-secret", &st.config.internal_service_secret)
+        .json(&req)
+        .send()
+        .await
+        .map_err(anyhow::Error::from)
+        .map_err(AppError::Other)?
+        .error_for_status()
+        .map_err(anyhow::Error::from)
+        .map_err(AppError::Other)?
+        .json::<CreateDeliveryTripResponse>()
+        .await
+        .map_err(anyhow::Error::from)
+        .map_err(AppError::Other)?;
 
     sqlx::query("UPDATE orders SET trip_id = $2 WHERE id = $1")
         .bind(order_id)
-        .bind(trip.id)
+        .bind(resp.trip_id)
         .execute(&st.db)
         .await?;
-
-    tokio::spawn({
-        let st = st.clone();
-        let trip_id = trip.id;
-        async move {
-            let _ = crate::dispatch::dispatch_trip(&st, trip_id).await;
-        }
-    });
     Ok(())
 }
 

@@ -79,22 +79,28 @@ pub async fn append(tx: &mut Transaction<'_, Postgres>, e: NewEntry) -> AppResul
     .execute(&mut **tx)
     .await?;
 
-    // Cash: driver collected the fare, so owes platform commission + fund.
-    // Digital: platform holds the fare, so owes the driver the payout.
+    // Cash: driver already holds the fare, so the platform's cut is drawn
+    // from their prepaid credit balance instead of an owed-cash reconciliation.
+    // Digital: platform holds the fare, so it credits the driver's payout share.
     if let Some(driver_id) = e.driver_id {
-        let delta: Decimal = if e.payment_method == "cash" {
-            -(e.commission + e.accident_fund)
+        if e.payment_method == "cash" {
+            saarathi_core::wallet::settle_driver_fee(
+                tx,
+                driver_id,
+                e.commission + e.accident_fund,
+                e.trip_id,
+            )
+            .await?;
         } else {
-            e.driver_payout
-        };
-        sqlx::query(
-            "INSERT INTO driver_wallets (driver_id, balance, updated_at) VALUES ($1, $2, now()) \
-             ON CONFLICT (driver_id) DO UPDATE SET balance = driver_wallets.balance + $2, updated_at = now()",
-        )
-        .bind(driver_id)
-        .bind(delta)
-        .execute(&mut **tx)
-        .await?;
+            sqlx::query(
+                "INSERT INTO driver_wallets (driver_id, balance, updated_at) VALUES ($1, $2, now()) \
+                 ON CONFLICT (driver_id) DO UPDATE SET balance = driver_wallets.balance + $2, updated_at = now()",
+            )
+            .bind(driver_id)
+            .bind(e.driver_payout)
+            .execute(&mut **tx)
+            .await?;
+        }
     }
 
     Ok(entry_hash)

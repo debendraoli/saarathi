@@ -136,7 +136,7 @@ async fn approve_driver(
     StaffUser(claims): StaffUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Value>> {
-    if !claims.role.can_review_kyc() {
+    if !claims.can_review_kyc() {
         return Err(AppError::Forbidden);
     }
     let mut tx = st.db.begin().await?;
@@ -186,7 +186,7 @@ async fn reject_driver(
     Path(id): Path<Uuid>,
     Json(body): Json<RejectInput>,
 ) -> AppResult<Json<Value>> {
-    if !claims.role.can_review_kyc() {
+    if !claims.can_review_kyc() {
         return Err(AppError::Forbidden);
     }
     if body.reason.trim().is_empty() {
@@ -250,7 +250,7 @@ async fn onboard_driver(
     StaffUser(claims): StaffUser,
     Json(body): Json<OnboardInput>,
 ) -> AppResult<Json<Driver>> {
-    if !claims.role.can_review_kyc() {
+    if !claims.can_review_kyc() {
         return Err(AppError::Forbidden);
     }
     let phone = body.phone.trim();
@@ -336,7 +336,7 @@ async fn upload_driver_document(
     Path(driver_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> AppResult<Json<DriverDocument>> {
-    if !claims.role.can_review_kyc() {
+    if !claims.can_review_kyc() {
         return Err(AppError::Forbidden);
     }
     // Confirm the driver exists.

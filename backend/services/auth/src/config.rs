@@ -18,6 +18,15 @@ pub struct Config {
     pub kyc_storage_dir: String,
     /// Optionally upsert a dev super-admin on boot (for local dashboard testing).
     pub seed_dev_admin_phone: Option<String>,
+    pub redis_url: String,
+    /// Source IPs exempt from the OTP token-bucket's IP layer (phone layer
+    /// still applies) — e.g. a shared CI/local-dev address. Empty by default;
+    /// production deployments should never set this.
+    pub otp_rate_limit_ip_allowlist: Vec<String>,
+    /// WhatsApp Cloud API (Meta) — OTP primary channel. `None` if unconfigured.
+    pub whatsapp: Option<crate::otp_delivery::WhatsAppConfig>,
+    /// Sparrow SMS — OTP fallback channel. `None` if unconfigured.
+    pub sparrow: Option<crate::otp_delivery::SparrowConfig>,
 }
 
 impl Config {
@@ -37,6 +46,37 @@ impl Config {
             otp_dev_mode: flag("OTP_DEV_MODE"),
             kyc_storage_dir: opt("KYC_STORAGE_DIR").unwrap_or_else(|| "./.data/kyc".into()),
             seed_dev_admin_phone: opt("SEED_DEV_ADMIN_PHONE"),
+            redis_url: opt("REDIS_URL").unwrap_or_else(|| "redis://localhost:6379".into()),
+            otp_rate_limit_ip_allowlist: opt("OTP_RATE_LIMIT_IP_ALLOWLIST")
+                .map(|v| {
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            whatsapp: match (
+                opt("WHATSAPP_PHONE_NUMBER_ID"),
+                opt("WHATSAPP_ACCESS_TOKEN"),
+                opt("WHATSAPP_OTP_TEMPLATE_NAME"),
+            ) {
+                (Some(phone_number_id), Some(access_token), Some(template_name)) => {
+                    Some(crate::otp_delivery::WhatsAppConfig {
+                        api_version: opt("WHATSAPP_API_VERSION")
+                            .unwrap_or_else(|| "v21.0".into()),
+                        phone_number_id,
+                        access_token,
+                        template_name,
+                        language_code: opt("WHATSAPP_OTP_TEMPLATE_LANG")
+                            .unwrap_or_else(|| "en_US".into()),
+                    })
+                }
+                _ => None,
+            },
+            sparrow: match (opt("SPARROW_SMS_TOKEN"), opt("SPARROW_SMS_FROM")) {
+                (Some(token), Some(from)) => Some(crate::otp_delivery::SparrowConfig { token, from }),
+                _ => None,
+            },
         })
     }
 }

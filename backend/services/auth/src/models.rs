@@ -22,21 +22,6 @@ pub enum UserRole {
     Analyst,
 }
 
-impl UserRole {
-    /// Any non-rider, non-driver account is staff (dashboard user).
-    pub fn is_staff(self) -> bool {
-        !matches!(self, UserRole::Rider | UserRole::Driver)
-    }
-
-    /// Roles allowed to make KYC approve/reject decisions.
-    pub fn can_review_kyc(self) -> bool {
-        matches!(
-            self,
-            UserRole::SuperAdmin | UserRole::Admin | UserRole::Compliance
-        )
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "user_status", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -83,12 +68,13 @@ pub enum DocumentStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "vehicle_wheeler_class", rename_all = "snake_case")]
+#[sqlx(type_name = "vehicle_class", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)] // matches the wire/DB values two_wheeler|three_wheeler|four_wheeler
 pub enum VehicleWheelerClass {
-    Two,
-    Three,
-    Four,
+    TwoWheeler,
+    ThreeWheeler,
+    FourWheeler,
 }
 
 // ── Partnership / fleet enums (doc 14) ──────────────────────────────────────

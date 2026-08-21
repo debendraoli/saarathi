@@ -6,17 +6,16 @@
 //! persists the durable inbox row, and escalates critical classes. Fully
 //! decoupled from the trip transaction — a natural first microservice split.
 
-use axum::extract::{FromRequestParts, Path, State};
-use axum::http::header::AUTHORIZATION;
-use axum::http::{request::Parts, StatusCode};
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use saarathi_core::authn::{AuthUser, HasJwtSecret};
 use saarathi_core::domain::notif;
 use saarathi_core::events::{NotifyRequest, NOTIFY_SUBJECT};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
@@ -33,33 +32,9 @@ struct AppState {
     jwt_secret: Arc<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Claims {
-    sub: Uuid,
-    #[allow(dead_code)] // present in the token; jsonwebtoken validates expiry
-    exp: usize,
-}
-
-/// Any authenticated user (a valid access token issued by saarathi-auth).
-struct AuthUser(Claims);
-
-impl FromRequestParts<AppState> for AuthUser {
-    type Rejection = StatusCode;
-
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, StatusCode> {
-        let token = parts
-            .headers
-            .get(AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|h| h.strip_prefix("Bearer "))
-            .ok_or(StatusCode::UNAUTHORIZED)?;
-        let data = decode::<Claims>(
-            token,
-            &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
-            &Validation::default(),
-        )
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-        Ok(AuthUser(data.claims))
+impl HasJwtSecret for AppState {
+    fn jwt_secret(&self) -> &str {
+        &self.jwt_secret
     }
 }
 

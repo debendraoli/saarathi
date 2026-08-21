@@ -188,21 +188,25 @@ async fn topup(
             "amount must be positive",
         ));
     }
-    let reference = st.payments.start_topup(pid, body.amount);
+    let purchase_order_id = Uuid::new_v4().to_string();
+    let init = st
+        .payments
+        .start_topup(pid, body.amount, &purchase_order_id)
+        .await?;
     sqlx::query(
         "INSERT INTO partner_topup_intents (reference, partner_id, amount, provider) \
          VALUES ($1, $2, $3, $4)",
     )
-    .bind(&reference)
+    .bind(&init.reference)
     .bind(pid)
     .bind(body.amount)
     .bind(st.payments.name())
     .execute(&st.db)
     .await?;
     Ok(Json(json!({
-        "reference": reference,
+        "reference": init.reference,
         "amount": body.amount,
-        "checkout_url": format!("mock://pay/{reference}"),
+        "checkout_url": init.checkout_url,
     })))
 }
 

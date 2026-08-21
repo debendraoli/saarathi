@@ -15,6 +15,7 @@ import {
     Route,
     ShieldCheck,
     Siren,
+    Store,
     Tag,
     ToggleRight,
     Trophy,
@@ -61,6 +62,10 @@ const NAV: NavGroup[] = [
       { href: "/partners", label: "Partners", icon: Building2 },
       { href: "/partner", label: "Partner Portal", icon: Briefcase },
     ],
+  },
+  {
+    title: "Marketplace",
+    items: [{ href: "/merchants", label: "Merchants", icon: Store }],
   },
   {
     title: "Growth",

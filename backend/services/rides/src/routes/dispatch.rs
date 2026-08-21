@@ -148,6 +148,17 @@ async fn accept_offer(
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Trip>> {
+    // A driver needs a positive credit balance to accept jobs — cash trips draw
+    // the platform's cut from it on completion (doc 13 §4.1); zero/negative
+    // means top up first rather than accruing an uncollectable debt.
+    let credit_balance = crate::payments::driver_credit_balance(&st.db, claims.sub).await?;
+    if credit_balance <= rust_decimal::Decimal::ZERO {
+        return Err(AppError::bad(
+            ErrorCode::InsufficientDriverCredits,
+            "top up your credit balance to accept rides",
+        ));
+    }
+
     let mut tx = st.db.begin().await?;
 
     let offer: Option<(Uuid,)> = sqlx::query_as(

@@ -1,0 +1,108 @@
+//! Service-to-service API — **not** registered in the gateway (see
+//! `backend/traefik/dynamic/routes.yml`; mirrors how `saarathi-routing` is
+//! reachable only inside the docker network, never publicly). This is the
+//! explicit boundary `saarathi-merchant` calls through instead of reaching
+//! into rides' dispatch/settlement internals directly, per the Phase 2 brief:
+//! "Decouple `merchant` domain into its own crate/service with a clear API
+//! boundary." Guarded by a shared secret (`INTERNAL_SERVICE_SECRET`) since,
+//! unlike routing's stateless computation, this one creates real trips.
+
+use crate::error::{AppError, AppResult};
+use crate::models::{Trip, TRIP_COLS};
+use crate::routing::{LatLng, RouteProfile};
+use crate::state::AppState;
+use axum::extract::State;
+use axum::http::HeaderMap;
+use axum::{routing::post, Json, Router};
+use rust_decimal::Decimal;
+use saarathi_core::money::Money;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+pub fn routes() -> Router<AppState> {
+    Router::new().route("/v1/internal/delivery-trips", post(create_delivery_trip))
+}
+
+fn check_internal_secret(st: &AppState, headers: &HeaderMap) -> AppResult<()> {
+    let expected = &st.config.internal_service_secret;
+    if expected.is_empty() {
+        // Unconfigured in this environment (e.g. local dev without the
+        // merchant service running) — don't hard-fail every boot.
+        tracing::warn!("INTERNAL_SERVICE_SECRET unset; /v1/internal/* is unauthenticated");
+        return Ok(());
+    }
+    let got = headers
+        .get("x-internal-secret")
+        .and_then(|v| v.to_str().ok());
+    if got != Some(expected.as_str()) {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct CreateDeliveryTrip {
+    rider_id: Uuid,
+    origin: LatLng,
+    dest: LatLng,
+    /// Already computed by the caller (e.g. merchant service's delivery-fee
+    /// calc) — this endpoint doesn't re-derive it, only splits + settles it.
+    gross_fare: Decimal,
+    payment_method: String,
+}
+
+#[derive(Serialize)]
+struct CreateDeliveryTripResponse {
+    trip_id: Uuid,
+}
+
+/// Create (and immediately attempt to dispatch) a `trip_type='delivery'`
+/// trip — the same courier leg every parcel/marketplace delivery rides on.
+async fn create_delivery_trip(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CreateDeliveryTrip>,
+) -> AppResult<Json<CreateDeliveryTripResponse>> {
+    check_internal_secret(&st, &headers)?;
+
+    let route = st
+        .router
+        .route_path(&[body.origin, body.dest], RouteProfile::Motorcycle)
+        .await;
+    let (commission, accident_fund, driver_payout) = saarathi_core::pricing::split_fare(
+        Money::from_decimal(body.gross_fare),
+        st.config.commission_rate,
+    );
+
+    let trip: Trip = sqlx::query_as(&format!(
+        "INSERT INTO trips (rider_id, trip_type, vehicle_class, origin_lat, origin_lng, \
+            dest_lat, dest_lng, distance_km, duration_secs, gross_fare, discount_amount, \
+            final_fare, commission, accident_fund, driver_payout, payment_method) \
+         VALUES ($1,'delivery','two_wheeler',$2,$3,$4,$5,$6,$7,$8,0,$8,$9,$10,$11,$12) \
+         RETURNING {TRIP_COLS}"
+    ))
+    .bind(body.rider_id)
+    .bind(body.origin.lat)
+    .bind(body.origin.lng)
+    .bind(body.dest.lat)
+    .bind(body.dest.lng)
+    .bind(route.distance_km)
+    .bind(route.duration_secs)
+    .bind(body.gross_fare)
+    .bind(commission.amount())
+    .bind(accident_fund.amount())
+    .bind(driver_payout.amount())
+    .bind(&body.payment_method)
+    .fetch_one(&st.db)
+    .await?;
+
+    tokio::spawn({
+        let st = st.clone();
+        let trip_id = trip.id;
+        async move {
+            let _ = crate::dispatch::dispatch_trip(&st, trip_id).await;
+        }
+    });
+
+    Ok(Json(CreateDeliveryTripResponse { trip_id: trip.id }))
+}

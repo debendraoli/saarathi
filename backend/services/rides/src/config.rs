@@ -8,6 +8,10 @@ pub struct Config {
     pub database_url: String,
     pub port: u16,
     pub jwt_secret: String,
+    /// Shared secret required on `/v1/internal/*` (service-to-service only —
+    /// not registered in the gateway). Empty = unauthenticated (logged loudly
+    /// at call time), for local dev without the merchant service running.
+    pub internal_service_secret: String,
     /// Base URL of the saarathi-routing service, e.g. http://localhost:8084.
     /// Empty = skip the service and use the local haversine fallback.
     pub routing_service_url: String,
@@ -37,9 +41,6 @@ pub struct Config {
     pub presence_ttl_secs: i64,
     /// Lowest fraction of the algorithmic fare a rider may bargain down to.
     pub bargain_floor_ratio: Decimal,
-    /// Weekly driver subscription pass (unlimited rides, keep 100% of fares).
-    pub subscription_weekly_price: Decimal,
-    pub subscription_weekly_days: i64,
     /// VAT rate applied to the platform's commission (reporting / liability).
     pub vat_rate: Decimal,
     /// Parcel delivery pricing (config-driven; not bound by the ride per-km caps).
@@ -65,6 +66,7 @@ impl Config {
                 .parse()
                 .context("RIDES_PORT")?,
             jwt_secret: req("JWT_SECRET")?,
+            internal_service_secret: opt("INTERNAL_SERVICE_SECRET").unwrap_or_default(),
             routing_service_url: opt("ROUTING_SERVICE_URL").unwrap_or_default(),
             road_factor: dec_env("ROUTING_ROAD_FACTOR", "1.3"),
             avg_speed_kmh: dec_env("ROUTING_AVG_SPEED_KMH", "22"),
@@ -80,8 +82,6 @@ impl Config {
             dispatch_broadcast_threshold: int_env("DISPATCH_BROADCAST_THRESHOLD", 3) as usize,
             presence_ttl_secs: int_env("DISPATCH_PRESENCE_TTL_SECS", 60),
             bargain_floor_ratio: dec_env("BARGAIN_FLOOR_RATIO", "0.5"),
-            subscription_weekly_price: dec_env("SUBSCRIPTION_WEEKLY_PRICE", "500"),
-            subscription_weekly_days: int_env("SUBSCRIPTION_WEEKLY_DAYS", 7),
             vat_rate: dec_env("VAT_RATE", "0.13"),
             delivery_base_fare: dec_env("DELIVERY_BASE_FARE", "30"),
             delivery_per_km: dec_env("DELIVERY_PER_KM", "15"),

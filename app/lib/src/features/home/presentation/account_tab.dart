@@ -65,6 +65,15 @@ class AccountTab extends ConsumerWidget {
           orElse: () => const SizedBox.shrink(),
         ),
         const SizedBox(height: 16),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.bookmark_rounded),
+            title: Text(l.savedPlaces),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => context.push(Routes.savedPlaces),
+          ),
+        ),
+        const SizedBox(height: 16),
         Text(l.chooseLanguage, style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 8),
         SegmentedButton<String>(

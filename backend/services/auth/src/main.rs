@@ -5,11 +5,14 @@
 //! PostGIS-backed rider/driver location data. See ../../../AGENTS.md.
 
 mod audit;
+mod auth;
 mod config;
 mod db;
 mod error;
 mod models;
 mod otp;
+mod otp_delivery;
+mod rate_limit;
 mod routes;
 mod state;
 mod store;
@@ -39,12 +42,32 @@ async fn main() -> anyhow::Result<()> {
         seed_dev_admin(&pool, phone).await?;
     }
 
+    let redis = match redis::Client::open(config.redis_url.clone()) {
+        Ok(client) => match redis::aio::ConnectionManager::new(client).await {
+            Ok(cm) => Some(cm),
+            Err(e) => {
+                tracing::warn!(error = %e, "redis unavailable; OTP rate limiter will fail open");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "invalid REDIS_URL; OTP rate limiter will fail open");
+            None
+        }
+    };
+    let otp_delivery = Arc::new(otp_delivery::OtpDelivery::new(
+        config.whatsapp.clone(),
+        config.sparrow.clone(),
+    ));
+
     let docs = Arc::new(LocalDocumentStore::new(&config.kyc_storage_dir));
     let port = config.port;
     let state = AppState {
         db: pool,
         config: Arc::new(config),
         docs,
+        redis,
+        otp_delivery,
     };
 
     let app = routes::router(state);

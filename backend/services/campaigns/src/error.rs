@@ -14,10 +14,6 @@ pub enum AppError {
     Coded(StatusCode, ErrorCode, String),
     #[error("{0}")]
     BadRequest(String),
-    #[error("unauthorized")]
-    Unauthorized,
-    #[error("forbidden")]
-    Forbidden,
     #[error("not found")]
     NotFound,
     #[error(transparent)]
@@ -35,16 +31,6 @@ impl IntoResponse for AppError {
         let (status, code, message) = match self {
             AppError::Coded(s, c, m) => (s, c, m),
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, ErrorCode::Validation, m),
-            AppError::Unauthorized => (
-                StatusCode::UNAUTHORIZED,
-                ErrorCode::Unauthorized,
-                "unauthorized".into(),
-            ),
-            AppError::Forbidden => (
-                StatusCode::FORBIDDEN,
-                ErrorCode::Forbidden,
-                "forbidden".into(),
-            ),
             AppError::NotFound => (
                 StatusCode::NOT_FOUND,
                 ErrorCode::NotFound,

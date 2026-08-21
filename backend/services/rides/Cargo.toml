@@ -35,3 +35,4 @@ async-nats = { workspace = true }
 hmac = "0.12"
 sha1 = "0.10"
 base64 = "0.22"
+h3o = { workspace = true }

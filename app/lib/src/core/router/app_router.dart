@@ -25,6 +25,7 @@ import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/onboarding/presentation/intro_screen.dart';
 import '../../features/onboarding/presentation/splash_screen.dart';
 import '../../features/places/data/places_repository.dart';
+import '../../features/places/presentation/saved_places_screen.dart';
 import '../../features/ride/domain/models.dart';
 import '../../features/ride/presentation/confirm_ride_screen.dart';
 import '../../features/ride/presentation/trip_screen.dart';
@@ -46,6 +47,7 @@ class Routes {
   static const chat = '/ride/chat';
   static const call = '/ride/call';
   static const notifications = '/notifications';
+  static const savedPlaces = '/places/saved';
   static const food = '/food';
   static const grocery = '/grocery';
   static const merchant = '/marketplace/merchant';
@@ -131,6 +133,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
           path: Routes.notifications,
           builder: (_, __) => const NotificationsScreen()),
+      GoRoute(
+          path: Routes.savedPlaces,
+          builder: (_, __) => const SavedPlacesScreen()),
       GoRoute(
         path: Routes.food,
         builder: (_, __) => const MarketplaceScreen(kind: MarketplaceKind.food),

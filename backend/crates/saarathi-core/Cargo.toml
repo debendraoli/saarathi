@@ -16,3 +16,11 @@ rust_decimal_macros = { workspace = true }
 sqlx = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }
+axum = { workspace = true }
+jsonwebtoken = { workspace = true }
+anyhow = { workspace = true }
+h3o = { workspace = true }
+geo = { workspace = true }

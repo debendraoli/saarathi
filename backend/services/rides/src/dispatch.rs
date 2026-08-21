@@ -1,12 +1,32 @@
-//! Dispatch & matching (E5): Redis-backed driver presence + geo-index, and the
-//! sequential-offer engine. A ride request is offered to the nearest eligible
-//! driver with a short TTL; on decline/timeout it moves to the next, widening
-//! the search radius. A background loop advances expired offers.
+//! Dispatch & matching (E5): H3-indexed driver presence + the sequential-offer
+//! engine. A ride request is offered to the nearest eligible driver with a
+//! short TTL; on decline/timeout it moves to the next, widening the search
+//! radius. A background loop advances expired offers.
+//!
+//! Driver presence is indexed by H3 resolution-9 cell (`h3o`, per the Phase 2
+//! brief) rather than Redis's built-in GEO commands: each online driver sits
+//! in a Redis SET keyed by their current cell (`disp:h3:{cell}`), and a radius
+//! search walks `grid_disk(k)` outward from the query point's cell, unions the
+//! member sets, then filters/sorts by exact haversine distance — `grid_disk`
+//! covers a hexagonal region, not a circle, so the ring count is padded by one
+//! and the true circle boundary is enforced afterward, not approximated by it.
+//!
+//! Presence itself (`disp:meta:{driver_id}`) has no Redis-level TTL, unlike
+//! the old GEO-based version: with drivers split across many per-cell keys,
+//! TTL-driven expiry would delete the very record (`cell`) needed to clean the
+//! right SET up. Instead staleness is checked against `last_seen` in
+//! application code (`is_stale`), and cleanup removes from both the meta hash
+//! and its cell's SET together.
 
 use crate::state::AppState;
+use saarathi_core::geo_h3::{cell_for, rings_for_radius};
+use h3o::CellIndex;
+use saarathi_core::routing::{haversine_km, LatLng as CoreLatLng};
 use uuid::Uuid;
 
-const GEO_KEY: &str = "disp:drivers";
+fn h3_key(cell: CellIndex) -> String {
+    format!("disp:h3:{}", u64::from(cell))
+}
 
 fn meta_key(driver_id: Uuid) -> String {
     format!("disp:meta:{driver_id}")
@@ -14,6 +34,10 @@ fn meta_key(driver_id: Uuid) -> String {
 
 fn now_ts() -> i64 {
     chrono::Utc::now().timestamp()
+}
+
+fn is_stale(last_seen: i64, ttl_secs: i64) -> bool {
+    now_ts() - last_seen > ttl_secs
 }
 
 // ── Presence ─────────────────────────────────────────────────────────────────
@@ -27,26 +51,42 @@ pub async fn set_online(
     job_types: &[String],
 ) -> anyhow::Result<()> {
     let mut r = st.redis.clone();
-    let member = driver_id.to_string();
-    let _: () = redis::cmd("GEOADD")
-        .arg(GEO_KEY)
-        .arg(lng)
-        .arg(lat)
-        .arg(&member)
+    let new_cell = cell_for(lat, lng)?;
+    let key = meta_key(driver_id);
+
+    let old_cell: Option<u64> = redis::cmd("HGET")
+        .arg(&key)
+        .arg("cell")
         .query_async(&mut r)
         .await?;
-    let key = meta_key(driver_id);
+    if old_cell != Some(u64::from(new_cell)) {
+        if let Some(old) = old_cell {
+            let _: () = redis::cmd("SREM")
+                .arg(format!("disp:h3:{old}"))
+                .arg(driver_id.to_string())
+                .query_async(&mut r)
+                .await
+                .unwrap_or(());
+        }
+        let _: () = redis::cmd("SADD")
+            .arg(h3_key(new_cell))
+            .arg(driver_id.to_string())
+            .query_async(&mut r)
+            .await?;
+    }
+
     let _: () = redis::cmd("HSET")
         .arg(&key)
         .arg("job_types")
         .arg(job_types.join(","))
         .arg("last_seen")
         .arg(now_ts())
-        .query_async(&mut r)
-        .await?;
-    let _: () = redis::cmd("EXPIRE")
-        .arg(&key)
-        .arg(st.config.presence_ttl_secs)
+        .arg("lat")
+        .arg(lat)
+        .arg("lng")
+        .arg(lng)
+        .arg("cell")
+        .arg(u64::from(new_cell))
         .query_async(&mut r)
         .await?;
     Ok(())
@@ -54,36 +94,107 @@ pub async fn set_online(
 
 pub async fn set_offline(st: &AppState, driver_id: Uuid) -> anyhow::Result<()> {
     let mut r = st.redis.clone();
-    let member = driver_id.to_string();
-    let _: () = redis::cmd("ZREM")
-        .arg(GEO_KEY)
-        .arg(&member)
-        .query_async(&mut r)
+    remove_driver(&mut r, driver_id).await
+}
+
+/// Remove a driver from both the meta hash and their cell's SET.
+async fn remove_driver(
+    r: &mut redis::aio::ConnectionManager,
+    driver_id: Uuid,
+) -> anyhow::Result<()> {
+    let key = meta_key(driver_id);
+    let cell: Option<u64> = redis::cmd("HGET")
+        .arg(&key)
+        .arg("cell")
+        .query_async(r)
         .await?;
-    let _: () = redis::cmd("DEL")
-        .arg(meta_key(driver_id))
-        .query_async(&mut r)
-        .await?;
+    if let Some(cell) = cell {
+        let _: () = redis::cmd("SREM")
+            .arg(format!("disp:h3:{cell}"))
+            .arg(driver_id.to_string())
+            .query_async(r)
+            .await
+            .unwrap_or(());
+    }
+    let _: () = redis::cmd("DEL").arg(&key).query_async(r).await?;
     Ok(())
+}
+
+struct Candidate {
+    driver_id: Uuid,
+    lat: f64,
+    lng: f64,
+}
+
+/// Fetch + parse meta for every driver in the H3 disk around `(lat, lng)`,
+/// lazily evicting anyone stale, without yet filtering by exact distance.
+async fn candidates_in_disk(
+    st: &AppState,
+    lat: f64,
+    lng: f64,
+    radius_km: f64,
+) -> anyhow::Result<Vec<Candidate>> {
+    let mut r = st.redis.clone();
+    let center = cell_for(lat, lng)?;
+    let k = rings_for_radius(radius_km);
+    let disk: Vec<CellIndex> = center.grid_disk(k);
+
+    let mut pipe = redis::pipe();
+    for cell in &disk {
+        pipe.cmd("SMEMBERS").arg(h3_key(*cell));
+    }
+    let members_per_cell: Vec<Vec<String>> = pipe.query_async(&mut r).await?;
+    let driver_ids: Vec<Uuid> = members_per_cell
+        .into_iter()
+        .flatten()
+        .filter_map(|s| Uuid::parse_str(&s).ok())
+        .collect();
+    if driver_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut pipe = redis::pipe();
+    for did in &driver_ids {
+        pipe.cmd("HMGET")
+            .arg(meta_key(*did))
+            .arg("lat")
+            .arg("lng")
+            .arg("last_seen");
+    }
+    let rows: Vec<(Option<f64>, Option<f64>, Option<i64>)> = pipe.query_async(&mut r).await?;
+
+    let mut out = Vec::with_capacity(driver_ids.len());
+    for (driver_id, (lat, lng, last_seen)) in driver_ids.into_iter().zip(rows) {
+        match (lat, lng, last_seen) {
+            (Some(lat), Some(lng), Some(last_seen)) => {
+                if is_stale(last_seen, st.config.presence_ttl_secs) {
+                    let _ = remove_driver(&mut r, driver_id).await;
+                    continue;
+                }
+                out.push(Candidate { driver_id, lat, lng });
+            }
+            // Meta vanished between the SMEMBERS read and this fetch (raced
+            // an offline/cleanup) — the SET membership is already stale too.
+            _ => continue,
+        }
+    }
+    Ok(out)
 }
 
 /// Nearest online drivers (ids) within `radius_km` of a point, nearest first.
 async fn nearby(st: &AppState, lng: f64, lat: f64, radius_km: f64) -> anyhow::Result<Vec<Uuid>> {
-    let mut r = st.redis.clone();
-    let ids: Vec<String> = redis::cmd("GEOSEARCH")
-        .arg(GEO_KEY)
-        .arg("FROMLONLAT")
-        .arg(lng)
-        .arg(lat)
-        .arg("BYRADIUS")
-        .arg(radius_km)
-        .arg("km")
-        .arg("ASC")
-        .arg("COUNT")
-        .arg(10)
-        .query_async(&mut r)
-        .await?;
-    Ok(ids.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect())
+    let origin = CoreLatLng { lat, lng };
+    let mut scored: Vec<(f64, Uuid)> = candidates_in_disk(st, lat, lng, radius_km)
+        .await?
+        .into_iter()
+        .filter_map(|c| {
+            let d = haversine_km(origin, CoreLatLng { lat: c.lat, lng: c.lng });
+            (d <= radius_km).then_some((d, c.driver_id))
+        })
+        .collect();
+    scored.sort_by(|a, b| a.0.total_cmp(&b.0));
+    scored.truncate(10);
+    Ok(scored.into_iter().map(|(_, id)| id).collect())
 }
 
 /// How many drivers are online within `radius_km` of a point. Used by the surge
@@ -100,23 +211,21 @@ pub async fn nearby_count(
 /// A driver is eligible if their heartbeat is fresh and they opted into this job type.
 async fn eligible(st: &AppState, driver_id: Uuid, job_type: &str) -> anyhow::Result<bool> {
     let mut r = st.redis.clone();
-    let job_types: Option<String> = redis::cmd("HGET")
+    let row: (Option<String>, Option<i64>) = redis::cmd("HMGET")
         .arg(meta_key(driver_id))
         .arg("job_types")
+        .arg("last_seen")
         .query_async(&mut r)
         .await?;
-    match job_types {
-        Some(jt) => Ok(jt.split(',').any(|t| t == job_type)),
-        None => {
-            // Stale heartbeat expired — drop them from the geo-index lazily.
-            let _: () = redis::cmd("ZREM")
-                .arg(GEO_KEY)
-                .arg(driver_id.to_string())
-                .query_async(&mut r)
-                .await
-                .unwrap_or(());
-            Ok(false)
+    match row {
+        (Some(jt), Some(last_seen)) => {
+            if is_stale(last_seen, st.config.presence_ttl_secs) {
+                let _ = remove_driver(&mut r, driver_id).await;
+                return Ok(false);
+            }
+            Ok(jt.split(',').any(|t| t == job_type))
         }
+        _ => Ok(false),
     }
 }
 
@@ -246,6 +355,69 @@ pub async fn run_dispatcher(st: AppState) {
             if let Err(e) = dispatch_trip(&st, tid).await {
                 tracing::warn!(trip = %tid, error = %e, "dispatch tick failed");
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_stale_respects_the_ttl_boundary() {
+        let now = now_ts();
+        assert!(!is_stale(now, 60));
+        assert!(!is_stale(now - 59, 60));
+        assert!(is_stale(now - 61, 60));
+    }
+
+    /// The acceptance criterion this satisfies: seed a small H3 grid of known
+    /// driver positions and confirm a radius search returns exactly the
+    /// expected set — near points included, far points excluded — using the
+    /// same disk-walk + exact-distance-filter logic `nearby()` uses, without
+    /// needing a live Redis (this exercises the pure cell/ring/distance math
+    /// directly; `nearby()` itself is covered live via `scripts/smoke.sh`).
+    #[test]
+    fn seeded_grid_radius_search_returns_the_correct_set() {
+        // Ghorahi-ish origin. Points at increasing offsets from it.
+        let origin = (28.0336, 82.4836);
+        let near = (28.0350, 82.4850); // ~0.2km away
+        let mid = (28.0450, 82.4950); // ~1.5km away
+        let far = (28.1200, 82.5600); // ~10km away
+
+        let radius_km = 2.0;
+        let center = cell_for(origin.0, origin.1).unwrap();
+        let k = rings_for_radius(radius_km);
+        let disk: std::collections::HashSet<CellIndex> =
+            center.grid_disk::<Vec<CellIndex>>(k).into_iter().collect();
+
+        for (label, (plat, plng), expect_in_disk) in [
+            ("near", near, true),
+            ("mid", mid, true),
+            ("far", far, false),
+        ] {
+            let cell = cell_for(plat, plng).unwrap();
+            assert_eq!(
+                disk.contains(&cell),
+                expect_in_disk,
+                "{label} point's cell membership in the disk"
+            );
+        }
+
+        // And the exact-distance filter (what `nearby()` applies after the
+        // disk walk) correctly excludes anything the hex disk over-covers.
+        let o = CoreLatLng { lat: origin.0, lng: origin.1 };
+        for (label, (plat, plng), expect_within_radius) in [
+            ("near", near, true),
+            ("mid", mid, true),
+            ("far", far, false),
+        ] {
+            let d = haversine_km(o, CoreLatLng { lat: plat, lng: plng });
+            assert_eq!(
+                d <= radius_km,
+                expect_within_radius,
+                "{label} point at {d:.2}km"
+            );
         }
     }
 }

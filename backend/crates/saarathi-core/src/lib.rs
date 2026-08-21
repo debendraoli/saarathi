@@ -7,9 +7,12 @@
 //! See `../../../AGENTS.md` for the golden rules these modules implement.
 
 pub mod api;
+pub mod authn;
 pub mod campaigns;
 pub mod domain;
 pub mod events;
+pub mod geo_h3;
+pub mod idempotency;
 pub mod ledger;
 pub mod legal;
 pub mod money;

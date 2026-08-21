@@ -32,3 +32,5 @@ dotenvy = { workspace = true }
 async-trait = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
+reqwest = { workspace = true }
+redis = { workspace = true }

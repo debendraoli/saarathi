@@ -44,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env()?;
     let pool = db::connect(&config.database_url).await?;
     db::init_schema(&pool).await?;
+    db::migrate_off_subscriptions(&pool).await?;
 
     let redis_client = redis::Client::open(config.redis_url.clone())?;
     let redis = redis::aio::ConnectionManager::new(redis_client).await?;
@@ -65,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
         router,
         hub: Hub::new(nats.clone()),
         redis,
-        payments: Arc::new(saarathi_core::payments::MockProvider),
+        payments: saarathi_core::payments::provider_from_env(),
         nats,
     };
 

@@ -86,6 +86,11 @@
   "infoReferBody": "Invite friends and earn ride credits.",
   "savedPlaces": "Saved places",
   "recentSearches": "Recent",
+  "savedPlacesEmpty": "No saved places yet. Add home, work, or anywhere you go often.",
+  "addPlace": "Add place",
+  "placeLabelHint": "Label (e.g. Home, Work)",
+  "removePlace": "Remove",
+  "removePlaceConfirm": "Remove this saved place?",
 
   "vehicleTwoWheeler": "Bike",
   "vehicleThreeWheeler": "Auto",

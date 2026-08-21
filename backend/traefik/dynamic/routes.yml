@@ -14,8 +14,12 @@ http:
       entryPoints: ["web"]
       service: auth
       middlewares: ["cors", "ratelimit"]
+      # `/v1/me` is Path + PathPrefix(`/v1/me/`), not a bare PathPrefix(`/v1/me`) —
+      # that would also literal-string-match `/v1/merchant*` (PathPrefix has no
+      # path-segment awareness) and, being the longer/higher-priority rule, steal
+      # every merchant-service request out from under the merchant router.
       rule: >-
-        PathPrefix(`/v1/auth`) || PathPrefix(`/v1/me`)
+        PathPrefix(`/v1/auth`) || Path(`/v1/me`) || PathPrefix(`/v1/me/`)
         || PathPrefix(`/v1/driver/register`) || PathPrefix(`/v1/driver/documents`) || PathPrefix(`/v1/driver/status`)
         || PathPrefix(`/v1/admin/drivers`) || PathPrefix(`/v1/admin/documents`)
 
@@ -26,20 +30,17 @@ http:
       rule: >-
         PathPrefix(`/v1/rides`) || PathPrefix(`/v1/delivery`) || PathPrefix(`/v1/wallet`)
         || PathPrefix(`/v1/rtc`)
-        || PathPrefix(`/v1/merchants`) || PathPrefix(`/v1/orders`)
-        || PathPrefix(`/v1/merchant`) || PathPrefix(`/v1/admin/merchants`)
-        || PathPrefix(`/v1/geo`) || PathPrefix(`/v1/items`)
+        || PathPrefix(`/v1/geo`)
         || PathPrefix(`/v1/ws`) || PathPrefix(`/v1/events`) || PathPrefix(`/v1/flags`)
         || PathPrefix(`/v1/reports`) || PathPrefix(`/v1/credit-plans`) || PathPrefix(`/v1/drivers`)
         || PathPrefix(`/v1/driver/analytics`) || PathPrefix(`/v1/driver/credits`)
         || PathPrefix(`/v1/driver/heartbeat`) || PathPrefix(`/v1/driver/offers`)
         || PathPrefix(`/v1/driver/offline`) || PathPrefix(`/v1/driver/online`)
-        || PathPrefix(`/v1/driver/subscription`)
         || PathPrefix(`/v1/admin/analytics`) || PathPrefix(`/v1/admin/cancellations`)
         || PathPrefix(`/v1/admin/credit-plans`) || PathPrefix(`/v1/admin/flags`)
         || PathPrefix(`/v1/admin/leaderboard`) || PathPrefix(`/v1/admin/ledger`)
         || PathPrefix(`/v1/admin/reports`) || PathPrefix(`/v1/admin/rides`)
-        || PathPrefix(`/v1/admin/sos`) || PathPrefix(`/v1/admin/subscriptions`)
+        || PathPrefix(`/v1/admin/sos`)
         || PathPrefix(`/v1/admin/surge`) || PathPrefix(`/v1/admin/trips`)
 
     notify:
@@ -54,13 +55,24 @@ http:
       middlewares: ["cors", "ratelimit"]
       rule: >-
         PathPrefix(`/v1/credits`) || PathPrefix(`/v1/payouts`) || PathPrefix(`/v1/psp`)
-        || PathPrefix(`/v1/admin/payouts`)
+        || PathPrefix(`/v1/payout-accounts`) || PathPrefix(`/v1/disputes`)
+        || PathPrefix(`/v1/payments`)
+        || PathPrefix(`/v1/admin/payouts`) || PathPrefix(`/v1/admin/disputes`)
 
     campaigns:
       entryPoints: ["web"]
       service: campaigns
       middlewares: ["cors", "ratelimit"]
       rule: PathPrefix(`/v1/campaigns`) || PathPrefix(`/v1/admin/campaigns`)
+
+    merchant:
+      entryPoints: ["web"]
+      service: merchant
+      middlewares: ["cors", "ratelimit"]
+      rule: >-
+        PathPrefix(`/v1/merchants`) || PathPrefix(`/v1/orders`)
+        || PathPrefix(`/v1/merchant`) || PathPrefix(`/v1/admin/merchants`)
+        || PathPrefix(`/v1/items`)
 
     partners:
       entryPoints: ["web"]
@@ -100,6 +112,11 @@ http:
       service: campaigns
       middlewares: ["cors", "health-rewrite"]
       rule: Path(`/status/campaigns`)
+    health-merchant:
+      entryPoints: ["web"]
+      service: merchant
+      middlewares: ["cors", "health-rewrite"]
+      rule: Path(`/status/merchant`)
     health-partners:
       entryPoints: ["web"]
       service: partners
@@ -148,6 +165,10 @@ http:
       loadBalancer:
         servers:
           - url: http://campaigns:8086
+    merchant:
+      loadBalancer:
+        servers:
+          - url: http://merchant:8088
     partners:
       loadBalancer:
         servers:

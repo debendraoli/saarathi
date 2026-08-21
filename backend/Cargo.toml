@@ -9,6 +9,7 @@ members = [
     "services/payments",
     "services/campaigns",
     "services/partners",
+    "services/merchant",
 ]
 
 [workspace.package]
@@ -45,6 +46,11 @@ dotenvy = "0.15"
 async-trait = "0.1"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "catch-panic"] }
+h3o = { version = "0.10", features = ["geo"] }
+# Must match the `geo` version h3o's own Cargo.toml depends on (currently
+# 0.33) — Cargo won't unify our direct dep with h3o's if they diverge, and
+# `geo::Polygon` values then wouldn't type-match what `h3o::geom` expects.
+geo = "0.33"
 
 # internal
 saarathi-core = { path = "crates/saarathi-core" }

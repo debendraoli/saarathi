@@ -3,15 +3,35 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{User, UserRole};
 use crate::otp;
+use crate::rate_limit;
 use crate::state::AppState;
 use crate::token;
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::{routing::post, Json, Router};
 use chrono::{Duration, Utc};
 use saarathi_core::api::ErrorCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
+
+/// Best-effort client IP for rate-limit keying. Traefik (this platform's one
+/// front door — see `AGENTS.md`) *appends* to `X-Forwarded-For`, so with
+/// exactly one trusted hop in front of this service, the trustworthy entry
+/// is the **last** one — Traefik's own view of the peer. The first entry is
+/// whatever the client itself sent and is trivially spoofable (a caller
+/// could set it to dodge their own rate limit), so it must never be trusted.
+/// Falls back to a constant so direct/dev access (no proxy in front) still
+/// rate-limits, just by phone alone in that case.
+fn client_ip(headers: &HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next_back())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -28,6 +48,7 @@ struct OtpRequest {
 
 async fn request_otp(
     State(st): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<OtpRequest>,
 ) -> AppResult<Json<Value>> {
     let phone = body.phone.trim().to_string();
@@ -38,7 +59,7 @@ async fn request_otp(
         ));
     }
 
-    // Rate limit by phone over the configured window.
+    // Coarser, longer-window limit (DB-based, phone-only) — the existing check.
     let since = Utc::now() - Duration::seconds(st.config.otp_rate_window_secs);
     let recent: i64 =
         sqlx::query_scalar("SELECT count(*) FROM otp_codes WHERE phone = $1 AND created_at > $2")
@@ -53,6 +74,18 @@ async fn request_otp(
         ));
     }
 
+    // Tighter burst limit: 3 requests / 10 min, keyed by both IP and phone —
+    // either bucket running dry blocks the request (see `crate::rate_limit`).
+    if let Some(mut redis) = st.redis.clone() {
+        let ip = client_ip(&headers);
+        if !rate_limit::check(&mut redis, &ip, &phone, &st.config.otp_rate_limit_ip_allowlist).await {
+            return Err(AppError::rate_limited(
+                ErrorCode::OtpRateLimited,
+                "too many OTP requests — please wait a few minutes",
+            ));
+        }
+    }
+
     let code = otp::generate_code();
     let code_hash = otp::hash_code(&code).map_err(AppError::Other)?;
     let expires_at = Utc::now() + Duration::seconds(st.config.otp_ttl_secs);
@@ -64,13 +97,20 @@ async fn request_otp(
         .execute(&st.db)
         .await?;
 
-    // TODO: dispatch via the SMS aggregator. In dev we log and echo the code.
     if st.config.otp_dev_mode {
         tracing::info!(%phone, %code, "OTP (dev mode)");
         return Ok(Json(json!({ "sent": true, "dev_code": code })));
     }
-    tracing::info!(%phone, "OTP sent");
-    Ok(Json(json!({ "sent": true })))
+    match st.otp_delivery.send(&phone, &code).await {
+        Ok(channel) => {
+            tracing::info!(%phone, ?channel, "OTP sent");
+            Ok(Json(json!({ "sent": true, "channel": channel })))
+        }
+        Err(e) => {
+            tracing::error!(%phone, error = %e, "OTP delivery failed on every channel");
+            Err(AppError::Other(e))
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -224,4 +264,51 @@ async fn issue_tokens(st: &AppState, user: &User) -> AppResult<TokenPair> {
         refresh_token: refresh,
         user: user.clone(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers_with(xff: Option<&str>) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        if let Some(v) = xff {
+            h.insert("x-forwarded-for", v.parse().unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn client_ip_reads_last_hop_of_x_forwarded_for() {
+        // The last entry is the one *our* trusted proxy (Traefik) appended —
+        // the first entry ("203.0.113.4" here) is client-supplied and must
+        // never be trusted, since a caller could set it to dodge their limit.
+        assert_eq!(
+            client_ip(&headers_with(Some("203.0.113.4, 10.0.0.1"))),
+            "10.0.0.1"
+        );
+    }
+
+    #[test]
+    fn client_ip_trims_whitespace() {
+        assert_eq!(
+            client_ip(&headers_with(Some("203.0.113.4, 10.0.0.1 "))),
+            "10.0.0.1"
+        );
+    }
+
+    #[test]
+    fn client_ip_uses_the_only_entry_when_unproxied() {
+        assert_eq!(client_ip(&headers_with(Some("203.0.113.4"))), "203.0.113.4");
+    }
+
+    #[test]
+    fn client_ip_falls_back_when_header_missing() {
+        assert_eq!(client_ip(&headers_with(None)), "unknown");
+    }
+
+    #[test]
+    fn client_ip_falls_back_when_header_empty() {
+        assert_eq!(client_ip(&headers_with(Some(""))), "unknown");
+    }
 }
