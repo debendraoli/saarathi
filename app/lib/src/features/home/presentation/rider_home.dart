@@ -7,6 +7,7 @@ import '../../../core/router/app_router.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
+import '../../ride/application/ride_controller.dart';
 
 /// Opens the address search; routes the pick into the ride flow (map picker or
 /// a prefilled destination).
@@ -35,6 +36,7 @@ class RiderHome extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        const _ActiveTripCard(),
         _WhereToCard(onTap: () => openWhereTo(context)),
         const _RecentDropoffs(),
         const SizedBox(height: 20),
@@ -104,8 +106,7 @@ class _RecentDropoffs extends ConsumerWidget {
             title: Text(h.label, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: h.address.isEmpty
                 ? null
-                : Text(h.address,
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                : Text(h.address, maxLines: 1, overflow: TextOverflow.ellipsis),
             onTap: () => context.push(Routes.whereTo, extra: h),
           ),
       ],
@@ -283,6 +284,51 @@ class _InfoCard extends StatelessWidget {
   }
 }
 
+/// Surfaces the rider's in-progress ride, if any, so it's never "lost" behind
+/// the normal request flow — and gives them a way back into it instead of
+/// wondering whether it's still happening (the backend also refuses a new
+/// ride request while one is active; this is the visible half of that rule).
+class _ActiveTripCard extends ConsumerWidget {
+  const _ActiveTripCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppL10n.of(context);
+    final trips = ref.watch(myTripsProvider).valueOrNull ?? const [];
+    final active = trips.where((t) => t.isActive).firstOrNull;
+    if (active == null) return const SizedBox.shrink();
+
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        color: scheme.primaryContainer,
+        child: ListTile(
+          contentPadding: const EdgeInsets.all(12),
+          leading: CircleAvatar(
+            backgroundColor: scheme.primary,
+            child: Icon(Icons.directions_car_rounded, color: scheme.onPrimary),
+          ),
+          title: Text(
+            l.ongoingRide,
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: scheme.onPrimaryContainer,
+            ),
+          ),
+          subtitle: Text(
+            l.ongoingRideBody,
+            style: TextStyle(color: scheme.onPrimaryContainer),
+          ),
+          trailing: Icon(Icons.chevron_right_rounded,
+              color: scheme.onPrimaryContainer),
+          onTap: () => context.push('${Routes.trip}/${active.id}'),
+        ),
+      ),
+    );
+  }
+}
+
 class _WhereToCard extends StatelessWidget {
   const _WhereToCard({required this.onTap});
   final VoidCallback onTap;
@@ -399,8 +445,8 @@ class _BecomeMerchantCard extends StatelessWidget {
         contentPadding: const EdgeInsets.all(12),
         leading: CircleAvatar(
           backgroundColor: scheme.tertiaryContainer,
-          child: Icon(Icons.storefront_rounded,
-              color: scheme.onTertiaryContainer),
+          child:
+              Icon(Icons.storefront_rounded, color: scheme.onTertiaryContainer),
         ),
         title: Text(l.becomeMerchant,
             style: const TextStyle(fontWeight: FontWeight.w700)),

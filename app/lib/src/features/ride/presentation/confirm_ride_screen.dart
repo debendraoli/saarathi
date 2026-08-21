@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
 import '../application/ride_controller.dart';
@@ -29,6 +30,16 @@ class _ConfirmRideScreenState extends ConsumerState<ConfirmRideScreen> {
       final draft = widget.draft.copyWith(paymentMethod: _payment);
       final trip = await ref.read(rideRepositoryProvider).book(draft);
       if (mounted) context.go('${Routes.trip}/${trip.id}');
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              e.isNetwork ? AppL10n.of(context).errorNetwork : e.message,
+            ),
+          ),
+        );
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

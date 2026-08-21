@@ -86,6 +86,8 @@
   "infoReferBody": "Invite friends and earn ride credits.",
   "savedPlaces": "Saved places",
   "recentSearches": "Recent",
+  "ongoingRide": "You have an ongoing ride",
+  "ongoingRideBody": "Tap to view live status and tracking.",
   "savedPlacesEmpty": "No saved places yet. Add home, work, or anywhere you go often.",
   "addPlace": "Add place",
   "placeLabelHint": "Label (e.g. Home, Work)",

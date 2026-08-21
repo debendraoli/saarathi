@@ -132,6 +132,23 @@ async fn create(
         ));
     }
 
+    // One active personal ride at a time — a rider can't stack requests.
+    // Delivery/parcel trips (trip_type='delivery') are a separate concern and
+    // aren't gated here.
+    let active: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM trips WHERE rider_id = $1 AND trip_type = 'ride' \
+         AND status NOT IN ('completed', 'cancelled') LIMIT 1",
+    )
+    .bind(claims.sub)
+    .fetch_optional(&st.db)
+    .await?;
+    if let Some(trip_id) = active {
+        return Err(AppError::conflict(
+            ErrorCode::Conflict,
+            format!("you already have an active ride ({trip_id}) — finish or cancel it first"),
+        ));
+    }
+
     let (est, _route) = pricing::estimate(
         &st,
         claims.sub,

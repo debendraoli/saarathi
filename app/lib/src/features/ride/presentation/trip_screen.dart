@@ -33,100 +33,110 @@ class TripScreen extends ConsumerWidget {
     final tripAsync = ref.watch(tripStreamProvider(tripId));
     final driverLoc = ref.watch(tripLocationProvider(tripId)).valueOrNull;
 
-    return Scaffold(
-      body: tripAsync.when(
-        loading: () => const LoadingView(),
-        error: (_, __) => ErrorRetry(
-          message: l.errorNetwork,
-          onRetry: () => ref.invalidate(tripStreamProvider(tripId)),
-        ),
-        data: (trip) {
-          final myId = ref.watch(authControllerProvider).user?.id;
-          final iAmDriver = myId != null && myId == trip.driverId;
-          final canComms = trip.driverId != null && trip.isActive;
-          final route = ref.watch(routeGeometryProvider(
-            RouteQuery(
-              [trip.origin, trip.dest],
-              trip.vehicleClass ?? 'two_wheeler',
-            ),
-          ));
-          return Stack(
-            children: [
-              MapView(
-                center: driverLoc ?? trip.origin,
-                route: route.valueOrNull ?? [trip.origin, trip.dest],
-                pins: [
-                  MapPin(
-                    trip.origin,
-                    Icons.trip_origin,
-                    Theme.of(context).colorScheme.primary,
-                  ),
-                  MapPin(
-                    trip.dest,
-                    Icons.location_on_rounded,
-                    Theme.of(context).colorScheme.secondary,
-                  ),
-                  if (driverLoc != null)
+    // This screen is reached via context.go (replacing the stack, so a
+    // stale confirm/checkout form can't be re-submitted from history), which
+    // leaves nothing for the system back button/gesture to pop — without
+    // this it exits the app instead of returning to Saarathi's home.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) context.go(Routes.home);
+      },
+      child: Scaffold(
+        body: tripAsync.when(
+          loading: () => const LoadingView(),
+          error: (_, __) => ErrorRetry(
+            message: l.errorNetwork,
+            onRetry: () => ref.invalidate(tripStreamProvider(tripId)),
+          ),
+          data: (trip) {
+            final myId = ref.watch(authControllerProvider).user?.id;
+            final iAmDriver = myId != null && myId == trip.driverId;
+            final canComms = trip.driverId != null && trip.isActive;
+            final route = ref.watch(routeGeometryProvider(
+              RouteQuery(
+                [trip.origin, trip.dest],
+                trip.vehicleClass ?? 'two_wheeler',
+              ),
+            ));
+            return Stack(
+              children: [
+                MapView(
+                  center: driverLoc ?? trip.origin,
+                  route: route.valueOrNull ?? [trip.origin, trip.dest],
+                  pins: [
                     MapPin(
-                      driverLoc,
-                      Icons.navigation_rounded,
-                      Theme.of(context).colorScheme.tertiary,
+                      trip.origin,
+                      Icons.trip_origin,
+                      Theme.of(context).colorScheme.primary,
                     ),
-                ],
-              ),
-              // Invisible: routes incoming calls to the call screen.
-              _CallWatcher(tripId: tripId),
-              // Invisible: the driver streams position during an active trip.
-              if (iAmDriver && trip.isActive)
-                _DriverLocationPublisher(tripId: tripId),
-              SafeArea(
-                child: Align(
-                  alignment: Alignment.topLeft,
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _MapCircleButton(
-                          icon: Icons.arrow_back_rounded,
-                          onTap: () => context.go(Routes.home),
-                        ),
-                        if (canComms) ...[
-                          const SizedBox(height: 8),
-                          _CommsBar(tripId: tripId, isRider: !iAmDriver),
+                    MapPin(
+                      trip.dest,
+                      Icons.location_on_rounded,
+                      Theme.of(context).colorScheme.secondary,
+                    ),
+                    if (driverLoc != null)
+                      MapPin(
+                        driverLoc,
+                        Icons.navigation_rounded,
+                        Theme.of(context).colorScheme.tertiary,
+                      ),
+                  ],
+                ),
+                // Invisible: routes incoming calls to the call screen.
+                _CallWatcher(tripId: tripId),
+                // Invisible: the driver streams position during an active trip.
+                if (iAmDriver && trip.isActive)
+                  _DriverLocationPublisher(tripId: tripId),
+                SafeArea(
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _MapCircleButton(
+                            icon: Icons.arrow_back_rounded,
+                            onTap: () => context.go(Routes.home),
+                          ),
+                          if (canComms) ...[
+                            const SizedBox(height: 8),
+                            _CommsBar(tripId: tripId, isRider: !iAmDriver),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-              SafeArea(
-                child: Align(
-                  alignment: Alignment.topRight,
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _SosButton(tripId: tripId),
-                        const SizedBox(height: 8),
-                        _ShareTripButton(tripId: tripId),
-                      ],
+                SafeArea(
+                  child: Align(
+                    alignment: Alignment.topRight,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _SosButton(tripId: tripId),
+                          const SizedBox(height: 8),
+                          _ShareTripButton(tripId: tripId),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: SafeArea(
-                  top: false,
-                  child: _StatusSheet(trip: trip),
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: SafeArea(
+                    top: false,
+                    child: _StatusSheet(trip: trip),
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+          },
+        ),
       ),
     );
   }

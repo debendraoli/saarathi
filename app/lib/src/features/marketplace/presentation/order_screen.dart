@@ -25,76 +25,86 @@ class OrderScreen extends ConsumerWidget {
     final l = AppL10n.of(context);
     final order = ref.watch(orderProvider(orderId));
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(l.yourOrder),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go(Routes.home),
+    // Reached via context.go from checkout (replacing the stack so a placed
+    // order can't be re-submitted from history) — without this, the system
+    // back button/gesture has nothing to pop and exits the app instead of
+    // returning to Saarathi's home.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) context.go(Routes.home);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(l.yourOrder),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => context.go(Routes.home),
+          ),
         ),
-      ),
-      body: order.when(
-        loading: () => const LoadingView(),
-        error: (_, __) => ErrorRetry(
-          message: l.errorNetwork,
-          onRetry: () => ref.invalidate(orderProvider(orderId)),
-        ),
-        data: (o) {
-          final cancelled = o.status == 'cancelled' || o.status == 'rejected';
-          final stepIndex = _steps.indexOf(o.status);
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Text(
-                o.merchantName,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 16),
-              if (cancelled)
-                _Banner(
-                  icon: Icons.cancel_rounded,
-                  label: l.orderCancelled,
-                  color: Theme.of(context).colorScheme.error,
-                )
-              else
-                Column(
-                  children: [
-                    for (var i = 0; i < _steps.length; i++)
-                      _Step(
-                        label: _stepLabel(l, _steps[i]),
-                        done: i <= stepIndex,
-                        current: i == stepIndex,
-                        last: i == _steps.length - 1,
-                      ),
-                  ],
+        body: order.when(
+          loading: () => const LoadingView(),
+          error: (_, __) => ErrorRetry(
+            message: l.errorNetwork,
+            onRetry: () => ref.invalidate(orderProvider(orderId)),
+          ),
+          data: (o) {
+            final cancelled = o.status == 'cancelled' || o.status == 'rejected';
+            final stepIndex = _steps.indexOf(o.status);
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Text(
+                  o.merchantName,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
                 ),
-              const SizedBox(height: 16),
-              if (o.tripId != null && o.isActive)
-                FilledButton.icon(
-                  onPressed: () => context.push('${Routes.trip}/${o.tripId}'),
-                  icon: const Icon(Icons.map_rounded),
-                  label: Text(l.trackCourier),
-                ),
-              const Divider(height: 32),
-              for (final item in o.items)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  leading: Text('${item.qty}×'),
-                  title: Text(item.name),
-                  trailing: Text(
-                    'NPR ${(item.unitPrice * item.qty).toStringAsFixed(0)}',
+                const SizedBox(height: 16),
+                if (cancelled)
+                  _Banner(
+                    icon: Icons.cancel_rounded,
+                    label: l.orderCancelled,
+                    color: Theme.of(context).colorScheme.error,
+                  )
+                else
+                  Column(
+                    children: [
+                      for (var i = 0; i < _steps.length; i++)
+                        _Step(
+                          label: _stepLabel(l, _steps[i]),
+                          done: i <= stepIndex,
+                          current: i == stepIndex,
+                          last: i == _steps.length - 1,
+                        ),
+                    ],
                   ),
-                ),
-              const Divider(),
-              _row(l.subtotal, o.subtotal),
-              _row(l.deliveryFee, o.deliveryFee),
-              _row(l.total, o.total, bold: true),
-            ],
-          );
-        },
+                const SizedBox(height: 16),
+                if (o.tripId != null && o.isActive)
+                  FilledButton.icon(
+                    onPressed: () => context.push('${Routes.trip}/${o.tripId}'),
+                    icon: const Icon(Icons.map_rounded),
+                    label: Text(l.trackCourier),
+                  ),
+                const Divider(height: 32),
+                for (final item in o.items)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    leading: Text('${item.qty}×'),
+                    title: Text(item.name),
+                    trailing: Text(
+                      'NPR ${(item.unitPrice * item.qty).toStringAsFixed(0)}',
+                    ),
+                  ),
+                const Divider(),
+                _row(l.subtotal, o.subtotal),
+                _row(l.deliveryFee, o.deliveryFee),
+                _row(l.total, o.total, bold: true),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

@@ -146,6 +146,11 @@ BTRIP=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" -H 'conte
 AGREED=$(echo "$BTRIP" | jq -r '.gross_fare')
 awk -v a="$AGREED" -v f="$FLOOR" 'BEGIN{exit !(a+0==f+0)}' \
   || { echo "  bargain not applied ($AGREED != $FLOOR)"; exit 1; }
+# Just probing the fare math, not actually taking the ride — cancel it so it
+# doesn't trip the one-active-ride guard for the rest of this rider's steps.
+j -X POST "$RIDES/v1/rides/$(echo "$BTRIP" | jq -r '.id')/status" \
+  -H "authorization: Bearer $RTOKEN" -H 'content-type: application/json' \
+  -d '{"status":"cancelled","reason":"smoke test probe"}' >/dev/null
 echo "  algo=$ALGO  band=[$FLOOR, $CEIL]  agreed=$AGREED"
 
 step "surge window (legal-clamped to +20%)"
@@ -448,6 +453,10 @@ done
 BLOCK=$(curl -sS -X POST "$RIDES/v1/rides/$BT/offer/accept" -H "authorization: Bearer $ZTOKEN" | jq -r '.error.code')
 [ "$BLOCK" = "INSUFFICIENT_DRIVER_CREDITS" ] \
   || { echo "  zero-credit driver should be blocked from accepting (got '$BLOCK')"; exit 1; }
+# The blocked offer leaves this trip stuck unaccepted — cancel it so it
+# doesn't trip the one-active-ride guard for this rider's later steps.
+j -X POST "$RIDES/v1/rides/$BT/status" -H "authorization: Bearer $RTOKEN" \
+  -H 'content-type: application/json' -d '{"status":"cancelled","reason":"smoke test probe"}' >/dev/null
 echo "  zero-credit driver blocked from accepting ($BLOCK)"
 
 step "withdrawal rules: payout accounts, weekly fee, idempotent replay"
