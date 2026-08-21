@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/common.dart';
@@ -51,6 +52,8 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
           await ref.read(authControllerProvider.notifier).requestOtp(e164);
       ref.read(devOtpCodeProvider.notifier).state = devCode;
       if (mounted) context.push(Routes.otp, extra: e164);
+    } on ApiException catch (e) {
+      setState(() => _error = e.isNetwork ? l.errorNetwork : e.message);
     } catch (_) {
       setState(() => _error = l.errorNetwork);
     } finally {
