@@ -1,10 +1,18 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/app_config.dart';
 import '../storage/token_store.dart';
+
+/// A fresh key for `X-Idempotency-Key` — generate once per user action (e.g.
+/// when a "place order"/"top up" button is tapped) and reuse it across
+/// retries of *that same* attempt, so a dropped response can't turn one tap
+/// into two charges/orders. Never reuse a key across a genuinely new attempt.
+String newIdempotencyKey() =>
+    '${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(1 << 32)}';
 
 /// A friendly, typed API error surfaced to the UI.
 class ApiException implements Exception {
@@ -115,8 +123,13 @@ class ApiClient {
   Future<dynamic> get(String path, {Map<String, dynamic>? query}) =>
       _send(() => _dio.get<dynamic>(path, queryParameters: query));
 
-  Future<dynamic> post(String path, {Object? body}) =>
-      _send(() => _dio.post<dynamic>(path, data: body));
+  Future<dynamic> post(String path,
+          {Object? body, Map<String, String>? headers}) =>
+      _send(() => _dio.post<dynamic>(
+            path,
+            data: body,
+            options: headers == null ? null : Options(headers: headers),
+          ));
 
   Future<dynamic> put(String path, {Object? body}) =>
       _send(() => _dio.put<dynamic>(path, data: body));

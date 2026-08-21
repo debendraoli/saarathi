@@ -161,6 +161,23 @@ async fn accept_offer(
 
     let mut tx = st.db.begin().await?;
 
+    // One active trip per driver at a time — nothing upstream stops the same
+    // driver being offered two different trips in the sequential-offer race
+    // window, so this is the actual point of enforcement.
+    let already_active: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM trips WHERE driver_id = $1 \
+         AND status IN ('accepted', 'arriving', 'in_progress') LIMIT 1",
+    )
+    .bind(claims.sub)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(other_trip) = already_active {
+        return Err(AppError::conflict(
+            ErrorCode::Conflict,
+            format!("you already have an active trip ({other_trip}) — complete it first"),
+        ));
+    }
+
     let offer: Option<(Uuid,)> = sqlx::query_as(
         "SELECT id FROM trip_offers \
          WHERE trip_id = $1 AND driver_id = $2 AND status = 'offered' AND expires_at > now() \

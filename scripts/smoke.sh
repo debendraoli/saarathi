@@ -622,6 +622,33 @@ NOZONE=$(j "$MERCHANT/v1/merchant/zone/00000000-0000-0000-0000-000000000000/cont
 [ "$NOZONE" = "false" ] || { echo "  undefined zone should report zone_defined=false (got $NOZONE)"; exit 1; }
 echo "  zone cached as $ZCELLS H3 cells; interior=in, ~50km away=out, undefined merchant=zone_defined:false"
 
+step "marketplace order: geofence-bounded visibility + idempotent placement"
+ITEMID=$(j -X POST "$MERCHANT/v1/merchant/menu" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d "{\"merchant_id\":\"$MID\",\"name\":\"Momo\",\"price\":150}" | jq -r '.id')
+[ -n "$ITEMID" ] && [ "$ITEMID" != "null" ] || { echo "  menu item creation failed"; exit 1; }
+VISIBLE_IN=$(j "$MERCHANT/v1/merchants?lat=28.035&lng=82.485" -H "authorization: Bearer $RTOKEN" \
+  | jq --arg m "$MID" '[.[] | select(.id==$m)] | length')
+[ "$VISIBLE_IN" -eq 1 ] || { echo "  merchant should be visible from inside its zone"; exit 1; }
+VISIBLE_OUT=$(j "$MERCHANT/v1/merchants?lat=28.5&lng=83.0" -H "authorization: Bearer $RTOKEN" \
+  | jq --arg m "$MID" '[.[] | select(.id==$m)] | length')
+[ "$VISIBLE_OUT" -eq 0 ] || { echo "  merchant should be hidden outside its zone"; exit 1; }
+ORDBODY="{\"merchant_id\":\"$MID\",\"items\":[{\"menu_item_id\":\"$ITEMID\",\"qty\":2}],\"delivery\":{\"lat\":28.035,\"lng\":82.485},\"payment_method\":\"cash\"}"
+IDEMKEY=$(idem)
+OID1=$(j -X POST "$MERCHANT/v1/orders" -H "authorization: Bearer $RTOKEN" -H "x-idempotency-key: $IDEMKEY" \
+  -H 'content-type: application/json' -d "$ORDBODY" | jq -r '.order.id')
+[ -n "$OID1" ] && [ "$OID1" != "null" ] || { echo "  order placement failed"; exit 1; }
+OID2=$(j -X POST "$MERCHANT/v1/orders" -H "authorization: Bearer $RTOKEN" -H "x-idempotency-key: $IDEMKEY" \
+  -H 'content-type: application/json' -d "$ORDBODY" | jq -r '.order.id')
+[ "$OID1" = "$OID2" ] || { echo "  replayed order should return the same id ($OID1 != $OID2)"; exit 1; }
+ORDCOUNT=$(j "$MERCHANT/v1/orders" -H "authorization: Bearer $RTOKEN" | jq --arg m "$MID" '[.[] | select(.merchant_id==$m)] | length')
+[ "$ORDCOUNT" -eq 1 ] || { echo "  idempotency key replay created a duplicate order (count=$ORDCOUNT)"; exit 1; }
+OUTZONE_BODY="{\"merchant_id\":\"$MID\",\"items\":[{\"menu_item_id\":\"$ITEMID\",\"qty\":1}],\"delivery\":{\"lat\":28.5,\"lng\":83.0},\"payment_method\":\"cash\"}"
+ZONEREJECT=$(curl -sS -w "|%{http_code}" -X POST "$MERCHANT/v1/orders" -H "authorization: Bearer $RTOKEN" -H "x-idempotency-key: $(idem)" \
+  -H 'content-type: application/json' -d "$OUTZONE_BODY" | tail -c 4)
+[ "$ZONEREJECT" = "|400" ] || { echo "  order to an out-of-zone address should be rejected (got $ZONEREJECT)"; exit 1; }
+echo "  merchant visible in-zone/hidden out-of-zone; order $OID1 idempotent replay -> same id; out-of-zone order rejected"
+
 step "dynamic rule-based campaign (new-customer only)"
 j -X POST "$CAMPAIGNS/v1/admin/campaigns" -H "authorization: Bearer $ADMIN_TOKEN" \
   -H 'content-type: application/json' \

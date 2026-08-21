@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/location.dart';
+import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
@@ -67,16 +68,31 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     final cart = ref.read(cartControllerProvider);
     if (cart.isEmpty || cart.merchantId == null || _delivery == null) return;
     setState(() => _busy = true);
+    // One key per tap: a dropped response can safely retry same-key without
+    // risking a duplicate order, but a fresh tap after a real failure gets a
+    // fresh key (see newIdempotencyKey's doc).
+    final idemKey = newIdempotencyKey();
     try {
       final order = await ref.read(marketplaceRepositoryProvider).placeOrder(
             merchantId: cart.merchantId!,
             lines: cart.orderLines,
             delivery: _delivery!,
+            idempotencyKey: idemKey,
             note: _note.text.trim(),
             paymentMethod: _payment,
           );
       ref.read(cartControllerProvider.notifier).clear();
       if (mounted) context.go('${Routes.order}/${order.id}');
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              e.isNetwork ? AppL10n.of(context).errorNetwork : e.message,
+            ),
+          ),
+        );
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(

@@ -59,11 +59,13 @@ class MarketplaceRepository {
     required String merchantId,
     required Map<String, int> lines, // menu_item_id -> qty
     required LatLng delivery,
+    required String idempotencyKey,
     String? note,
     String paymentMethod = 'cash',
   }) async {
     final res = await _api.post(
       '/v1/orders',
+      headers: {'x-idempotency-key': idempotencyKey},
       body: {
         'merchant_id': merchantId,
         'items': [
@@ -112,8 +114,7 @@ final merchantsProvider =
   return ref.watch(marketplaceRepositoryProvider).merchants(vertical, null);
 });
 
-final myOrdersProvider =
-    FutureProvider.autoDispose<List<CustomerOrder>>((ref) {
+final myOrdersProvider = FutureProvider.autoDispose<List<CustomerOrder>>((ref) {
   return ref.watch(marketplaceRepositoryProvider).myOrders();
 });
 

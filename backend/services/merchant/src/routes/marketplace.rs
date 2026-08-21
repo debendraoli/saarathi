@@ -10,11 +10,13 @@ use crate::error::{AppError, AppResult};
 use crate::routes::zone;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use axum::{
     routing::{get, post},
     Json, Router,
 };
 use rust_decimal::Decimal;
+use saarathi_core::idempotency::{self, Reservation};
 use saarathi_core::routing::{LatLng, RouteProfile};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -245,8 +247,31 @@ struct PlaceOrder {
 async fn place_order(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
+    headers: HeaderMap,
     Json(body): Json<PlaceOrder>,
 ) -> AppResult<Json<Value>> {
+    // A dropped response (flaky network) shouldn't turn one tap of "place
+    // order" into two orders — same idempotency-key protocol as rides/payments.
+    let idem_key = headers
+        .get("x-idempotency-key")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            AppError::BadRequest("X-Idempotency-Key header is required".into())
+        })?
+        .to_string();
+    let mut reserve_tx = st.db.begin().await?;
+    let reservation = idempotency::reserve(&mut reserve_tx, &idem_key, claims.sub, "marketplace.place_order")
+        .await
+        .map_err(anyhow::Error::from)
+        .map_err(AppError::Other)?;
+    reserve_tx.commit().await?;
+    if let Reservation::Replay { body, .. } = reservation {
+        let order_id: Uuid = serde_json::from_value(body["id"].clone())
+            .map_err(|e| AppError::Other(e.into()))?;
+        return order_json(&st, order_id, claims.sub, false).await;
+    }
+
     if body.items.is_empty() {
         return Err(AppError::BadRequest("order has no items".into()));
     }
@@ -346,6 +371,17 @@ async fn place_order(
         .execute(&mut *tx)
         .await?;
     }
+    idempotency::store(
+        &mut tx,
+        &idem_key,
+        claims.sub,
+        "marketplace.place_order",
+        200,
+        &json!({ "id": order_id }),
+    )
+    .await
+    .map_err(anyhow::Error::from)
+    .map_err(AppError::Other)?;
     tx.commit().await?;
 
     order_json(&st, order_id, claims.sub, false).await
