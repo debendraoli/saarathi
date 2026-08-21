@@ -1,16 +1,29 @@
 //! Geocoding proxy for address autocomplete + reverse lookup. Wraps a Photon
 //! instance (self-hosted in prod, public komoot for dev — GEOCODER_URL). Results
 //! degrade gracefully to an empty list so the search box never errors out.
+//!
+//! Reverse lookups are cached in Redis by H3 resolution-9 cell (~174m² hex —
+//! reuses the platform's existing spatial index rather than inventing a
+//! rounding scheme) so GPS breadcrumb trails, which revisit the same
+//! neighborhood repeatedly, don't hit the upstream geocoder per point.
+//! Misses are cached too (as an empty marker) so a point with no address
+//! doesn't get re-queried on every repeat visit either.
 
 use crate::auth::AuthUser;
 use crate::error::AppResult;
 use crate::state::AppState;
-use axum::extract::Query;
+use axum::extract::{Query, State};
 use axum::{routing::get, Json, Router};
+use saarathi_core::geo_h3::cell_for;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::OnceLock;
 use std::time::Duration;
+
+/// Addresses don't move; 30 days is a self-healing backstop, not the primary
+/// invalidation mechanism (there isn't one — reverse-geocode results are
+/// treated as effectively immutable).
+const REVERSE_CACHE_TTL_SECS: i64 = 30 * 24 * 3600;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -37,7 +50,7 @@ fn geocoder_url() -> String {
         .to_string()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct GeoPlace {
     label: String,
     address: String,
@@ -81,16 +94,50 @@ struct ReverseQuery {
     lng: f64,
 }
 
+fn reverse_cache_key(lat: f64, lng: f64) -> Option<String> {
+    let cell = cell_for(lat, lng).ok()?;
+    Some(format!("geo:reverse:{}", u64::from(cell)))
+}
+
 async fn reverse(
+    State(st): State<AppState>,
     _auth: AuthUser,
     Query(q): Query<ReverseQuery>,
 ) -> AppResult<Json<Option<GeoPlace>>> {
+    let key = reverse_cache_key(q.lat, q.lng);
+    if let Some(key) = &key {
+        let mut r = st.redis.clone();
+        if let Ok(cached) = redis::cmd("GET")
+            .arg(key)
+            .query_async::<Option<String>>(&mut r)
+            .await
+        {
+            if let Some(raw) = cached {
+                let place: Option<GeoPlace> = serde_json::from_str(&raw).unwrap_or(None);
+                return Ok(Json(place));
+            }
+        }
+    }
+
     let params: Vec<(&str, String)> = vec![("lat", q.lat.to_string()), ("lon", q.lng.to_string())];
     let place = fetch(&format!("{}/reverse", geocoder_url()), &params)
         .await
         .unwrap_or_default()
         .into_iter()
         .next();
+
+    if let Some(key) = &key {
+        let mut r = st.redis.clone();
+        if let Ok(raw) = serde_json::to_string(&place) {
+            let _: Result<(), _> = redis::cmd("SET")
+                .arg(key)
+                .arg(raw)
+                .arg("EX")
+                .arg(REVERSE_CACHE_TTL_SECS)
+                .query_async::<()>(&mut r)
+                .await;
+        }
+    }
     Ok(Json(place))
 }
 

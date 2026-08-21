@@ -58,6 +58,10 @@ class DriverKycRepository {
     final res = await _api.get('/v1/driver/status');
     return DriverKyc.fromJson(res as Map<String, dynamic>);
   }
+
+  /// Gated server-side on every [DocKind] being uploaded; moves the driver
+  /// from `pending` (not yet in the staff queue) to `under_review`.
+  Future<void> submit() => _api.post('/v1/driver/kyc/submit');
 }
 
 final driverKycRepositoryProvider = Provider<DriverKycRepository>((ref) {

@@ -53,7 +53,9 @@ async fn list_drivers(
     _staff: StaffUser,
     Query(q): Query<ListQuery>,
 ) -> AppResult<Json<Vec<DriverListItem>>> {
-    // Default to the actionable queue (pending + under_review).
+    // Default to the actionable queue — `pending` means the driver hasn't
+    // finished uploading documents and submitted yet (see POST
+    // /v1/driver/kyc/submit), so it's deliberately excluded here.
     let status_filter = q.status.unwrap_or_else(|| "queue".into());
 
     let base = "SELECT d.id, d.user_id, d.kyc_status, u.full_name, u.phone, \
@@ -62,7 +64,7 @@ async fn list_drivers(
 
     let items: Vec<DriverListItem> = if status_filter == "queue" {
         sqlx::query_as(&format!(
-            "{base} WHERE d.kyc_status IN ('pending','under_review') ORDER BY d.created_at",
+            "{base} WHERE d.kyc_status = 'under_review' ORDER BY d.created_at",
         ))
         .fetch_all(&st.db)
         .await?

@@ -21,6 +21,7 @@ http:
       rule: >-
         PathPrefix(`/v1/auth`) || Path(`/v1/me`) || PathPrefix(`/v1/me/`)
         || PathPrefix(`/v1/driver/register`) || PathPrefix(`/v1/driver/documents`) || PathPrefix(`/v1/driver/status`)
+        || PathPrefix(`/v1/driver/kyc`)
         || PathPrefix(`/v1/admin/drivers`) || PathPrefix(`/v1/admin/documents`)
 
     rides:

@@ -141,8 +141,11 @@
   "decline": "Decline",
   "pickupPassenger": "Pick up passenger",
 
-  "kycPending": "Verification pending",
-  "kycPendingBody": "Your documents are under review. We'll notify you once approved.",
+  "kycPending": "Documents incomplete",
+  "kycPendingBody": "Upload every document below, then submit for review.",
+  "kycSubmitForReview": "Submit for review",
+  "kycDocsRemaining": "{count} more document(s) to upload",
+  "@kycDocsRemaining": { "placeholders": { "count": {} } },
 
   "sosSent": "Emergency alert sent",
   "shareTrip": "Share trip",

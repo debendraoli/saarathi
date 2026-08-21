@@ -7,6 +7,7 @@
 
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
+use crate::routes::zone;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::{
@@ -117,7 +118,20 @@ async fn list_merchants(
     .bind(q.vertical)
     .fetch_all(&st.db)
     .await?;
-    Ok(Json(rows))
+
+    // Visibility is bounded by each merchant's delivery geofence (Phase 2's H3
+    // polyfill cache) — a merchant with no zone defined is unbounded/visible
+    // everywhere, matching `is_point_in_zone`'s None-means-unset semantics.
+    let mut visible = Vec::with_capacity(rows.len());
+    for m in rows {
+        let in_zone = zone::is_point_in_zone(&st, m.id, lat, lng)
+            .await
+            .map_err(AppError::Other)?;
+        if in_zone != Some(false) {
+            visible.push(m);
+        }
+    }
+    Ok(Json(visible))
 }
 
 // ── Cross-merchant item search ───────────────────────────────────────────────
@@ -251,6 +265,14 @@ async fn place_order(
             .ok_or(AppError::NotFound)?;
     if !merchant.2 {
         return Err(AppError::BadRequest("merchant is closed".into()));
+    }
+    let in_zone = zone::is_point_in_zone(&st, body.merchant_id, body.delivery.lat, body.delivery.lng)
+        .await
+        .map_err(AppError::Other)?;
+    if in_zone == Some(false) {
+        return Err(AppError::BadRequest(
+            "delivery address is outside this merchant's delivery zone".into(),
+        ));
     }
 
     // Price from the DB — never trust client-supplied prices.

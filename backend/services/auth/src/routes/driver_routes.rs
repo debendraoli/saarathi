@@ -18,6 +18,63 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/driver/register", post(register))
         .route("/v1/driver/documents", post(upload_document))
         .route("/v1/driver/status", get(status))
+        .route("/v1/driver/kyc/submit", post(submit_kyc))
+}
+
+/// Every document kind a driver must upload before their KYC can be reviewed —
+/// mirrors the app's `DocKind.values` list.
+const REQUIRED_DOC_KINDS: [&str; 7] = [
+    "profile_photo",
+    "citizenship_front",
+    "citizenship_back",
+    "license",
+    "bluebook",
+    "vehicle_photo",
+    "insurance",
+];
+
+/// Gates KYC review on document completeness: a driver stays `pending` (kept
+/// out of the staff queue) until they've uploaded every required document and
+/// explicitly submit, at which point this flips them to `under_review`.
+/// Re-submission after a rejection is allowed once the flagged issue is fixed.
+async fn submit_kyc(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<Driver>> {
+    let driver_id: Uuid = sqlx::query_scalar("SELECT id FROM drivers WHERE user_id = $1")
+        .bind(claims.sub)
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("register as a driver first".into()))?;
+
+    let uploaded: Vec<String> =
+        sqlx::query_scalar("SELECT DISTINCT kind::text FROM driver_documents WHERE driver_id = $1")
+            .bind(driver_id)
+            .fetch_all(&st.db)
+            .await?;
+    let missing: Vec<&str> = REQUIRED_DOC_KINDS
+        .into_iter()
+        .filter(|k| !uploaded.iter().any(|u| u == k))
+        .collect();
+    if !missing.is_empty() {
+        return Err(AppError::bad(
+            ErrorCode::Validation,
+            format!("missing required documents: {}", missing.join(", ")),
+        ));
+    }
+
+    let driver: Driver = sqlx::query_as(
+        "UPDATE drivers SET kyc_status = 'under_review', rejection_reason = NULL \
+         WHERE id = $1 AND kyc_status IN ('pending', 'rejected') \
+         RETURNING id, user_id, kyc_status, license_number, date_of_birth, address, \
+                   rejection_reason, reviewed_by, reviewed_at, approved_at, created_at, updated_at",
+    )
+    .bind(driver_id)
+    .fetch_optional(&st.db)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("already submitted or reviewed".into()))?;
+
+    Ok(Json(driver))
 }
 
 #[derive(Deserialize)]
@@ -212,6 +269,8 @@ async fn status(
 fn parse_kind(s: &str) -> Result<DocumentKind, AppError> {
     Ok(match s {
         "citizenship" => DocumentKind::Citizenship,
+        "citizenship_front" => DocumentKind::CitizenshipFront,
+        "citizenship_back" => DocumentKind::CitizenshipBack,
         "license" => DocumentKind::License,
         "bluebook" => DocumentKind::Bluebook,
         "vehicle_fitness" => DocumentKind::VehicleFitness,

@@ -28,11 +28,34 @@ String docLabel(DocKind k) {
   }
 }
 
-class KycDocumentsScreen extends ConsumerWidget {
+class KycDocumentsScreen extends ConsumerStatefulWidget {
   const KycDocumentsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<KycDocumentsScreen> createState() =>
+      _KycDocumentsScreenState();
+}
+
+class _KycDocumentsScreenState extends ConsumerState<KycDocumentsScreen> {
+  bool _submitting = false;
+
+  Future<void> _submit() async {
+    setState(() => _submitting = true);
+    try {
+      await ref.read(driverKycRepositoryProvider).submit();
+      ref.invalidate(driverKycProvider);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppL10n.of(context).errorGeneric)));
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final kyc = ref.watch(driverKycProvider);
 
@@ -44,24 +67,53 @@ class KycDocumentsScreen extends ConsumerWidget {
           message: l.errorNetwork,
           onRetry: () => ref.invalidate(driverKycProvider),
         ),
-        data: (data) => ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _StatusBanner(status: data.status, reason: data.rejectionReason),
-            const SizedBox(height: 16),
-            for (final kind in DocKind.values)
-              _DocRow(
-                kind: kind,
-                uploaded: data.uploadedKinds.contains(kind.wire),
-              ),
-            const SizedBox(height: 24),
-            if (data.status == KycStatus.approved)
-              FilledButton(
-                onPressed: () => context.go(Routes.home),
-                child: Text(l.actionDone),
-              ),
-          ],
-        ),
+        data: (data) {
+          final missing = DocKind.values
+              .where((k) => !data.uploadedKinds.contains(k.wire))
+              .length;
+          final canSubmit = missing == 0 &&
+              (data.status == KycStatus.pending ||
+                  data.status == KycStatus.rejected);
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _StatusBanner(status: data.status, reason: data.rejectionReason),
+              const SizedBox(height: 16),
+              for (final kind in DocKind.values)
+                _DocRow(
+                  kind: kind,
+                  uploaded: data.uploadedKinds.contains(kind.wire),
+                ),
+              const SizedBox(height: 24),
+              if (data.status == KycStatus.approved)
+                FilledButton(
+                  onPressed: () => context.go(Routes.home),
+                  child: Text(l.actionDone),
+                )
+              else if (data.status == KycStatus.pending ||
+                  data.status == KycStatus.rejected) ...[
+                if (!canSubmit)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      l.kycDocsRemaining(missing),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                FilledButton(
+                  onPressed: canSubmit && !_submitting ? _submit : null,
+                  child: _submitting
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2.2),
+                        )
+                      : Text(l.kycSubmitForReview),
+                ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -86,8 +138,14 @@ class _StatusBanner extends StatelessWidget {
       KycStatus.rejected => (
           Icons.error_rounded,
           l.kycRejected,
-          reason ?? l.kycUnderReviewBody,
+          reason ?? l.kycPendingBody,
           scheme.error,
+        ),
+      KycStatus.pending => (
+          Icons.upload_file_rounded,
+          l.kycPending,
+          l.kycPendingBody,
+          scheme.tertiary,
         ),
       _ => (
           Icons.hourglass_top_rounded,
