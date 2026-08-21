@@ -60,8 +60,9 @@ class _StoreCardState extends ConsumerState<_StoreCard> {
   Future<void> _toggle(bool value) async {
     setState(() => _busy = true);
     try {
-      final now =
-          await ref.read(merchantRepositoryProvider).setOpen(widget.merchant.id, value);
+      final now = await ref
+          .read(merchantRepositoryProvider)
+          .setOpen(widget.merchant.id, value);
       if (mounted) setState(() => _open = now);
     } catch (_) {
       if (mounted) {

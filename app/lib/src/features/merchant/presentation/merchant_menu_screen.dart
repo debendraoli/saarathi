@@ -105,7 +105,9 @@ class _ItemTileState extends ConsumerState<_ItemTile> {
       ),
       trailing: _busy
           ? const SizedBox(
-              width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2))
           : Switch(value: _available, onChanged: _toggle),
     );
   }
@@ -171,7 +173,8 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(l.merchantAddItem, style: Theme.of(context).textTheme.titleLarge),
+          Text(l.merchantAddItem,
+              style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 12),
           TextField(
             controller: _name,
@@ -202,7 +205,9 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
             onPressed: _busy ? null : _submit,
             child: _busy
                 ? const SizedBox(
-                    width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
                 : Text(l.merchantAddItem),
           ),
         ],

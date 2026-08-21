@@ -151,8 +151,7 @@ class _AddressSearchScreenState extends ConsumerState<AddressSearchScreen> {
               near: _near,
               allowMap: widget.allowMap,
               onCurrent: _useCurrentLocation,
-              onMap: () =>
-                  Navigator.of(context).pop(const AddressPick.map()),
+              onMap: () => Navigator.of(context).pop(const AddressPick.map()),
               onPick: _select,
               distanceKm: _distanceKm,
             ),

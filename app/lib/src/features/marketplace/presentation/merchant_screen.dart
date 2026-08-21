@@ -5,6 +5,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../application/cart_controller.dart';
 import '../data/marketplace_repository.dart';
 import '../domain/models.dart';
@@ -26,7 +27,7 @@ class MerchantScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: Text(merchant.name)),
       body: detail.when(
-        loading: () => const LoadingView(),
+        loading: () => const SkeletonList(),
         error: (_, __) => ErrorRetry(
           message: l.errorNetwork,
           onRetry: () => ref.invalidate(merchantDetailProvider(merchant.id)),
@@ -36,7 +37,9 @@ class MerchantScreen extends ConsumerWidget {
           final items = data.$2;
           final grouped = <String, List<MenuItem>>{};
           for (final it in items) {
-            grouped.putIfAbsent(it.category ?? l.merchantMenu, () => []).add(it);
+            grouped
+                .putIfAbsent(it.category ?? l.merchantMenu, () => [])
+                .add(it);
           }
           // Flatten header + category sections + items into one bounded list.
           final rows = <Widget>[_Header(merchant: loaded)];
@@ -376,8 +379,8 @@ class _CartBadge extends StatelessWidget {
         color: scheme.onPrimary.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text('$count',
-          style: const TextStyle(fontWeight: FontWeight.w800)),
+      child:
+          Text('$count', style: const TextStyle(fontWeight: FontWeight.w800)),
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../data/marketplace_repository.dart';
 import '../domain/models.dart';
 import 'item_search_screen.dart';
@@ -39,7 +40,7 @@ class MarketplaceScreen extends ConsumerWidget {
         ],
       ),
       body: merchants.when(
-        loading: () => const LoadingView(),
+        loading: () => const SkeletonList(padding: EdgeInsets.all(12)),
         error: (_, __) => ErrorRetry(
           message: l.errorNetwork,
           onRetry: () => ref.invalidate(merchantsProvider(_vertical)),

@@ -88,8 +88,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     );
     if (pick?.hit == null || !mounted) return;
     final hit = pick!.hit!;
-    setState(() =>
-        _stops.add(Place(point: hit.point, label: hit.label)));
+    setState(() => _stops.add(Place(point: hit.point, label: hit.label)));
     _mapController.move(hit.point, 15);
   }
 
@@ -406,7 +405,8 @@ class _VehicleCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Material(
-      color: selected ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+      color:
+          selected ? scheme.primaryContainer : scheme.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: onTap,
@@ -426,7 +426,9 @@ class _VehicleCard extends StatelessWidget {
               Icon(
                 icon,
                 size: 28,
-                color: selected ? scheme.onPrimaryContainer : scheme.onSurfaceVariant,
+                color: selected
+                    ? scheme.onPrimaryContainer
+                    : scheme.onSurfaceVariant,
               ),
               const SizedBox(height: 6),
               Text(
@@ -434,7 +436,8 @@ class _VehicleCard extends StatelessWidget {
                 style: TextStyle(
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   fontSize: 12.5,
-                  color: selected ? scheme.onPrimaryContainer : scheme.onSurface,
+                  color:
+                      selected ? scheme.onPrimaryContainer : scheme.onSurface,
                 ),
               ),
             ],

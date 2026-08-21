@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
 import '../data/driver_kyc_repository.dart';
 import '../domain/models.dart';
@@ -32,8 +33,7 @@ class KycDocumentsScreen extends ConsumerStatefulWidget {
   const KycDocumentsScreen({super.key});
 
   @override
-  ConsumerState<KycDocumentsScreen> createState() =>
-      _KycDocumentsScreenState();
+  ConsumerState<KycDocumentsScreen> createState() => _KycDocumentsScreenState();
 }
 
 class _KycDocumentsScreenState extends ConsumerState<KycDocumentsScreen> {
@@ -43,8 +43,10 @@ class _KycDocumentsScreenState extends ConsumerState<KycDocumentsScreen> {
     setState(() => _submitting = true);
     try {
       await ref.read(driverKycRepositoryProvider).submit();
+      Haptics.success();
       ref.invalidate(driverKycProvider);
     } catch (_) {
+      Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(AppL10n.of(context).errorGeneric)));

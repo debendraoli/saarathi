@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../shared/haptics.dart';
 import '../application/auth_controller.dart';
 
 /// Carries the dev-mode OTP from the request step so we can prefill it in dev.
@@ -48,9 +49,12 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
           .read(authControllerProvider.notifier)
           .verifyOtp(widget.phone, _controller.text.trim());
       // Router redirect takes over on success.
+      Haptics.success();
     } on ApiException catch (e) {
+      Haptics.error();
       setState(() => _error = e.isNetwork ? l.errorNetwork : e.message);
     } catch (_) {
+      Haptics.error();
       setState(() => _error = l.otpInvalid);
     } finally {
       if (mounted) setState(() => _busy = false);

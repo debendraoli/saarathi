@@ -7,6 +7,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 import '../../../core/location.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
 import '../application/cart_controller.dart';
@@ -82,8 +83,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             paymentMethod: _payment,
           );
       ref.read(cartControllerProvider.notifier).clear();
+      Haptics.success();
       if (mounted) context.go('${Routes.order}/${order.id}');
     } on ApiException catch (e) {
+      Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

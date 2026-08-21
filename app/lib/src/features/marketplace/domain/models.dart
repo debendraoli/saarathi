@@ -123,9 +123,8 @@ class ItemResult {
         rating: asDouble(j['rating']),
         description: j['description'] as String?,
         imageUrl: _asImageUrl(j['image_key']),
-        distanceKm: j['distance_m'] == null
-            ? null
-            : asDouble(j['distance_m']) / 1000.0,
+        distanceKm:
+            j['distance_m'] == null ? null : asDouble(j['distance_m']) / 1000.0,
       );
 }
 
@@ -183,7 +182,7 @@ class CustomerOrder {
         subtotal: asDouble(j['subtotal']),
         deliveryFee: asDouble(j['delivery_fee']),
         total: asDouble(j['total']),
-    merchantId: j['merchant_id'] as String?,
+        merchantId: j['merchant_id'] as String?,
         tripId: j['trip_id'] as String?,
         items: items,
         createdAt: DateTime.tryParse((j['created_at'] as String?) ?? ''),

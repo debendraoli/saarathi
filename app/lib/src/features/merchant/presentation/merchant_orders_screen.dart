@@ -129,7 +129,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   Future<void> _advance(String status) async {
     setState(() => _busy = true);
     try {
-      await ref.read(merchantRepositoryProvider).advance(widget.order.id, status);
+      await ref
+          .read(merchantRepositoryProvider)
+          .advance(widget.order.id, status);
       ref.invalidate(merchantOrdersProvider(widget.merchantId));
     } catch (_) {
       if (mounted) {
@@ -193,8 +195,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                           ? const SizedBox(
                               width: 18,
                               height: 18,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : Text(next.$2),
                     ),

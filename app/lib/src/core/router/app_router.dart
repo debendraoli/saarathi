@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -59,6 +59,33 @@ class Routes {
   static const merchantMenu = '/store/menu';
 }
 
+/// One consistent motion language for every screen transition (Material's
+/// "shared axis" pattern: fade + a short upward drift) instead of go_router's
+/// default abrupt platform swap — applied at the router level so every route
+/// gets it for free, no per-screen wiring.
+CustomTransitionPage<void> _page(Widget child, {required LocalKey key}) {
+  return CustomTransitionPage<void>(
+    key: key,
+    child: child,
+    transitionDuration: const Duration(milliseconds: 260),
+    reverseTransitionDuration: const Duration(milliseconds: 200),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final curved =
+          CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+      return FadeTransition(
+        opacity: curved,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.03),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
 /// Bridges Riverpod state changes to go_router's redirect re-evaluation.
 class _RouterRefresh extends ChangeNotifier {
   _RouterRefresh(Ref ref) {
@@ -95,87 +122,148 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(path: Routes.splash, builder: (_, __) => const SplashScreen()),
-      GoRoute(path: Routes.intro, builder: (_, __) => const IntroScreen()),
-      GoRoute(path: Routes.login, builder: (_, __) => const PhoneScreen()),
+      GoRoute(
+        path: Routes.splash,
+        pageBuilder: (_, state) =>
+            _page(const SplashScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.intro,
+        pageBuilder: (_, state) =>
+            _page(const IntroScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.login,
+        pageBuilder: (_, state) =>
+            _page(const PhoneScreen(), key: state.pageKey),
+      ),
       GoRoute(
         path: Routes.otp,
-        builder: (_, state) => OtpScreen(phone: state.extra as String? ?? ''),
+        pageBuilder: (_, state) => _page(
+          OtpScreen(phone: state.extra as String? ?? ''),
+          key: state.pageKey,
+        ),
       ),
-      GoRoute(path: Routes.home, builder: (_, __) => const HomeShell()),
+      GoRoute(
+        path: Routes.home,
+        pageBuilder: (_, state) => _page(const HomeShell(), key: state.pageKey),
+      ),
       GoRoute(
         path: Routes.whereTo,
-        builder: (_, state) =>
-            WhereToScreen(initialDest: state.extra as PlaceHit?),
+        pageBuilder: (_, state) => _page(
+          WhereToScreen(initialDest: state.extra as PlaceHit?),
+          key: state.pageKey,
+        ),
       ),
       GoRoute(
         path: Routes.confirm,
-        builder: (_, state) =>
-            ConfirmRideScreen(draft: state.extra as RideDraft),
+        pageBuilder: (_, state) => _page(
+          ConfirmRideScreen(draft: state.extra as RideDraft),
+          key: state.pageKey,
+        ),
       ),
       GoRoute(
         path: '${Routes.trip}/:id',
-        builder: (_, state) => TripScreen(tripId: state.pathParameters['id']!),
+        pageBuilder: (_, state) => _page(
+          TripScreen(tripId: state.pathParameters['id']!),
+          key: state.pageKey,
+        ),
       ),
       GoRoute(
-          path: Routes.becomeDriver,
-          builder: (_, __) => const BecomeDriverScreen()),
-      GoRoute(path: Routes.kyc, builder: (_, __) => const KycDocumentsScreen()),
-      GoRoute(path: Routes.parcel, builder: (_, __) => const ParcelScreen()),
+        path: Routes.becomeDriver,
+        pageBuilder: (_, state) =>
+            _page(const BecomeDriverScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.kyc,
+        pageBuilder: (_, state) =>
+            _page(const KycDocumentsScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.parcel,
+        pageBuilder: (_, state) =>
+            _page(const ParcelScreen(), key: state.pageKey),
+      ),
       GoRoute(
         path: Routes.chat,
-        builder: (_, state) => ChatScreen(tripId: state.extra as String),
+        pageBuilder: (_, state) => _page(
+          ChatScreen(tripId: state.extra as String),
+          key: state.pageKey,
+        ),
       ),
       GoRoute(
         path: Routes.call,
-        builder: (_, state) => CallScreen(args: state.extra as CallArgs),
+        pageBuilder: (_, state) => _page(
+          CallScreen(args: state.extra as CallArgs),
+          key: state.pageKey,
+        ),
       ),
       GoRoute(
-          path: Routes.notifications,
-          builder: (_, __) => const NotificationsScreen()),
+        path: Routes.notifications,
+        pageBuilder: (_, state) =>
+            _page(const NotificationsScreen(), key: state.pageKey),
+      ),
       GoRoute(
-          path: Routes.savedPlaces,
-          builder: (_, __) => const SavedPlacesScreen()),
+        path: Routes.savedPlaces,
+        pageBuilder: (_, state) =>
+            _page(const SavedPlacesScreen(), key: state.pageKey),
+      ),
       GoRoute(
         path: Routes.food,
-        builder: (_, __) => const MarketplaceScreen(kind: MarketplaceKind.food),
+        pageBuilder: (_, state) => _page(
+          const MarketplaceScreen(kind: MarketplaceKind.food),
+          key: state.pageKey,
+        ),
       ),
       GoRoute(
         path: Routes.grocery,
-        builder: (_, __) =>
-            const MarketplaceScreen(kind: MarketplaceKind.grocery),
+        pageBuilder: (_, state) => _page(
+          const MarketplaceScreen(kind: MarketplaceKind.grocery),
+          key: state.pageKey,
+        ),
       ),
       GoRoute(
         path: Routes.merchant,
-        builder: (_, state) =>
-            MerchantScreen(merchant: state.extra as Merchant),
+        pageBuilder: (_, state) => _page(
+          MerchantScreen(merchant: state.extra as Merchant),
+          key: state.pageKey,
+        ),
       ),
       GoRoute(
         path: Routes.checkout,
-        builder: (_, __) => const CheckoutScreen(),
+        pageBuilder: (_, state) =>
+            _page(const CheckoutScreen(), key: state.pageKey),
       ),
       GoRoute(
         path: '${Routes.order}/:id',
-        builder: (_, state) =>
-            OrderScreen(orderId: state.pathParameters['id']!),
+        pageBuilder: (_, state) => _page(
+          OrderScreen(orderId: state.pathParameters['id']!),
+          key: state.pageKey,
+        ),
       ),
       GoRoute(
         path: Routes.merchantDashboard,
-        builder: (_, __) => const MerchantDashboardScreen(),
+        pageBuilder: (_, state) =>
+            _page(const MerchantDashboardScreen(), key: state.pageKey),
       ),
       GoRoute(
         path: Routes.merchantOnboarding,
-        builder: (_, __) => const MerchantOnboardingScreen(),
+        pageBuilder: (_, state) =>
+            _page(const MerchantOnboardingScreen(), key: state.pageKey),
       ),
       GoRoute(
         path: Routes.merchantOrders,
-        builder: (_, state) =>
-            MerchantOrdersScreen(merchant: state.extra as Merchant),
+        pageBuilder: (_, state) => _page(
+          MerchantOrdersScreen(merchant: state.extra as Merchant),
+          key: state.pageKey,
+        ),
       ),
       GoRoute(
         path: Routes.merchantMenu,
-        builder: (_, state) =>
-            MerchantMenuScreen(merchant: state.extra as Merchant),
+        pageBuilder: (_, state) => _page(
+          MerchantMenuScreen(merchant: state.extra as Merchant),
+          key: state.pageKey,
+        ),
       ),
     ],
   );

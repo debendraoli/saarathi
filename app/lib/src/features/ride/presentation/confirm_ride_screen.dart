@@ -5,6 +5,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
 import '../application/ride_controller.dart';
 import '../data/ride_repository.dart';
@@ -29,8 +30,10 @@ class _ConfirmRideScreenState extends ConsumerState<ConfirmRideScreen> {
     try {
       final draft = widget.draft.copyWith(paymentMethod: _payment);
       final trip = await ref.read(rideRepositoryProvider).book(draft);
+      Haptics.success();
       if (mounted) context.go('${Routes.trip}/${trip.id}');
     } on ApiException catch (e) {
+      Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -41,6 +44,7 @@ class _ConfirmRideScreenState extends ConsumerState<ConfirmRideScreen> {
         );
       }
     } catch (_) {
+      Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(AppL10n.of(context).errorGeneric)),

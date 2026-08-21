@@ -5,6 +5,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/foreground/driver_foreground_service.dart';
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
 import '../../driver/application/driver_controller.dart';
 import '../../driver/data/driver_kyc_repository.dart';
@@ -91,8 +92,10 @@ class _OnlineBoard extends ConsumerWidget {
         _OnlineCard(
           online: status.online,
           busy: status.busy,
-          onToggle: () =>
-              ref.read(driverControllerProvider.notifier).toggleOnline(),
+          onToggle: () {
+            Haptics.success();
+            ref.read(driverControllerProvider.notifier).toggleOnline();
+          },
         ),
         const SizedBox(height: 16),
         if (status.online && offers.isEmpty)
@@ -211,11 +214,14 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
     try {
       if (accept) {
         await repo.accept(widget.offer.tripId);
+        Haptics.success();
         if (mounted) context.push('${Routes.trip}/${widget.offer.tripId}');
       } else {
+        Haptics.warning();
         await repo.decline(widget.offer.tripId);
       }
     } catch (_) {
+      Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(AppL10n.of(context).errorGeneric)));

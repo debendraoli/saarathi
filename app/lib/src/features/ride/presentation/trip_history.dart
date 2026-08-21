@@ -5,6 +5,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../application/ride_controller.dart';
 import '../domain/models.dart';
 
@@ -18,7 +19,7 @@ class TripHistoryList extends ConsumerWidget {
     final trips = ref.watch(myTripsProvider);
 
     return trips.when(
-      loading: () => const LoadingView(),
+      loading: () => const SkeletonList(padding: EdgeInsets.all(12)),
       error: (_, __) => ErrorRetry(
         message: l.errorNetwork,
         onRetry: () => ref.invalidate(myTripsProvider),

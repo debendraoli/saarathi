@@ -6,6 +6,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 import '../../../core/location.dart';
 import '../../../core/offline/connectivity.dart';
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/models.dart';
 import '../../notifications/data/notifications_repository.dart';
@@ -82,7 +83,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        onDestinationSelected: (i) {
+          Haptics.tap();
+          setState(() => _tab = i);
+        },
         destinations: [
           NavigationDestination(
             icon: const Icon(Icons.home_outlined),

@@ -7,6 +7,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
 import '../application/auth_controller.dart';
 import 'otp_screen.dart';
@@ -40,6 +41,7 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
     final l = AppL10n.of(context);
     final e164 = nepaliMobileToE164(_controller.text);
     if (e164 == null) {
+      Haptics.error();
       setState(() => _error = l.phoneInvalid);
       return;
     }
@@ -51,10 +53,13 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
       final devCode =
           await ref.read(authControllerProvider.notifier).requestOtp(e164);
       ref.read(devOtpCodeProvider.notifier).state = devCode;
+      Haptics.tap();
       if (mounted) context.push(Routes.otp, extra: e164);
     } on ApiException catch (e) {
+      Haptics.error();
       setState(() => _error = e.isNetwork ? l.errorNetwork : e.message);
     } catch (_) {
+      Haptics.error();
       setState(() => _error = l.errorNetwork);
     } finally {
       if (mounted) setState(() => _busy = false);

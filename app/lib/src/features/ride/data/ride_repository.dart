@@ -56,10 +56,7 @@ class RideRepository {
     final res = await _api.post(
       '/v1/rides/route',
       body: {
-        'origin': {
-          'lat': points.first.latitude,
-          'lng': points.first.longitude
-        },
+        'origin': {'lat': points.first.latitude, 'lng': points.first.longitude},
         'dest': {'lat': points.last.latitude, 'lng': points.last.longitude},
         'stops': [
           for (final p in points.sublist(1, points.length - 1))

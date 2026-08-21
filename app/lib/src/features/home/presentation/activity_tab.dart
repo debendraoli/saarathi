@@ -5,6 +5,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../../marketplace/data/marketplace_repository.dart';
 import '../../marketplace/domain/models.dart';
 import '../../ride/application/ride_controller.dart';
@@ -26,7 +27,8 @@ class ActivityTab extends ConsumerWidget {
         ref.invalidate(myTripsProvider);
       },
       child: trips.when(
-        loading: () => const LoadingView(),
+        loading: () =>
+            const SkeletonList(padding: EdgeInsets.symmetric(vertical: 8)),
         error: (_, __) => ListView(
           children: [
             const SizedBox(height: 120),
@@ -50,8 +52,7 @@ class ActivityTab extends ConsumerWidget {
             children: [
               if (orders.isNotEmpty) ...[
                 _SectionHeader(l.merchantOrders),
-                for (final o in orders)
-                  _OrderTile(order: o),
+                for (final o in orders) _OrderTile(order: o),
               ],
               if (tripList.isNotEmpty) ...[
                 _SectionHeader(l.tabActivity),

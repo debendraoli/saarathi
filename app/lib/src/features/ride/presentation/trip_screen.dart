@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../comms/application/call_controller.dart';
@@ -251,6 +252,7 @@ class _StatusSheet extends ConsumerWidget {
               const SizedBox(height: 14),
               FilledButton(
                 onPressed: () async {
+                  Haptics.tap();
                   await ref
                       .read(rideRepositoryProvider)
                       .updateStatus(trip.id, driverNext.$1);
@@ -263,6 +265,7 @@ class _StatusSheet extends ConsumerWidget {
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: () async {
+                  Haptics.warning();
                   await ref.read(rideRepositoryProvider).cancel(trip.id);
                   if (context.mounted) context.go(Routes.home);
                 },
@@ -380,6 +383,7 @@ class _SosButton extends ConsumerWidget {
           ),
         );
         if (ok == true && context.mounted) {
+          Haptics.warning();
           try {
             final here = await currentLatLng();
             await ref.read(rideRepositoryProvider).sos(
