@@ -146,7 +146,7 @@ export default function MerchantDetailPage({ params }: { params: Promise<{ id: s
           <p className="subtle">
             Staff override — closes or reopens the store regardless of what the owner has set.
           </p>
-          <button className="btn primary" disabled={busy} onClick={toggleOpen}>
+          <button className="btn primary" style={{ marginTop: 12 }} disabled={busy} onClick={toggleOpen}>
             {busy ? "Saving…" : row.is_open ? "Close store" : "Open store"}
           </button>
         </div>

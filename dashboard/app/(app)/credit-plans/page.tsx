@@ -84,7 +84,7 @@ export default function CreditPlansPage() {
             <input className="input" type="number" value={form.max_amount} onChange={(e) => setForm({ ...form, max_amount: Number(e.target.value) })} />
           </div>
         </div>
-        <button className="btn primary" disabled={busy} onClick={create}>
+        <button className="btn primary" style={{ marginTop: 16 }} disabled={busy} onClick={create}>
           {busy ? "Submitting…" : "Submit for approval"}
         </button>
       </div>

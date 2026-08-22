@@ -58,9 +58,25 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
   generate: true
   assets:
     - assets/images/
+
+# Regenerate after changing the source image: dart run flutter_launcher_icons
+flutter_launcher_icons:
+  image_path: assets/images/app_icon.png
+  android: true
+  # Matches AppTheme.ink (core/theme/app_theme.dart) — the same dark brand
+  # ink used for text-on-brand elsewhere, so the adaptive icon's background
+  # layer reads as intentional rather than a random fill color.
+  adaptive_icon_background: "#1A1200"
+  adaptive_icon_foreground: assets/images/app_icon.png
+  # ios/ isn't generated in this checkout yet (see README's first-time setup);
+  # flip this to true and rerun once it exists — flutter_launcher_icons can't
+  # write into a platform folder that isn't there.
+  ios: false
+  remove_alpha_ios: true

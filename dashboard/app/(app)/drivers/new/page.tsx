@@ -154,11 +154,11 @@ export default function OnboardDriverPage() {
           </div>
         </div>
         {!driver ? (
-          <button className="btn primary" disabled={busy || !plate.trim()} onClick={onboard}>
+          <button className="btn primary" style={{ marginTop: 16 }} disabled={busy || !plate.trim()} onClick={onboard}>
             {busy ? "Saving…" : "Create driver"}
           </button>
         ) : (
-          <div className="row">
+          <div className="row" style={{ marginTop: 16 }}>
             <span className="badge under_review">created · under review</span>
             <Link className="btn ghost" href={`/drivers/${driver.id}`}>
               Open in verification
@@ -196,7 +196,7 @@ export default function OnboardDriverPage() {
               />
             </div>
           </div>
-          <div className="row" style={{ flexWrap: "wrap" }}>
+          <div className="row" style={{ flexWrap: "wrap", marginTop: 16 }}>
             <button className="btn primary" disabled={uploadBusy || !docFile} onClick={upload}>
               {uploadBusy ? "Uploading…" : "Upload file"}
             </button>

@@ -113,7 +113,7 @@ export default function SurgePage() {
             </select>
           </div>
         </div>
-        <button className="btn primary" disabled={busy} onClick={create}>
+        <button className="btn primary" style={{ marginTop: 16 }} disabled={busy} onClick={create}>
           {busy ? "Saving…" : "Add window"}
         </button>
       </div>

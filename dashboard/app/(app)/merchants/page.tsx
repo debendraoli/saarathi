@@ -137,7 +137,7 @@ export default function MerchantsPage() {
             />
           </div>
         </div>
-        <button className="btn primary" disabled={busy || !form.name} onClick={create}>
+        <button className="btn primary" style={{ marginTop: 16 }} disabled={busy || !form.name} onClick={create}>
           {busy ? "Creating…" : "Create merchant"}
         </button>
       </div>

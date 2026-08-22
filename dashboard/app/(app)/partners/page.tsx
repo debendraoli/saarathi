@@ -109,7 +109,7 @@ export default function PartnersPage() {
             />
           </div>
         </div>
-        <button className="btn primary" disabled={busy || !form.name || !form.owner_phone} onClick={create}>
+        <button className="btn primary" style={{ marginTop: 16 }} disabled={busy || !form.name || !form.owner_phone} onClick={create}>
           {busy ? "Creating…" : "Create partner"}
         </button>
       </div>

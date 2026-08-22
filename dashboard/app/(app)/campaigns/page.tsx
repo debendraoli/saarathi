@@ -346,7 +346,7 @@ export default function CampaignsPage() {
           ))}
         </div>
 
-        <button className="btn primary" disabled={busy} onClick={create}>
+        <button className="btn primary" style={{ marginTop: 16 }} disabled={busy} onClick={create}>
           {busy ? "Creating…" : "Create campaign"}
         </button>
       </div>
