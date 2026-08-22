@@ -31,6 +31,10 @@ pub enum ErrorCode {
     InvalidPaymentMethod,
     TripUnavailable,
     OfferExpired,
+    /// Too many accept-then-cancel trips in the trailing window (see
+    /// `dispatch::MAX_DRIVER_CANCELS_PER_WINDOW`) — temporarily blocked from
+    /// accepting new offers.
+    TooManyCancellations,
     // Money
     InsufficientCredits,
     InsufficientDriverCredits,

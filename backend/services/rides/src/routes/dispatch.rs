@@ -143,6 +143,14 @@ async fn my_offers(
     Ok(Json(offers))
 }
 
+/// Accept-then-cancel trips (by this driver) allowed in the trailing window
+/// before new offers are blocked. A trip only reaches `cancelled_by_role =
+/// 'driver'` once the driver has actually accepted (driver_id is only set on
+/// acceptance), so this is inherently a cancel-*after*-accept count, not
+/// declined offers (which never touch `trips` at all).
+const MAX_DRIVER_CANCELS_PER_WINDOW: i64 = 3;
+const DRIVER_CANCEL_WINDOW_HOURS: i64 = 24;
+
 async fn accept_offer(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
@@ -156,6 +164,24 @@ async fn accept_offer(
         return Err(AppError::bad(
             ErrorCode::InsufficientDriverCredits,
             "top up your credit balance to accept rides",
+        ));
+    }
+
+    let recent_cancels: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM trips \
+         WHERE driver_id = $1 AND status = 'cancelled' AND cancelled_by_role = 'driver' \
+           AND cancelled_at > now() - make_interval(hours => $2)",
+    )
+    .bind(claims.sub)
+    .bind(DRIVER_CANCEL_WINDOW_HOURS as i32)
+    .fetch_one(&st.db)
+    .await?;
+    if recent_cancels >= MAX_DRIVER_CANCELS_PER_WINDOW {
+        return Err(AppError::bad(
+            ErrorCode::TooManyCancellations,
+            format!(
+                "too many cancelled trips in the last {DRIVER_CANCEL_WINDOW_HOURS}h — try again later"
+            ),
         ));
     }
 

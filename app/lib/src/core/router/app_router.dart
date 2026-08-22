@@ -26,6 +26,7 @@ import '../../features/onboarding/presentation/intro_screen.dart';
 import '../../features/onboarding/presentation/splash_screen.dart';
 import '../../features/places/data/places_repository.dart';
 import '../../features/places/presentation/saved_places_screen.dart';
+import '../../features/wallet/presentation/wallet_screen.dart';
 import '../../features/ride/domain/models.dart';
 import '../../features/ride/presentation/confirm_ride_screen.dart';
 import '../../features/ride/presentation/trip_screen.dart';
@@ -48,6 +49,7 @@ class Routes {
   static const call = '/ride/call';
   static const notifications = '/notifications';
   static const savedPlaces = '/places/saved';
+  static const wallet = '/wallet';
   static const food = '/food';
   static const grocery = '/grocery';
   static const merchant = '/marketplace/merchant';
@@ -207,6 +209,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: Routes.savedPlaces,
         pageBuilder: (_, state) =>
             _page(const SavedPlacesScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.wallet,
+        pageBuilder: (_, state) =>
+            _page(const WalletScreen(), key: state.pageKey),
       ),
       GoRoute(
         path: Routes.food,

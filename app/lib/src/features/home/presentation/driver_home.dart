@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/foreground/driver_foreground_service.dart';
+import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
@@ -219,6 +220,13 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
       } else {
         Haptics.warning();
         await repo.decline(widget.offer.tripId);
+      }
+    } on ApiException catch (e) {
+      Haptics.error();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                e.isNetwork ? AppL10n.of(context).errorNetwork : e.message)));
       }
     } catch (_) {
       Haptics.error();

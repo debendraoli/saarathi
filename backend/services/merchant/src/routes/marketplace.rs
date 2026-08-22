@@ -371,6 +371,14 @@ async fn place_order(
         .execute(&mut *tx)
         .await?;
     }
+
+    // Wallet orders actually charge here, atomically with order creation —
+    // cash orders settle physically on delivery, nothing to move now.
+    if method == "wallet" {
+        saarathi_core::wallet::debit_rider(&mut tx, claims.sub, total, "order_charge", Some(order_id))
+            .await?;
+    }
+
     idempotency::store(
         &mut tx,
         &idem_key,
@@ -487,13 +495,14 @@ async fn update_order_status(
         return Err(AppError::BadRequest("invalid order status".into()));
     }
 
-    let row: Option<(Uuid, Uuid, String, Option<Uuid>)> = sqlx::query_as(
-        "SELECT customer_id, merchant_id, status, trip_id FROM orders WHERE id = $1",
+    let row: Option<(Uuid, Uuid, String, Option<Uuid>, String, Decimal)> = sqlx::query_as(
+        "SELECT customer_id, merchant_id, status, trip_id, payment_method, total FROM orders WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(&st.db)
     .await?;
-    let (customer_id, merchant_id, current, _trip_id) = row.ok_or(AppError::NotFound)?;
+    let (customer_id, merchant_id, current, _trip_id, payment_method, total) =
+        row.ok_or(AppError::NotFound)?;
 
     // The merchant owner (or staff) drives the order; a customer may only cancel
     // their own order before it's being prepared.
@@ -506,11 +515,21 @@ async fn update_order_status(
         }
     }
 
+    let already_terminal = matches!(current.as_str(), "cancelled" | "rejected" | "delivered");
+    let refunding =
+        !already_terminal && payment_method == "wallet" && matches!(body.status.as_str(), "cancelled" | "rejected");
+
+    let mut tx = st.db.begin().await?;
     sqlx::query("UPDATE orders SET status = $2, updated_at = now() WHERE id = $1")
         .bind(id)
         .bind(&body.status)
-        .execute(&st.db)
+        .execute(&mut *tx)
         .await?;
+    if refunding {
+        saarathi_core::wallet::credit_rider(&mut tx, customer_id, total, "order_refund", None, Some(id))
+            .await?;
+    }
+    tx.commit().await?;
 
     // On 'ready', spawn the courier delivery trip via rides' internal API.
     if body.status == "ready" {

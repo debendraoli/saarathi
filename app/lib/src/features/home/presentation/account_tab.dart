@@ -7,6 +7,7 @@ import '../../../core/prefs.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../auth/domain/models.dart';
 import '../../merchant/data/merchant_repository.dart';
 
 class AccountTab extends ConsumerWidget {
@@ -64,6 +65,17 @@ class AccountTab extends ConsumerWidget {
                   ),
                 ),
           orElse: () => const SizedBox.shrink(),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.account_balance_wallet_rounded),
+            title: Text(ref.watch(authControllerProvider).mode == AppMode.driver
+                ? l.creditsTitle
+                : l.walletTitle),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => context.push(Routes.wallet),
+          ),
         ),
         const SizedBox(height: 16),
         Card(
