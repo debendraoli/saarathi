@@ -1,7 +1,10 @@
 "use client";
 
+import { Modal } from "@/components/Modal";
+import { Pagination, SearchInput, usePaged } from "@/components/Toolbar";
 import { rides, type Campaign, type CampaignRule, type NewCampaign } from "@/lib/api";
-import { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 const EMPTY: NewCampaign = {
   code: "",
@@ -61,6 +64,8 @@ export default function CampaignsPage() {
   const [ruleToAdd, setRuleToAdd] = useState<RuleType>("new_user");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [query, setQuery] = useState("");
 
   function addRule() {
     setRules((r) => [...r, defaultRule(ruleToAdd)]);
@@ -104,6 +109,7 @@ export default function CampaignsPage() {
       setRules([]);
       setStartsAt("");
       setEndsAt("");
+      setShowAdd(false);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -125,6 +131,14 @@ export default function CampaignsPage() {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((c) => [c.code, c.title].some((v) => v.toLowerCase().includes(q)));
+  }, [rows, query]);
+
+  const { page, setPage, pageCount, total, slice } = usePaged(filtered, 12);
+
   return (
     <div className="stack">
       <div>
@@ -137,8 +151,92 @@ export default function CampaignsPage() {
 
       {error && <div className="error">{error}</div>}
 
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>New campaign</h3>
+      <div className="toolbar">
+        <div />
+        <div className="toolbar-actions">
+          <SearchInput value={query} onChange={setQuery} placeholder="Code, title…" />
+          <button className="btn primary" onClick={() => setShowAdd(true)}>
+            <Plus size={15} /> Add campaign
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0 }}>
+        <table>
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Title</th>
+              <th>Audience</th>
+              <th>Benefit</th>
+              <th>Used</th>
+              <th>Rules</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {slice.map((c) => (
+              <tr key={c.id}>
+                <td>
+                  <b>{c.code}</b>
+                </td>
+                <td>{c.title}</td>
+                <td>{c.audience}</td>
+                <td>
+                  {c.kind === "percent" ? `${c.value}%` : `NPR ${c.value}`}
+                  {c.max_discount ? ` (max ${c.max_discount})` : ""}
+                </td>
+                <td className="subtle">
+                  {c.used_count}
+                  {c.usage_limit ? ` / ${c.usage_limit}` : ""}
+                </td>
+                <td className="subtle">
+                  {c.rules && c.rules.length > 0
+                    ? c.rules.map((r) => RULE_LABELS[r.type]).join(", ")
+                    : "—"}
+                </td>
+                <td>
+                  <span className={`badge ${c.active ? "approved" : "rejected"}`}>
+                    {c.active ? "active" : "inactive"}
+                  </span>
+                </td>
+                <td style={{ textAlign: "right" }}>
+                  {c.active && (
+                    <button className="btn ghost" onClick={() => deactivate(c.id)}>
+                      Deactivate
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={8} className="subtle" style={{ textAlign: "center", padding: 32 }}>
+                  No campaigns yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <Pagination page={page} pageCount={pageCount} total={total} onPage={setPage} />
+
+      <Modal
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        title="New campaign"
+        wide
+        footer={
+          <>
+            <button className="btn ghost" onClick={() => setShowAdd(false)}>Cancel</button>
+            <button className="btn primary" disabled={busy} onClick={create}>
+              {busy ? "Creating…" : "Create campaign"}
+            </button>
+          </>
+        }
+      >
         <div className="grid-2">
           <div className="field">
             <label>Code</label>
@@ -345,71 +443,7 @@ export default function CampaignsPage() {
             </div>
           ))}
         </div>
-
-        <button className="btn primary" style={{ marginTop: 16 }} disabled={busy} onClick={create}>
-          {busy ? "Creating…" : "Create campaign"}
-        </button>
-      </div>
-
-      <div className="card" style={{ padding: 0 }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Title</th>
-              <th>Audience</th>
-              <th>Benefit</th>
-              <th>Used</th>
-              <th>Rules</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr key={c.id}>
-                <td>
-                  <b>{c.code}</b>
-                </td>
-                <td>{c.title}</td>
-                <td>{c.audience}</td>
-                <td>
-                  {c.kind === "percent" ? `${c.value}%` : `NPR ${c.value}`}
-                  {c.max_discount ? ` (max ${c.max_discount})` : ""}
-                </td>
-                <td className="subtle">
-                  {c.used_count}
-                  {c.usage_limit ? ` / ${c.usage_limit}` : ""}
-                </td>
-                <td className="subtle">
-                  {c.rules && c.rules.length > 0
-                    ? c.rules.map((r) => RULE_LABELS[r.type]).join(", ")
-                    : "—"}
-                </td>
-                <td>
-                  <span className={`badge ${c.active ? "approved" : "rejected"}`}>
-                    {c.active ? "active" : "inactive"}
-                  </span>
-                </td>
-                <td>
-                  {c.active && (
-                    <button className="btn ghost" onClick={() => deactivate(c.id)}>
-                      Deactivate
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={8} className="subtle" style={{ textAlign: "center", padding: 32 }}>
-                  No campaigns yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      </Modal>
     </div>
   );
 }

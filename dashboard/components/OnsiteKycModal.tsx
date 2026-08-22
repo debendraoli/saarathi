@@ -1,11 +1,10 @@
 "use client";
 
-import { Modal } from "@/components/Modal";
-import { WebcamCapture } from "@/components/Webcam";
 import { api, type Driver, type OnboardDriverInput, type VehicleClass } from "@/lib/api";
 import { Camera, Check } from "lucide-react";
-import Link from "next/link";
 import { useState } from "react";
+import { Modal } from "./Modal";
+import { WebcamCapture } from "./Webcam";
 
 const DOC_KINDS = [
   "profile_photo",
@@ -38,7 +37,20 @@ const CAMERA_FACING: Record<string, "user" | "environment"> = {
   profile_photo: "user",
 };
 
-export default function OnboardDriverPage() {
+/**
+ * On-site walk-in driver KYC: create the driver + vehicle, then upload their
+ * documents (webcam or file), all without leaving the Verification queue —
+ * folded into a modal instead of a separate page/nav item.
+ */
+export function OnsiteKycModal({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const [phone, setPhone] = useState("+977");
   const [fullName, setFullName] = useState("");
   const [license, setLicense] = useState("");
@@ -57,6 +69,28 @@ export default function OnboardDriverPage() {
   const [uploaded, setUploaded] = useState<string[]>([]);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [camOpen, setCamOpen] = useState(false);
+
+  function reset() {
+    setPhone("+977");
+    setFullName("");
+    setLicense("");
+    setAddress("");
+    setVclass("two_wheeler");
+    setPlate("");
+    setMake("");
+    setModel("");
+    setDriver(null);
+    setError(null);
+    setDocFile(null);
+    setUploaded([]);
+  }
+
+  function close() {
+    const created = driver !== null;
+    reset();
+    onClose();
+    if (created) onCreated();
+  }
 
   async function onboard() {
     setBusy(true);
@@ -103,73 +137,64 @@ export default function OnboardDriverPage() {
   }
 
   return (
-    <div className="stack">
-      <div>
-        <h1 className="page-title">On-site Driver KYC</h1>
-        <p className="subtle">
-          Capture a walk-in driver&apos;s details, then upload their documents. They land in the
-          verification queue for a compliance decision.
-        </p>
-      </div>
+    <Modal open={open} onClose={close} title="On-site Driver KYC" wide>
+      <p className="subtle" style={{ marginTop: 0 }}>
+        Capture a walk-in driver&apos;s details, then upload their documents. They land in the
+        verification queue for a compliance decision.
+      </p>
 
       {error && <div className="error">{error}</div>}
 
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>1. Driver &amp; vehicle</h3>
-        <div className="grid-2">
-          <div className="field">
-            <label>Phone (E.164)</label>
-            <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+9779800000000" disabled={!!driver} />
-          </div>
-          <div className="field">
-            <label>Full name</label>
-            <input className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} disabled={!!driver} />
-          </div>
-          <div className="field">
-            <label>License number</label>
-            <input className="input" value={license} onChange={(e) => setLicense(e.target.value)} disabled={!!driver} />
-          </div>
-          <div className="field">
-            <label>Address</label>
-            <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} disabled={!!driver} />
-          </div>
-          <div className="field">
-            <label>Vehicle class</label>
-            <select className="input" value={vclass} onChange={(e) => setVclass(e.target.value as VehicleClass)} disabled={!!driver}>
-              <option value="two_wheeler">Two-wheeler</option>
-              <option value="four_wheeler">Four-wheeler</option>
-            </select>
-          </div>
-          <div className="field">
-            <label>Plate number</label>
-            <input className="input" value={plate} onChange={(e) => setPlate(e.target.value)} placeholder="BA-1-PA-1234" disabled={!!driver} />
-          </div>
-          <div className="field">
-            <label>Make (optional)</label>
-            <input className="input" value={make} onChange={(e) => setMake(e.target.value)} disabled={!!driver} />
-          </div>
-          <div className="field">
-            <label>Model (optional)</label>
-            <input className="input" value={model} onChange={(e) => setModel(e.target.value)} disabled={!!driver} />
-          </div>
+      <div className="grid-2">
+        <div className="field">
+          <label>Phone (E.164)</label>
+          <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+9779800000000" disabled={!!driver} />
         </div>
-        {!driver ? (
-          <button className="btn primary" style={{ marginTop: 16 }} disabled={busy || !plate.trim()} onClick={onboard}>
+        <div className="field">
+          <label>Full name</label>
+          <input className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} disabled={!!driver} />
+        </div>
+        <div className="field">
+          <label>License number</label>
+          <input className="input" value={license} onChange={(e) => setLicense(e.target.value)} disabled={!!driver} />
+        </div>
+        <div className="field">
+          <label>Address</label>
+          <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} disabled={!!driver} />
+        </div>
+        <div className="field">
+          <label>Vehicle class</label>
+          <select className="input" value={vclass} onChange={(e) => setVclass(e.target.value as VehicleClass)} disabled={!!driver}>
+            <option value="two_wheeler">Two-wheeler</option>
+            <option value="four_wheeler">Four-wheeler</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Plate number</label>
+          <input className="input" value={plate} onChange={(e) => setPlate(e.target.value)} placeholder="BA-1-PA-1234" disabled={!!driver} />
+        </div>
+        <div className="field">
+          <label>Make (optional)</label>
+          <input className="input" value={make} onChange={(e) => setMake(e.target.value)} disabled={!!driver} />
+        </div>
+        <div className="field">
+          <label>Model (optional)</label>
+          <input className="input" value={model} onChange={(e) => setModel(e.target.value)} disabled={!!driver} />
+        </div>
+      </div>
+      {!driver ? (
+        <div className="form-actions" style={{ marginTop: 16 }}>
+          <button className="btn primary" disabled={busy || !plate.trim()} onClick={onboard}>
             {busy ? "Saving…" : "Create driver"}
           </button>
-        ) : (
+        </div>
+      ) : (
+        <>
           <div className="row" style={{ marginTop: 16 }}>
             <span className="badge under_review">created · under review</span>
-            <Link className="btn ghost" href={`/drivers/${driver.id}`}>
-              Open in verification
-            </Link>
           </div>
-        )}
-      </div>
 
-      {driver && (
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>2. Documents &amp; photos</h3>
+          <h3 style={{ marginTop: 24 }}>Documents &amp; photos</h3>
           <p className="subtle" style={{ marginTop: 0 }}>
             Capture a live photo with the webcam or upload a file. Citizenship needs both the front
             and back page.
@@ -196,7 +221,7 @@ export default function OnboardDriverPage() {
               />
             </div>
           </div>
-          <div className="row" style={{ flexWrap: "wrap", marginTop: 16 }}>
+          <div className="row" style={{ flexWrap: "wrap" }}>
             <button className="btn primary" disabled={uploadBusy || !docFile} onClick={upload}>
               {uploadBusy ? "Uploading…" : "Upload file"}
             </button>
@@ -214,7 +239,12 @@ export default function OnboardDriverPage() {
               ))}
             </div>
           )}
-        </div>
+          <div className="form-actions" style={{ marginTop: 16 }}>
+            <button className="btn primary" onClick={close}>
+              Done
+            </button>
+          </div>
+        </>
       )}
 
       <Modal
@@ -231,6 +261,6 @@ export default function OnboardDriverPage() {
           />
         )}
       </Modal>
-    </div>
+    </Modal>
   );
 }

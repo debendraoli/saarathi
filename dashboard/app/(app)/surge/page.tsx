@@ -1,6 +1,8 @@
 "use client";
 
+import { Modal } from "@/components/Modal";
 import { rides, type NewSurgeWindow, type SurgeWindow } from "@/lib/api";
+import { Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 
 function toMinutes(hhmm: string): number {
@@ -22,6 +24,7 @@ export default function SurgePage() {
   const [end, setEnd] = useState("20:00");
   const [multiplier, setMultiplier] = useState(1.15);
   const [vclass, setVclass] = useState<string>("");
+  const [showAdd, setShowAdd] = useState(false);
 
   async function load() {
     setError(null);
@@ -48,6 +51,7 @@ export default function SurgePage() {
         vehicle_class: vclass || null,
       };
       await rides.createSurge(w);
+      setShowAdd(false);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -77,45 +81,13 @@ export default function SurgePage() {
 
       {error && <div className="error">{error}</div>}
 
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>New surge window</h3>
-        <div className="grid-2">
-          <div className="field">
-            <label>Label</label>
-            <input className="input" value={label} onChange={(e) => setLabel(e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Multiplier (max 1.20)</label>
-            <input
-              className="input"
-              type="number"
-              step="0.01"
-              min="1"
-              max="1.2"
-              value={multiplier}
-              onChange={(e) => setMultiplier(Number(e.target.value))}
-            />
-          </div>
-          <div className="field">
-            <label>Start time</label>
-            <input className="input" type="time" value={start} onChange={(e) => setStart(e.target.value)} />
-          </div>
-          <div className="field">
-            <label>End time</label>
-            <input className="input" type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Vehicle class (optional)</label>
-            <select className="input" value={vclass} onChange={(e) => setVclass(e.target.value)}>
-              <option value="">Any</option>
-              <option value="two_wheeler">Two-wheeler</option>
-              <option value="four_wheeler">Four-wheeler</option>
-            </select>
-          </div>
+      <div className="toolbar">
+        <div />
+        <div className="toolbar-actions">
+          <button className="btn primary" onClick={() => setShowAdd(true)}>
+            <Plus size={15} /> Add window
+          </button>
         </div>
-        <button className="btn primary" style={{ marginTop: 16 }} disabled={busy} onClick={create}>
-          {busy ? "Saving…" : "Add window"}
-        </button>
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -165,6 +137,55 @@ export default function SurgePage() {
           </tbody>
         </table>
       </div>
+
+      <Modal
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        title="New surge window"
+        footer={
+          <>
+            <button className="btn ghost" onClick={() => setShowAdd(false)}>Cancel</button>
+            <button className="btn primary" disabled={busy} onClick={create}>
+              {busy ? "Saving…" : "Add window"}
+            </button>
+          </>
+        }
+      >
+        <div className="grid-2">
+          <div className="field">
+            <label>Label</label>
+            <input className="input" value={label} onChange={(e) => setLabel(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Multiplier (max 1.20)</label>
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              min="1"
+              max="1.2"
+              value={multiplier}
+              onChange={(e) => setMultiplier(Number(e.target.value))}
+            />
+          </div>
+          <div className="field">
+            <label>Start time</label>
+            <input className="input" type="time" value={start} onChange={(e) => setStart(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>End time</label>
+            <input className="input" type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Vehicle class (optional)</label>
+            <select className="input" value={vclass} onChange={(e) => setVclass(e.target.value)}>
+              <option value="">Any</option>
+              <option value="two_wheeler">Two-wheeler</option>
+              <option value="four_wheeler">Four-wheeler</option>
+            </select>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

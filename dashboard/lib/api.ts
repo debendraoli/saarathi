@@ -696,6 +696,8 @@ export interface RideRow {
   cancelled_by_role: string | null;
   driver_stars: number | null;
   created_at: string;
+  accepted_at: string | null;
+  completed_at: string | null;
 }
 
 export interface LeaderRow {

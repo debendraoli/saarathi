@@ -1,6 +1,9 @@
 "use client";
 
+import { Modal } from "@/components/Modal";
+import { Pagination, usePaged } from "@/components/Toolbar";
 import { auth, rides, type CreditPlan, type NewCreditPlan } from "@/lib/api";
+import { Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const EMPTY: NewCreditPlan = { name: "", min_amount: 1000, max_amount: 10000, bonus_percent: 0 };
@@ -10,6 +13,7 @@ export default function CreditPlansPage() {
   const [form, setForm] = useState<NewCreditPlan>(EMPTY);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
   const canApprove = ["super_admin", "admin"].includes(auth.user?.role ?? "");
 
   async function load() {
@@ -25,6 +29,8 @@ export default function CreditPlansPage() {
     load();
   }, []);
 
+  const { page, setPage, pageCount, total, slice } = usePaged(rows, 12);
+
   async function create() {
     setBusy(true);
     setError(null);
@@ -36,6 +42,7 @@ export default function CreditPlansPage() {
         bonus_percent: Number(form.bonus_percent ?? 0),
       });
       setForm(EMPTY);
+      setShowAdd(false);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -64,8 +71,70 @@ export default function CreditPlansPage() {
       </div>
       {error && <div className="error">{error}</div>}
 
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>New plan</h3>
+      <div className="toolbar">
+        <div />
+        <div className="toolbar-actions">
+          <button className="btn primary" onClick={() => setShowAdd(true)}>
+            <Plus size={15} /> New plan
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0 }}>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Range (NPR)</th>
+              <th>Bonus</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {slice.map((p) => (
+              <tr key={p.id}>
+                <td><b>{p.name}</b></td>
+                <td>{p.min_amount} – {p.max_amount}</td>
+                <td className="subtle">{p.bonus_percent}%</td>
+                <td>
+                  <span className={`badge ${p.status === "active" ? "approved" : p.status === "rejected" ? "rejected" : "under_review"}`}>
+                    {p.status}
+                  </span>
+                </td>
+                <td>
+                  {p.status === "pending" && canApprove && (
+                    <div className="row" style={{ justifyContent: "flex-end" }}>
+                      <button className="btn primary" onClick={() => decide(p.id, true)}>Approve</button>
+                      <button className="btn danger" onClick={() => decide(p.id, false)}>Reject</button>
+                    </div>
+                  )}
+                  {p.status === "pending" && !canApprove && <span className="subtle">awaiting admin</span>}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={5} className="subtle" style={{ textAlign: "center", padding: 24 }}>No plans yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <Pagination page={page} pageCount={pageCount} total={total} onPage={setPage} />
+
+      <Modal
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        title="New credit plan"
+        footer={
+          <>
+            <button className="btn ghost" onClick={() => setShowAdd(false)}>Cancel</button>
+            <button className="btn primary" disabled={busy} onClick={create}>
+              {busy ? "Submitting…" : "Submit for approval"}
+            </button>
+          </>
+        }
+      >
         <div className="grid-2">
           <div className="field">
             <label>Name</label>
@@ -84,50 +153,7 @@ export default function CreditPlansPage() {
             <input className="input" type="number" value={form.max_amount} onChange={(e) => setForm({ ...form, max_amount: Number(e.target.value) })} />
           </div>
         </div>
-        <button className="btn primary" style={{ marginTop: 16 }} disabled={busy} onClick={create}>
-          {busy ? "Submitting…" : "Submit for approval"}
-        </button>
-      </div>
-
-      <div className="card" style={{ padding: 0 }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Range (NPR)</th>
-              <th>Bonus</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((p) => (
-              <tr key={p.id}>
-                <td><b>{p.name}</b></td>
-                <td>{p.min_amount} – {p.max_amount}</td>
-                <td className="subtle">{p.bonus_percent}%</td>
-                <td>
-                  <span className={`badge ${p.status === "active" ? "approved" : p.status === "rejected" ? "rejected" : "under_review"}`}>
-                    {p.status}
-                  </span>
-                </td>
-                <td>
-                  {p.status === "pending" && canApprove && (
-                    <div className="row">
-                      <button className="btn primary" onClick={() => decide(p.id, true)}>Approve</button>
-                      <button className="btn danger" onClick={() => decide(p.id, false)}>Reject</button>
-                    </div>
-                  )}
-                  {p.status === "pending" && !canApprove && <span className="subtle">awaiting admin</span>}
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr><td colSpan={5} className="subtle" style={{ textAlign: "center", padding: 24 }}>No plans yet.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      </Modal>
     </div>
   );
 }

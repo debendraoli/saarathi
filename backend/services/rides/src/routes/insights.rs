@@ -33,6 +33,8 @@ struct RideRow {
     cancelled_by_role: Option<String>,
     driver_stars: Option<i32>,
     created_at: DateTime<Utc>,
+    accepted_at: Option<DateTime<Utc>>,
+    completed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Deserialize)]
@@ -48,7 +50,7 @@ async fn rides(
     let base = "SELECT t.id, t.rider_id, ur.full_name AS rider_name, t.driver_id, \
                 ud.full_name AS driver_name, t.status::text AS status, t.final_fare, \
                 t.payment_method, t.cancel_reason, t.cancelled_by_role, \
-                rt.stars AS driver_stars, t.created_at \
+                rt.stars AS driver_stars, t.created_at, t.accepted_at, t.completed_at \
          FROM trips t \
          JOIN users ur ON ur.id = t.rider_id \
          LEFT JOIN users ud ON ud.id = t.driver_id \
@@ -80,7 +82,7 @@ async fn cancellations(
         "SELECT t.id, t.rider_id, ur.full_name AS rider_name, t.driver_id, \
                 ud.full_name AS driver_name, t.status::text AS status, t.final_fare, \
                 t.payment_method, t.cancel_reason, t.cancelled_by_role, \
-                NULL::int AS driver_stars, t.created_at \
+                NULL::int AS driver_stars, t.created_at, t.accepted_at, t.completed_at \
          FROM trips t \
          JOIN users ur ON ur.id = t.rider_id \
          LEFT JOIN users ud ON ud.id = t.driver_id \

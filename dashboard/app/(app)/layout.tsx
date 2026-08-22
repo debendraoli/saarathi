@@ -20,7 +20,6 @@ import {
     Tag,
     ToggleRight,
     Trophy,
-    UserPlus,
     Wallet,
     Zap,
     type LucideIcon,
@@ -38,7 +37,6 @@ const NAV: NavGroup[] = [
     items: [
       { href: "/analytics", label: "Analytics", icon: BarChart3 },
       { href: "/live", label: "Live Ops", icon: Navigation },
-      { href: "/leaderboards", label: "Leaderboards", icon: Trophy },
     ],
   },
   {
@@ -53,8 +51,8 @@ const NAV: NavGroup[] = [
   {
     title: "Drivers",
     items: [
-      { href: "/drivers", label: "Verification", icon: ShieldCheck },
-      { href: "/drivers/new", label: "On-site KYC", icon: UserPlus },
+      { href: "/drivers", label: "Driver KYC", icon: ShieldCheck },
+      { href: "/leaderboards", label: "Leaderboards", icon: Trophy },
     ],
   },
   {
@@ -99,7 +97,7 @@ const NAV: NavGroup[] = [
 const ALL_ITEMS = NAV.flatMap((g) => g.items);
 
 /** The single best-matching nav href (longest prefix), so overlapping routes
- *  like /partner vs /partners and /drivers vs /drivers/new never both light up. */
+ *  like /partner vs /partners never both light up. */
 function activeHref(pathname: string): string | null {
   let best: string | null = null;
   for (const { href } of ALL_ITEMS) {

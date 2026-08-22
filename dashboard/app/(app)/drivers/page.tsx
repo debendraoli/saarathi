@@ -1,13 +1,17 @@
 "use client";
 
+import { OnsiteKycModal } from "@/components/OnsiteKycModal";
 import { Pagination, SearchInput, Segmented, usePaged } from "@/components/Toolbar";
 import { api, type DriverListItem } from "@/lib/api";
+import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+// Approved drivers are done — nothing left to review — so they're not worth
+// a tab here. If you need to look one up, the queue's search covers active
+// drivers; a dedicated "all drivers" view can come later if that's needed.
 const TABS = [
   { key: "queue", label: "Review queue" },
-  { key: "approved", label: "Approved" },
   { key: "rejected", label: "Rejected" },
 ];
 
@@ -18,6 +22,9 @@ export default function DriversPage() {
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showOnsite, setShowOnsite] = useState(false);
+
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -31,7 +38,7 @@ export default function DriversPage() {
     return () => {
       active = false;
     };
-  }, [tab]);
+  }, [tab, reloadKey]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -48,7 +55,7 @@ export default function DriversPage() {
   return (
     <div className="stack">
       <div>
-        <h1 className="page-title">Driver Verification</h1>
+        <h1 className="page-title">Driver KYC</h1>
         <p className="subtle">Review KYC submissions and approve or reject drivers.</p>
       </div>
 
@@ -63,6 +70,9 @@ export default function DriversPage() {
         />
         <div className="toolbar-actions">
           <SearchInput value={query} onChange={setQuery} placeholder="Name, phone, license…" />
+          <button className="btn primary" onClick={() => setShowOnsite(true)}>
+            <Plus size={15} /> On-site KYC
+          </button>
         </div>
       </div>
 
@@ -103,6 +113,12 @@ export default function DriversPage() {
       </div>
 
       <Pagination page={page} pageCount={pageCount} total={total} onPage={setPage} />
+
+      <OnsiteKycModal
+        open={showOnsite}
+        onClose={() => setShowOnsite(false)}
+        onCreated={() => setReloadKey((k) => k + 1)}
+      />
     </div>
   );
 }

@@ -1,7 +1,10 @@
 "use client";
 
+import { Modal } from "@/components/Modal";
+import { Pagination, SearchInput, usePaged } from "@/components/Toolbar";
 import { api, type NewPartner, type Partner } from "@/lib/api";
-import { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 const EMPTY: NewPartner = {
   name: "",
@@ -13,9 +16,11 @@ const EMPTY: NewPartner = {
 
 export default function PartnersPage() {
   const [rows, setRows] = useState<Partner[]>([]);
+  const [query, setQuery] = useState("");
   const [form, setForm] = useState<NewPartner>(EMPTY);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
   async function load() {
     setError(null);
@@ -30,6 +35,14 @@ export default function PartnersPage() {
     load();
   }, []);
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((p) => [p.name, p.city].filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
+  }, [rows, query]);
+
+  const { page, setPage, pageCount, total, slice } = usePaged(filtered, 12);
+
   async function create() {
     setBusy(true);
     setError(null);
@@ -40,6 +53,7 @@ export default function PartnersPage() {
         city: form.city || null,
       });
       setForm(EMPTY);
+      setShowAdd(false);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -73,8 +87,81 @@ export default function PartnersPage() {
 
       {error && <div className="error">{error}</div>}
 
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Onboard a partner</h3>
+      <div className="toolbar">
+        <div />
+        <div className="toolbar-actions">
+          <SearchInput value={query} onChange={setQuery} placeholder="Name, city…" />
+          <button className="btn primary" onClick={() => setShowAdd(true)}>
+            <Plus size={15} /> Add partner
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0 }}>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>City</th>
+              <th>Share</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {slice.map((p) => (
+              <tr key={p.id}>
+                <td>
+                  <b>{p.name}</b>
+                </td>
+                <td className="subtle">{p.type}</td>
+                <td className="subtle">{p.city ?? "—"}</td>
+                <td>{(Number(p.commission_share) * 100).toFixed(1)}%</td>
+                <td>
+                  <span className={`badge ${p.status === "active" ? "approved" : p.status === "suspended" ? "rejected" : "pending"}`}>
+                    {p.status}
+                  </span>
+                </td>
+                <td style={{ textAlign: "right" }}>
+                  {p.status === "active" ? (
+                    <button className="btn ghost" onClick={() => setStatus(p.id, "suspended")}>
+                      Suspend
+                    </button>
+                  ) : (
+                    <button className="btn ghost" onClick={() => setStatus(p.id, "active")}>
+                      Activate
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={6} className="subtle" style={{ textAlign: "center", padding: 32 }}>
+                  No partners yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <Pagination page={page} pageCount={pageCount} total={total} onPage={setPage} />
+
+      <Modal
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        title="Onboard a partner"
+        footer={
+          <>
+            <button className="btn ghost" onClick={() => setShowAdd(false)}>Cancel</button>
+            <button className="btn primary" disabled={busy || !form.name || !form.owner_phone} onClick={create}>
+              {busy ? "Creating…" : "Create partner"}
+            </button>
+          </>
+        }
+      >
         <div className="grid-2">
           <div className="field">
             <label>Partner name</label>
@@ -109,60 +196,7 @@ export default function PartnersPage() {
             />
           </div>
         </div>
-        <button className="btn primary" style={{ marginTop: 16 }} disabled={busy || !form.name || !form.owner_phone} onClick={create}>
-          {busy ? "Creating…" : "Create partner"}
-        </button>
-      </div>
-
-      <div className="card" style={{ padding: 0 }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Type</th>
-              <th>City</th>
-              <th>Share</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((p) => (
-              <tr key={p.id}>
-                <td>
-                  <b>{p.name}</b>
-                </td>
-                <td className="subtle">{p.type}</td>
-                <td className="subtle">{p.city ?? "—"}</td>
-                <td>{(Number(p.commission_share) * 100).toFixed(1)}%</td>
-                <td>
-                  <span className={`badge ${p.status === "active" ? "approved" : p.status === "suspended" ? "rejected" : "pending"}`}>
-                    {p.status}
-                  </span>
-                </td>
-                <td style={{ textAlign: "right" }}>
-                  {p.status === "active" ? (
-                    <button className="btn ghost" onClick={() => setStatus(p.id, "suspended")}>
-                      Suspend
-                    </button>
-                  ) : (
-                    <button className="btn ghost" onClick={() => setStatus(p.id, "active")}>
-                      Activate
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="subtle" style={{ textAlign: "center", padding: 32 }}>
-                  No partners yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      </Modal>
     </div>
   );
 }

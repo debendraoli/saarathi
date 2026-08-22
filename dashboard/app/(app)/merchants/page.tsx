@@ -1,7 +1,9 @@
 "use client";
 
+import { Modal } from "@/components/Modal";
 import { Pagination, SearchInput, Segmented, usePaged } from "@/components/Toolbar";
 import { merchant, type MerchantRow, type NewMerchant } from "@/lib/api";
+import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -29,6 +31,7 @@ export default function MerchantsPage() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<NewMerchant>(EMPTY);
   const [busy, setBusy] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
   async function load() {
     setError(null);
@@ -74,6 +77,7 @@ export default function MerchantsPage() {
         phone: form.phone || null,
       });
       setForm(EMPTY);
+      setShowAdd(false);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -94,54 +98,6 @@ export default function MerchantsPage() {
 
       {error && <div className="error">{error}</div>}
 
-      <div className="card">
-        <h3 style={{ marginTop: 0 }}>Onboard a merchant</h3>
-        <div className="grid-2">
-          <div className="field">
-            <label>Store name</label>
-            <input className="input" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Ghorahi Momo House" />
-          </div>
-          <div className="field">
-            <label>Vertical</label>
-            <select className="input" value={form.vertical} onChange={(e) => set("vertical", e.target.value)}>
-              <option value="food">Food</option>
-              <option value="grocery">Grocery</option>
-            </select>
-          </div>
-          <div className="field">
-            <label>Phone</label>
-            <input className="input" value={form.phone ?? ""} onChange={(e) => set("phone", e.target.value)} placeholder="+9779800000000" />
-          </div>
-          <div className="field">
-            <label>Address</label>
-            <input className="input" value={form.address ?? ""} onChange={(e) => set("address", e.target.value)} placeholder="Tribhuvan Chowk, Ghorahi" />
-          </div>
-          <div className="field">
-            <label>Latitude</label>
-            <input
-              className="input"
-              type="number"
-              step="0.0001"
-              value={form.lat}
-              onChange={(e) => set("lat", Number(e.target.value))}
-            />
-          </div>
-          <div className="field">
-            <label>Longitude</label>
-            <input
-              className="input"
-              type="number"
-              step="0.0001"
-              value={form.lng}
-              onChange={(e) => set("lng", Number(e.target.value))}
-            />
-          </div>
-        </div>
-        <button className="btn primary" style={{ marginTop: 16 }} disabled={busy || !form.name} onClick={create}>
-          {busy ? "Creating…" : "Create merchant"}
-        </button>
-      </div>
-
       <div className="toolbar">
         <Segmented
           options={VERTICALS}
@@ -153,6 +109,9 @@ export default function MerchantsPage() {
         />
         <div className="toolbar-actions">
           <SearchInput value={query} onChange={setQuery} placeholder="Name, phone, address…" />
+          <button className="btn primary" onClick={() => setShowAdd(true)}>
+            <Plus size={15} /> Add merchant
+          </button>
         </div>
       </div>
 
@@ -196,6 +155,64 @@ export default function MerchantsPage() {
       </div>
 
       <Pagination page={page} pageCount={pageCount} total={total} onPage={setPage} />
+
+      <Modal
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        title="Onboard a merchant"
+        footer={
+          <>
+            <button className="btn ghost" onClick={() => setShowAdd(false)}>
+              Cancel
+            </button>
+            <button className="btn primary" disabled={busy || !form.name} onClick={create}>
+              {busy ? "Creating…" : "Create merchant"}
+            </button>
+          </>
+        }
+      >
+        <div className="grid-2">
+          <div className="field">
+            <label>Store name</label>
+            <input className="input" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Ghorahi Momo House" />
+          </div>
+          <div className="field">
+            <label>Vertical</label>
+            <select className="input" value={form.vertical} onChange={(e) => set("vertical", e.target.value)}>
+              <option value="food">Food</option>
+              <option value="grocery">Grocery</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Phone</label>
+            <input className="input" value={form.phone ?? ""} onChange={(e) => set("phone", e.target.value)} placeholder="+9779800000000" />
+          </div>
+          <div className="field">
+            <label>Address</label>
+            <input className="input" value={form.address ?? ""} onChange={(e) => set("address", e.target.value)} placeholder="Tribhuvan Chowk, Ghorahi" />
+          </div>
+          <div className="field">
+            <label>Latitude</label>
+            <input
+              className="input"
+              type="number"
+              step="0.0001"
+              value={form.lat}
+              onChange={(e) => set("lat", Number(e.target.value))}
+            />
+          </div>
+          <div className="field">
+            <label>Longitude</label>
+            <input
+              className="input"
+              type="number"
+              step="0.0001"
+              value={form.lng}
+              onChange={(e) => set("lng", Number(e.target.value))}
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

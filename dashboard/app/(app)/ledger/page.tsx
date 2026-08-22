@@ -1,5 +1,6 @@
 "use client";
 
+import { Pagination, usePaged } from "@/components/Toolbar";
 import { rides, type LedgerEntry } from "@/lib/api";
 import { useEffect, useState } from "react";
 
@@ -19,6 +20,8 @@ export default function LedgerPage() {
       }
     })();
   }, []);
+
+  const { page, setPage, pageCount, total, slice } = usePaged(rows, 20);
 
   return (
     <div className="stack">
@@ -48,7 +51,7 @@ export default function LedgerPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((e) => (
+            {slice.map((e) => (
               <tr key={e.seq}>
                 <td>{e.seq}</td>
                 <td>NPR {e.gross}</td>
@@ -73,6 +76,8 @@ export default function LedgerPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} pageCount={pageCount} total={total} onPage={setPage} />
     </div>
   );
 }

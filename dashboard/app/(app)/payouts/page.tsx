@@ -1,5 +1,6 @@
 "use client";
 
+import { Pagination, usePaged } from "@/components/Toolbar";
 import { rides, type Payout } from "@/lib/api";
 import { useEffect, useState } from "react";
 
@@ -13,6 +14,8 @@ export default function PayoutsPage() {
       .then(setRows)
       .catch((e) => setError((e as Error).message));
   }, []);
+
+  const { page, setPage, pageCount, total, slice } = usePaged(rows, 20);
 
   return (
     <div className="stack">
@@ -36,7 +39,7 @@ export default function PayoutsPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((p) => (
+            {slice.map((p) => (
               <tr key={p.id}>
                 <td>{p.driver_id.slice(0, 8)}…</td>
                 <td>NPR {p.amount}</td>
@@ -60,6 +63,8 @@ export default function PayoutsPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} pageCount={pageCount} total={total} onPage={setPage} />
     </div>
   );
 }

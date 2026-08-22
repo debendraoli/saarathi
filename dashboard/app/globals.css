@@ -312,6 +312,13 @@ a {
     @apply flex flex-wrap items-center gap-2.5;
   }
 
+  /* Submit/cancel row at the bottom of a form — right-aligned, since a form's
+     primary action reads naturally at the end, not stranded at the left edge
+     of the card. */
+  .form-actions {
+    @apply flex items-center justify-end gap-2.5;
+  }
+
   .icon-btn {
     @apply grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-lg transition-colors;
     background: var(--color-surface-2);

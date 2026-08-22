@@ -1,15 +1,17 @@
 "use client";
 
 import { Modal } from "@/components/Modal";
+import { Pagination, SearchInput, usePaged } from "@/components/Toolbar";
 import { TripMap } from "@/components/TripMap";
 import { rides, type RideRow, type TripRoute } from "@/lib/api";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const TABS = ["all", "requested", "accepted", "in_progress", "completed", "cancelled"];
 
 export default function RidesPage() {
   const [status, setStatus] = useState("all");
   const [rows, setRows] = useState<RideRow[]>([]);
+  const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [routeFor, setRouteFor] = useState<string | null>(null);
   const [route, setRoute] = useState<TripRoute | null>(null);
@@ -37,6 +39,14 @@ export default function RidesPage() {
     };
   }, [status]);
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => [r.rider_name, r.driver_name].filter(Boolean).some((v) => v!.toLowerCase().includes(q)));
+  }, [rows, query]);
+
+  const { page, setPage, pageCount, total, slice } = usePaged(filtered, 15);
+
   return (
     <div className="stack">
       <div>
@@ -44,12 +54,24 @@ export default function RidesPage() {
         <p className="subtle">Every ride with status, rating, payment, and cancellation detail.</p>
       </div>
 
-      <div className="row">
-        {TABS.map((t) => (
-          <button key={t} className={`btn ${status === t ? "primary" : "ghost"}`} onClick={() => setStatus(t)}>
-            {t.replace("_", " ")}
-          </button>
-        ))}
+      <div className="toolbar">
+        <div className="row">
+          {TABS.map((t) => (
+            <button
+              key={t}
+              className={`btn ${status === t ? "primary" : "ghost"}`}
+              onClick={() => {
+                setStatus(t);
+                setPage(0);
+              }}
+            >
+              {t.replace("_", " ")}
+            </button>
+          ))}
+        </div>
+        <div className="toolbar-actions">
+          <SearchInput value={query} onChange={setQuery} placeholder="Rider or driver name…" />
+        </div>
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -64,12 +86,13 @@ export default function RidesPage() {
               <th>Fare</th>
               <th>Pay</th>
               <th>Rating</th>
+              <th>Duration</th>
               <th>Cancellation</th>
               <th>When</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {slice.map((r) => (
               <tr key={r.id} onClick={() => viewRoute(r.id)}>
                 <td>{r.rider_name ?? r.rider_id.slice(0, 8)}</td>
                 <td>{r.driver_name ?? (r.driver_id ? r.driver_id.slice(0, 8) : "—")}</td>
@@ -79,18 +102,21 @@ export default function RidesPage() {
                 <td>NPR {r.final_fare}</td>
                 <td className="subtle">{r.payment_method}</td>
                 <td>{r.driver_stars ? `${"★".repeat(r.driver_stars)}` : "—"}</td>
+                <td className="subtle">{fmtDuration(r)}</td>
                 <td className="subtle">
                   {r.cancel_reason ? `${r.cancelled_by_role}: ${r.cancel_reason}` : "—"}
                 </td>
                 <td className="subtle">{new Date(r.created_at).toLocaleString()}</td>
               </tr>
             ))}
-            {rows.length === 0 && (
-              <tr><td colSpan={8} className="subtle" style={{ textAlign: "center", padding: 24 }}>No rides.</td></tr>
+            {!error && filtered.length === 0 && (
+              <tr><td colSpan={9} className="subtle" style={{ textAlign: "center", padding: 24 }}>No rides.</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} pageCount={pageCount} total={total} onPage={setPage} />
 
       <Modal
         open={routeFor !== null}
@@ -118,6 +144,17 @@ export default function RidesPage() {
       </Modal>
     </div>
   );
+}
+
+// From driver acceptance to completion — the actual ride, not the wait for a
+// match. Falls back to request-to-completion if acceptance wasn't recorded.
+function fmtDuration(r: RideRow): string {
+  if (!r.completed_at) return "—";
+  const start = r.accepted_at ?? r.created_at;
+  const mins = Math.round((new Date(r.completed_at).getTime() - new Date(start).getTime()) / 60000);
+  if (mins < 1) return "<1 min";
+  if (mins < 60) return `${mins} min`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
 function badge(status: string): string {
