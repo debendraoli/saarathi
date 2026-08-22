@@ -324,6 +324,14 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
 }
 
 /// Background loop: expire stale offers and (re)dispatch waiting trips.
+/// How long a trip stays in the matching pool before giving up. Past this, a
+/// still-unmatched trip used to just silently fall out of the dispatcher's
+/// polling query and sit at `requested` forever — the app's "no driver
+/// found" UI (`TripStatus.noDriver`) had nothing that ever set it. Now it's
+/// explicitly cancelled so the rider sees that state and (since the
+/// one-active-ride guard landed) can request again instead of being stuck.
+const SEARCH_TIMEOUT_MINUTES: i64 = 10;
+
 pub async fn run_dispatcher(st: AppState) {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(3));
     loop {
@@ -338,15 +346,39 @@ pub async fn run_dispatcher(st: AppState) {
         .execute(&st.db)
         .await;
 
+        let timed_out: Vec<(Uuid, Uuid)> = sqlx::query_as(
+            "UPDATE trips SET status = 'cancelled', cancel_reason = 'no_driver_available', \
+                 cancelled_by_role = 'system', updated_at = now() \
+             WHERE status = 'requested' AND driver_id IS NULL \
+               AND created_at <= now() - make_interval(mins => $1) \
+             RETURNING id, rider_id",
+        )
+        .bind(SEARCH_TIMEOUT_MINUTES as i32)
+        .fetch_all(&st.db)
+        .await
+        .unwrap_or_default();
+        for (tid, rider_id) in timed_out {
+            crate::notify::send(
+                &st.nats,
+                rider_id,
+                saarathi_core::domain::notif::TRANSACTIONAL,
+                "No driver found",
+                "We couldn't find a nearby driver for your trip. Please try requesting again.",
+            )
+            .await;
+            tracing::info!(trip = %tid, "dispatch: search timed out, cancelled");
+        }
+
         let waiting: Vec<Uuid> = sqlx::query_scalar(
             "SELECT t.id FROM trips t \
              WHERE t.status = 'requested' AND t.driver_id IS NULL \
-               AND t.created_at > now() - interval '10 minutes' \
+               AND t.created_at > now() - make_interval(mins => $1) \
                AND NOT EXISTS ( \
                    SELECT 1 FROM trip_offers o \
                    WHERE o.trip_id = t.id AND o.status = 'offered' AND o.expires_at > now()) \
              LIMIT 20",
         )
+        .bind(SEARCH_TIMEOUT_MINUTES as i32)
         .fetch_all(&st.db)
         .await
         .unwrap_or_default();

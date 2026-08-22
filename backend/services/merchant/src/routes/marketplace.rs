@@ -537,14 +537,23 @@ struct CreateDeliveryTripResponse {
 /// Ask rides to create (and dispatch) the delivery trip for a ready order —
 /// the API boundary this whole extraction exists to enforce: this service
 /// never inserts into `trips` or calls dispatch itself.
+///
+/// Holds a `FOR UPDATE` row lock on the order across the outbound HTTP call so
+/// two concurrent callers (a double-tap, a client retry racing the original
+/// request) can't both pass the "not yet dispatched" check and spawn two
+/// courier trips for the same order. This serializes dispatch per-order,
+/// which is fine — it happens once, not on a hot path. A failed attempt
+/// rolls the transaction back without writing `trip_id`, so a genuine retry
+/// (merchant re-marks the order `ready`) still goes through cleanly.
 async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()> {
+    let mut tx = st.db.begin().await?;
     let o: (Uuid, Uuid, Decimal, String, f64, f64, Option<Uuid>) = sqlx::query_as(
         "SELECT o.customer_id, o.merchant_id, o.delivery_fee, o.payment_method, \
                 o.delivery_lat, o.delivery_lng, o.trip_id \
-         FROM orders o WHERE o.id = $1",
+         FROM orders o WHERE o.id = $1 FOR UPDATE",
     )
     .bind(order_id)
-    .fetch_one(&st.db)
+    .fetch_one(&mut *tx)
     .await?;
     if o.6.is_some() {
         return Ok(()); // already dispatched
@@ -552,7 +561,7 @@ async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()> {
     let (merchant_lat, merchant_lng): (f64, f64) =
         sqlx::query_as("SELECT lat, lng FROM merchants WHERE id = $1")
             .bind(o.1)
-            .fetch_one(&st.db)
+            .fetch_one(&mut *tx)
             .await?;
 
     let req = CreateDeliveryTripRequest {
@@ -588,8 +597,9 @@ async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()> {
     sqlx::query("UPDATE orders SET trip_id = $2 WHERE id = $1")
         .bind(order_id)
         .bind(resp.trip_id)
-        .execute(&st.db)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     Ok(())
 }
 

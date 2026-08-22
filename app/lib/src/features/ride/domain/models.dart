@@ -139,6 +139,7 @@ class Trip {
     this.tripType,
     this.distanceKm = 0,
     this.createdAt,
+    this.cancelReason,
   });
 
   final String id;
@@ -151,6 +152,10 @@ class Trip {
   final String? tripType;
   final double distanceKm;
   final DateTime? createdAt;
+  final String? cancelReason;
+
+  bool get noDriverFound =>
+      status == TripStatus.cancelled && cancelReason == 'no_driver_available';
 
   bool get isActive => const {
         TripStatus.searching,
@@ -171,5 +176,6 @@ class Trip {
         tripType: j['trip_type'] as String?,
         distanceKm: asDouble(j['distance_km']),
         createdAt: DateTime.tryParse((j['created_at'] as String?) ?? ''),
+        cancelReason: j['cancel_reason'] as String?,
       );
 }

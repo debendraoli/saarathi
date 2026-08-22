@@ -115,6 +115,7 @@
   "statusArriving": "Arriving",
   "statusOnTrip": "On trip",
   "statusCompleted": "Trip completed",
+  "tripCancelled": "Trip cancelled",
   "driverArrived": "I've arrived",
   "startTrip": "Start trip",
   "completeTrip": "Complete trip",

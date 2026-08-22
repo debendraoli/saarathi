@@ -115,6 +115,7 @@
   "statusArriving": "आउँदै",
   "statusOnTrip": "यात्रामा",
   "statusCompleted": "यात्रा पूरा भयो",
+  "tripCancelled": "यात्रा रद्द भयो",
   "driverArrived": "म आइपुगें",
   "startTrip": "यात्रा सुरु गर्नुहोस्",
   "completeTrip": "यात्रा पूरा गर्नुहोस्",

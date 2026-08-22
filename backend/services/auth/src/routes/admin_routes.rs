@@ -13,6 +13,7 @@ use axum::{
     Json, Router,
 };
 use chrono::NaiveDate;
+use saarathi_core::api::ErrorCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -143,16 +144,31 @@ async fn approve_driver(
     }
     let mut tx = st.db.begin().await?;
 
+    // Guarded on the current status (not just existence) so two staff acting
+    // on the same driver at once can't silently clobber each other — the
+    // loser's WHERE clause simply matches nothing.
     let updated = sqlx::query(
         "UPDATE drivers SET kyc_status = 'approved', approved_at = now(), reviewed_at = now(), \
-         reviewed_by = $2, rejection_reason = NULL WHERE id = $1",
+         reviewed_by = $2, rejection_reason = NULL \
+         WHERE id = $1 AND kyc_status = 'under_review'",
     )
     .bind(id)
     .bind(claims.sub)
     .execute(&mut *tx)
     .await?;
     if updated.rows_affected() == 0 {
-        return Err(AppError::NotFound);
+        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM drivers WHERE id = $1)")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+        return Err(if exists {
+            AppError::conflict(
+                ErrorCode::Conflict,
+                "driver has already been reviewed (or hasn't submitted for review yet)",
+            )
+        } else {
+            AppError::NotFound
+        });
     }
 
     // Activate the underlying user account.
@@ -199,7 +215,8 @@ async fn reject_driver(
 
     let updated = sqlx::query(
         "UPDATE drivers SET kyc_status = 'rejected', reviewed_at = now(), reviewed_by = $2, \
-         rejection_reason = $3, approved_at = NULL WHERE id = $1",
+         rejection_reason = $3, approved_at = NULL \
+         WHERE id = $1 AND kyc_status = 'under_review'",
     )
     .bind(id)
     .bind(claims.sub)
@@ -207,7 +224,18 @@ async fn reject_driver(
     .execute(&st.db)
     .await?;
     if updated.rows_affected() == 0 {
-        return Err(AppError::NotFound);
+        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM drivers WHERE id = $1)")
+            .bind(id)
+            .fetch_one(&st.db)
+            .await?;
+        return Err(if exists {
+            AppError::conflict(
+                ErrorCode::Conflict,
+                "driver has already been reviewed (or hasn't submitted for review yet)",
+            )
+        } else {
+            AppError::NotFound
+        });
     }
 
     audit::record(

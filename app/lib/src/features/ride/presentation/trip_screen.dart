@@ -165,6 +165,10 @@ class _StatusSheet extends ConsumerWidget {
         return (Icons.check_circle_rounded, l.statusCompleted, '');
       case TripStatus.noDriver:
         return (Icons.search_off_rounded, l.noDriverFound, l.noDriverFoundBody);
+      case TripStatus.cancelled:
+        return trip.noDriverFound
+            ? (Icons.search_off_rounded, l.noDriverFound, l.noDriverFoundBody)
+            : (Icons.cancel_rounded, l.tripCancelled, '');
       default:
         return (Icons.info_outline_rounded, l.statusArriving, '');
     }
