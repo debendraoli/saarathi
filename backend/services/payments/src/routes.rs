@@ -550,6 +550,17 @@ async fn admin_topup(
     let response = json!({ "ok": true, "balance": balance });
     idempotency::store(&mut tx, &key, claims.sub, "admin.credits.topup", 200, &response).await?;
     tx.commit().await?;
+
+    crate::notify::send(
+        &st.nats,
+        body.user_id,
+        saarathi_core::domain::notif::TRANSACTIONAL,
+        "Credits added",
+        &format!("NPR {} was added to your account by Saarathi support.", body.amount),
+        Some("saarathi://wallet/topup".to_string()),
+    )
+    .await;
+
     Ok(Json(response))
 }
 

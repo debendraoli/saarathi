@@ -12,4 +12,6 @@ pub struct AppState {
     pub payments: Arc<dyn PaymentProvider>,
     /// Tax deducted at source on payouts (recipient nets amount − TDS).
     pub tds_rate: Decimal,
+    /// NATS bus for topup/payout notifications. `None` if unavailable.
+    pub nats: Option<async_nats::Client>,
 }

@@ -9,6 +9,7 @@
 mod auth;
 mod disputes;
 mod error;
+mod notify;
 mod payout_accounts;
 mod routes;
 mod state;
@@ -43,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
     let jwt_secret = std::env::var("JWT_SECRET")?;
     let port: u16 = env_or("PAYMENTS_PORT", "8085").parse()?;
     let tds_rate: Decimal = env_or("PAYOUT_TDS_RATE", "0.015").parse()?;
+    let nats_url = env_or("NATS_URL", "nats://localhost:4222");
 
     let db = PgPoolOptions::new()
         .max_connections(10)
@@ -50,11 +52,22 @@ async fn main() -> anyhow::Result<()> {
         .connect(&database_url)
         .await?;
 
+    // NATS bus for top-up/payout notifications (non-fatal: money moves fine
+    // if the bus is down, the user just doesn't get told).
+    let nats = match async_nats::connect(&nats_url).await {
+        Ok(c) => Some(c),
+        Err(e) => {
+            tracing::warn!(error = %e, "NATS unavailable; payment notifications will be skipped");
+            None
+        }
+    };
+
     let state = AppState {
         db,
         jwt_secret: Arc::new(jwt_secret),
         payments: saarathi_core::payments::provider_from_env(),
         tds_rate,
+        nats,
     };
 
     let app = Router::new()

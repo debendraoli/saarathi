@@ -289,7 +289,25 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ status }),
     }),
+
+  // Staff's own notification inbox — same per-user endpoint the rider/driver
+  // app uses; a staff account is just a `users` row with a different role.
+  notifications: () => request<{ unread: number; items: AppNotification[] }>("/v1/notifications"),
+  markNotificationRead: (id: string) =>
+    request<{ ok: boolean }>(`/v1/notifications/${id}/read`, { method: "POST" }),
+  markAllNotificationsRead: () =>
+    request<{ marked: number }>("/v1/notifications/read-all", { method: "POST" }),
 };
+
+export interface AppNotification {
+  id: string;
+  class: string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  read_at: string | null;
+  created_at: string;
+}
 
 export type PartnerType = "fleet" | "corporate" | "agent";
 export type PartnerStatus = "pending" | "active" | "suspended" | "terminated";

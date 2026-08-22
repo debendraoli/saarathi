@@ -1,6 +1,7 @@
 "use client";
 
-import { auth, type User } from "@/lib/api";
+import { NotificationBell } from "@/components/NotificationBell";
+import { api, auth, places, rides, type User } from "@/lib/api";
 import {
     BarChart3,
     Briefcase,
@@ -29,7 +30,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-type NavItem = { href: string; label: string; icon: LucideIcon };
+type CountKey = "kyc" | "sos" | "reports" | "complaints" | "places";
+type NavItem = { href: string; label: string; icon: LucideIcon; countKey?: CountKey };
 type NavGroup = { title: string; items: NavItem[] };
 
 const NAV: NavGroup[] = [
@@ -44,9 +46,9 @@ const NAV: NavGroup[] = [
     title: "Trips & Safety",
     items: [
       { href: "/rides", label: "Rides", icon: Route },
-      { href: "/sos", label: "SOS Console", icon: Siren },
-      { href: "/reports", label: "Reports", icon: Flag },
-      { href: "/complaints", label: "Complaints", icon: MessageSquare },
+      { href: "/sos", label: "SOS Console", icon: Siren, countKey: "sos" },
+      { href: "/reports", label: "Reports", icon: Flag, countKey: "reports" },
+      { href: "/complaints", label: "Complaints", icon: MessageSquare, countKey: "complaints" },
     ],
   },
   {
@@ -56,7 +58,7 @@ const NAV: NavGroup[] = [
   {
     title: "Drivers",
     items: [
-      { href: "/drivers", label: "Driver KYC", icon: ShieldCheck },
+      { href: "/drivers", label: "Driver KYC", icon: ShieldCheck, countKey: "kyc" },
       { href: "/leaderboards", label: "Leaderboards", icon: Trophy },
     ],
   },
@@ -73,7 +75,7 @@ const NAV: NavGroup[] = [
   },
   {
     title: "Community",
-    items: [{ href: "/places", label: "Map Contributions", icon: MapPinned }],
+    items: [{ href: "/places", label: "Map Contributions", icon: MapPinned, countKey: "places" }],
   },
   {
     title: "Growth",
@@ -116,11 +118,14 @@ function activeHref(pathname: string): string | null {
   return best;
 }
 
+const COUNT_POLL_MS = 30_000;
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
+  const [counts, setCounts] = useState<Partial<Record<CountKey, number>>>({});
 
   useEffect(() => {
     if (!auth.access) {
@@ -130,6 +135,34 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setUser(auth.user);
     setReady(true);
   }, [router]);
+
+  useEffect(() => {
+    if (!ready) return;
+    let active = true;
+    async function loadCounts() {
+      const [kyc, sos, reports, complaints, placesQueue] = await Promise.all([
+        api.listDrivers("queue").catch(() => []),
+        rides.listSos().catch(() => []),
+        rides.listReports().catch(() => []),
+        rides.cancellations().catch(() => []),
+        places.queue("pending").catch(() => []),
+      ]);
+      if (!active) return;
+      setCounts({
+        kyc: kyc.length,
+        sos: sos.length,
+        reports: reports.filter((r) => r.status === "open").length,
+        complaints: complaints.length,
+        places: placesQueue.length,
+      });
+    }
+    loadCounts();
+    const t = setInterval(loadCounts, COUNT_POLL_MS);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, [ready]);
 
   if (!ready) return null;
 
@@ -152,6 +185,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="nav-section">{group.title}</div>
             {group.items.map((item) => {
               const Icon = item.icon;
+              const count = item.countKey ? counts[item.countKey] : undefined;
               return (
                 <Link
                   key={item.href}
@@ -160,6 +194,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 >
                   <Icon />
                   {item.label}
+                  {!!count && <span className="nav-count">{count > 99 ? "99+" : count}</span>}
                 </Link>
               );
             })}
@@ -171,6 +206,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="topbar">
           <div className="title">{title}</div>
           <div className="row">
+            <NotificationBell />
             <span className="subtle text-[13px]">
               {user?.full_name ?? user?.phone} · <b>{user?.role}</b>
             </span>

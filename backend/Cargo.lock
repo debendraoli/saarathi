@@ -2560,6 +2560,7 @@ name = "saarathi-payments"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-nats",
  "axum",
  "chrono",
  "dotenvy",

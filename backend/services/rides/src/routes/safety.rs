@@ -93,6 +93,28 @@ async fn trigger(
         )
         .await;
     }
+
+    // Alert every staff account, not just whoever happens to have the SOS
+    // console open — the console's own 5s poll only reaches someone already
+    // looking at it. `link` is a dashboard path here (not the app's
+    // `saarathi://` scheme), consumed by the dashboard's notification bell.
+    let staff_ids: Vec<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM users WHERE role NOT IN ('rider', 'driver')")
+            .fetch_all(&st.db)
+            .await
+            .unwrap_or_default();
+    for (staff_id,) in staff_ids {
+        notify::send(
+            &st.nats,
+            staff_id,
+            saarathi_core::domain::notif::SAFETY,
+            "SOS raised",
+            "A rider or driver just triggered an emergency alert — open the SOS console.",
+            Some("/sos".to_string()),
+        )
+        .await;
+    }
+
     tracing::warn!(incident = %incident.id, trip = %id, "SOS — OPS ALERT");
     Ok(Json(incident))
 }
