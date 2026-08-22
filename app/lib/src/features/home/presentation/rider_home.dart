@@ -13,8 +13,11 @@ import '../../ride/application/ride_controller.dart';
 /// Opens the address search; routes the pick into the ride flow (map picker or
 /// a prefilled destination).
 Future<void> openWhereTo(BuildContext context) async {
+  final l = AppL10n.of(context);
   final pick = await Navigator.of(context).push<AddressPick>(
-    MaterialPageRoute(builder: (_) => const AddressSearchScreen()),
+    MaterialPageRoute(
+      builder: (_) => AddressSearchScreen(title: l.searchDestinationTitle),
+    ),
   );
   if (pick == null || !context.mounted) return;
   if (pick.chooseOnMap) {

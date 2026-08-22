@@ -61,9 +61,13 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   }
 
   Future<void> _openSearch({required bool forPickup}) async {
+    final l = AppL10n.of(context);
     final pick = await Navigator.of(context).push<AddressPick>(
       MaterialPageRoute(
-        builder: (_) => const AddressSearchScreen(allowMap: false),
+        builder: (_) => AddressSearchScreen(
+          allowMap: false,
+          title: forPickup ? l.searchPickupTitle : l.searchDestinationTitle,
+        ),
       ),
     );
     if (pick?.hit == null || !mounted) return;
@@ -223,6 +227,12 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                 onVehicle: (v) => setState(() => _vehicle = v),
                 onContinue: _dest == null ? null : _continue,
                 onSave: _dest == null ? null : _saveDest,
+                onClearDest: _dest == null
+                    ? null
+                    : () => setState(() {
+                          _dest = null;
+                          _destLabel.clear();
+                        }),
               ),
             ),
           ),
@@ -245,6 +255,7 @@ class _Sheet extends StatelessWidget {
     required this.onVehicle,
     required this.onContinue,
     required this.onSave,
+    required this.onClearDest,
   });
 
   final String pickupText;
@@ -258,6 +269,7 @@ class _Sheet extends StatelessWidget {
   final ValueChanged<VehicleClass> onVehicle;
   final VoidCallback? onContinue;
   final VoidCallback? onSave;
+  final VoidCallback? onClearDest;
 
   @override
   Widget build(BuildContext context) {
@@ -322,11 +334,23 @@ class _Sheet extends StatelessWidget {
                     text: destText ?? l.searchAddressHint,
                     isPlaceholder: destText == null,
                     onTap: onDestTap,
-                    trailing: onSave == null
+                    trailing: onSave == null && onClearDest == null
                         ? null
-                        : IconButton(
-                            icon: const Icon(Icons.bookmark_add_outlined),
-                            onPressed: onSave,
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (onClearDest != null)
+                                IconButton(
+                                  icon: const Icon(Icons.close_rounded),
+                                  tooltip: l.clearDestination,
+                                  onPressed: onClearDest,
+                                ),
+                              if (onSave != null)
+                                IconButton(
+                                  icon: const Icon(Icons.bookmark_add_outlined),
+                                  onPressed: onSave,
+                                ),
+                            ],
                           ),
                   ),
                 ],

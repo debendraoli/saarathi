@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/domain/models.dart';
@@ -11,6 +12,8 @@ import '../../features/comms/presentation/chat_screen.dart';
 import '../../features/delivery/presentation/parcel_screen.dart';
 import '../../features/driver/presentation/become_driver_screen.dart';
 import '../../features/driver/presentation/kyc_documents_screen.dart';
+import '../../features/home/presentation/account_tab.dart';
+import '../../features/home/presentation/activity_tab.dart';
 import '../../features/home/presentation/home_shell.dart';
 import '../../features/marketplace/domain/models.dart';
 import '../../features/marketplace/presentation/checkout_screen.dart';
@@ -39,6 +42,8 @@ class Routes {
   static const login = '/login';
   static const otp = '/login/otp';
   static const home = '/home';
+  static const activity = '/activity';
+  static const account = '/account';
   static const whereTo = '/ride/where-to';
   static const confirm = '/ride/confirm';
   static const trip = '/ride/trip'; // /ride/trip/:id
@@ -149,6 +154,26 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.home,
         pageBuilder: (_, state) => _page(const HomeShell(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.activity,
+        pageBuilder: (context, state) => _page(
+          Scaffold(
+            appBar: AppBar(title: Text(AppL10n.of(context).tabActivity)),
+            body: const ActivityTab(),
+          ),
+          key: state.pageKey,
+        ),
+      ),
+      GoRoute(
+        path: Routes.account,
+        pageBuilder: (context, state) => _page(
+          Scaffold(
+            appBar: AppBar(title: Text(AppL10n.of(context).tabAccount)),
+            body: const AccountTab(),
+          ),
+          key: state.pageKey,
+        ),
       ),
       GoRoute(
         path: Routes.whereTo,

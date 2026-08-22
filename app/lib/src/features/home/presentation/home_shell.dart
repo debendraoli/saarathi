@@ -12,14 +12,15 @@ import '../../auth/domain/models.dart';
 import '../../notifications/data/notifications_repository.dart';
 import '../../places/data/places_repository.dart';
 import '../../ride/application/ride_controller.dart';
-import 'account_tab.dart';
-import 'activity_tab.dart';
 import 'driver_home.dart';
 import 'rider_home.dart';
 
-/// The signed-in shell. Bottom tabs (Home / Activity / Account); the Home tab
-/// shows the rider or driver experience based on the active mode. Drivers can
-/// flip modes from the top switch; riders see a "become a driver" nudge.
+/// The signed-in shell. The Home tab (rider or driver experience, based on
+/// the active mode) fills the whole screen — Activity and Account live behind
+/// a hamburger menu on the top right instead of eating vertical space with a
+/// bottom bar, leaving room to grow the menu with more entries later.
+/// Drivers can flip modes from the top switch; riders see a "become a
+/// driver" nudge.
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
@@ -28,8 +29,6 @@ class HomeShell extends ConsumerStatefulWidget {
 }
 
 class _HomeShellState extends ConsumerState<HomeShell> {
-  int _tab = 0;
-
   @override
   void initState() {
     super.initState();
@@ -63,7 +62,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final gpsOff = ref.watch(locationServiceProvider).valueOrNull == false;
 
     final home = isDriverMode ? const DriverHome() : const RiderHome();
-    final body = [home, const ActivityTab(), const AccountTab()][_tab];
 
     return Scaffold(
       appBar: AppBar(
@@ -71,38 +69,23 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         actions: [
           if (auth.user?.isDriver ?? false) _ModeSwitch(mode: auth.mode),
           const _NotificationBell(),
-          const SizedBox(width: 4),
+          Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu_rounded),
+              onPressed: () {
+                Haptics.tap();
+                Scaffold.of(context).openEndDrawer();
+              },
+            ),
+          ),
         ],
       ),
+      endDrawer: const _MenuDrawer(),
       body: Column(
         children: [
           if (!online) const _OfflineBar(),
           if (gpsOff) const _LocationOffBar(),
-          Expanded(child: body),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) {
-          Haptics.tap();
-          setState(() => _tab = i);
-        },
-        destinations: [
-          NavigationDestination(
-            icon: const Icon(Icons.home_outlined),
-            selectedIcon: const Icon(Icons.home_rounded),
-            label: l.tabHome,
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.receipt_long_outlined),
-            selectedIcon: const Icon(Icons.receipt_long_rounded),
-            label: l.tabActivity,
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.person_outline_rounded),
-            selectedIcon: const Icon(Icons.person_rounded),
-            label: l.tabAccount,
-          ),
+          Expanded(child: home),
         ],
       ),
     );
@@ -111,6 +94,91 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   String _greeting(AppL10n l, AppUser? user) {
     final name = user?.fullName;
     return l.greeting(name == null || name.isEmpty ? '' : ', $name');
+  }
+}
+
+/// The top-right hamburger menu: user identity up top, then the screens that
+/// used to be bottom tabs, with room to grow as more sections are added.
+class _MenuDrawer extends ConsumerWidget {
+  const _MenuDrawer();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppL10n.of(context);
+    final user = ref.watch(authControllerProvider).user;
+    final scheme = Theme.of(context).colorScheme;
+
+    void go(String route) {
+      Haptics.tap();
+      Navigator.of(context).pop();
+      context.push(route);
+    }
+
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DrawerHeader(
+              decoration: BoxDecoration(color: scheme.primaryContainer),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 26,
+                    backgroundColor: scheme.primary,
+                    child: Text(
+                      (user?.fullName?.isNotEmpty ?? false)
+                          ? user!.fullName![0].toUpperCase()
+                          : '👤',
+                      style: TextStyle(
+                          fontSize: 20, color: scheme.onPrimary),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          user?.fullName?.isNotEmpty == true
+                              ? user!.fullName!
+                              : (user?.phone ?? ''),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onPrimaryContainer,
+                          ),
+                        ),
+                        if (user?.fullName?.isNotEmpty == true)
+                          Text(
+                            user?.phone ?? '',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: scheme.onPrimaryContainer,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.receipt_long_rounded),
+              title: Text(l.tabActivity),
+              onTap: () => go(Routes.activity),
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_rounded),
+              title: Text(l.tabAccount),
+              onTap: () => go(Routes.account),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

@@ -81,8 +81,15 @@ class AccountTab extends ConsumerWidget {
             onTap: () => context.push(Routes.wallet),
           ),
         ),
-        const SizedBox(height: 16),
-        const _BackgroundRunningCard(),
+        // Only relevant to roles that need to keep *receiving* things while
+        // backgrounded — a driver's job offers, a merchant's incoming orders.
+        // A plain rider has nothing that needs the app alive in the
+        // background, so the section would just be confusing noise for them.
+        if ((user?.isDriver ?? false) ||
+            (merchants.valueOrNull?.isNotEmpty ?? false)) ...[
+          const SizedBox(height: 16),
+          const _BackgroundRunningCard(),
+        ],
         const SizedBox(height: 16),
         Card(
           child: ListTile(
