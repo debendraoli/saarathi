@@ -5,7 +5,7 @@
 use crate::auth::StaffUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::{routing::get, Json, Router};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -17,6 +17,9 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/admin/rides", get(rides))
         .route("/v1/admin/cancellations", get(cancellations))
         .route("/v1/admin/leaderboard", get(leaderboard))
+        .route("/v1/admin/riders", get(riders))
+        .route("/v1/admin/riders/{id}", get(rider_detail))
+        .route("/v1/admin/driver-analytics/{id}", get(driver_analytics))
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -146,4 +149,209 @@ async fn leaderboard(
 
     let rows: Vec<LeaderRow> = sqlx::query_as(sql).fetch_all(&st.db).await?;
     Ok(Json(rows))
+}
+
+// ── Riders directory ─────────────────────────────────────────────────────────
+// Owned here (not auth, which owns the `users` table) because a useful rider
+// row needs trip/spend aggregates that only exist in rides' own schema — same
+// cross-schema-read-in-one-query convention `rides` already uses elsewhere in
+// this file (`JOIN users` against auth's table from rides' own pool).
+
+#[derive(Serialize, sqlx::FromRow)]
+struct RiderRow {
+    id: Uuid,
+    phone: String,
+    full_name: Option<String>,
+    status: String,
+    created_at: DateTime<Utc>,
+    total_rides: i64,
+    total_spend: Decimal,
+}
+
+#[derive(Deserialize)]
+struct RidersQuery {
+    #[serde(default)]
+    q: String,
+}
+
+async fn riders(
+    State(st): State<AppState>,
+    _staff: StaffUser,
+    Query(q): Query<RidersQuery>,
+) -> AppResult<Json<Vec<RiderRow>>> {
+    let query = q.q.trim().to_string();
+    let rows: Vec<RiderRow> = sqlx::query_as(
+        "SELECT u.id, u.phone, u.full_name, u.status::text AS status, u.created_at, \
+                COALESCE(agg.total_rides, 0) AS total_rides, \
+                COALESCE(agg.total_spend, 0) AS total_spend \
+         FROM users u \
+         LEFT JOIN ( \
+             SELECT rider_id, count(*) FILTER (WHERE status = 'completed') AS total_rides, \
+                    SUM(final_fare) FILTER (WHERE status = 'completed') AS total_spend \
+             FROM trips GROUP BY rider_id \
+         ) agg ON agg.rider_id = u.id \
+         WHERE u.role = 'rider' \
+           AND ($1 = '' OR u.phone ILIKE '%' || $1 || '%' OR u.full_name ILIKE '%' || $1 || '%') \
+         ORDER BY u.created_at DESC LIMIT 200",
+    )
+    .bind(&query)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+#[derive(Serialize)]
+struct RiderDetail {
+    id: Uuid,
+    phone: String,
+    full_name: Option<String>,
+    status: String,
+    created_at: DateTime<Utc>,
+    total_rides: i64,
+    completed_rides: i64,
+    cancelled_rides: i64,
+    total_spend: Decimal,
+    avg_rating: Option<f64>,
+    rating_count: i64,
+    recent_trips: Vec<RideRow>,
+}
+
+async fn rider_detail(
+    State(st): State<AppState>,
+    _staff: StaffUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<RiderDetail>> {
+    let user: Option<(String, Option<String>, String, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT phone, full_name, status::text, created_at FROM users WHERE id = $1 AND role = 'rider'",
+    )
+    .bind(id)
+    .fetch_optional(&st.db)
+    .await?;
+    let (phone, full_name, status, created_at) = user.ok_or(AppError::NotFound)?;
+
+    let (total_rides, completed_rides, cancelled_rides, total_spend): (i64, i64, i64, Decimal) =
+        sqlx::query_as(
+            "SELECT count(*), \
+                    count(*) FILTER (WHERE status = 'completed'), \
+                    count(*) FILTER (WHERE status = 'cancelled'), \
+                    COALESCE(SUM(final_fare) FILTER (WHERE status = 'completed'), 0) \
+             FROM trips WHERE rider_id = $1",
+        )
+        .bind(id)
+        .fetch_one(&st.db)
+        .await?;
+
+    let (avg_rating, rating_count): (Option<f64>, i64) = sqlx::query_as(
+        "SELECT AVG(stars)::float8, count(*) FROM ratings \
+         WHERE ratee_id = $1 AND role = 'driver_rates_rider'",
+    )
+    .bind(id)
+    .fetch_one(&st.db)
+    .await?;
+
+    let recent_trips: Vec<RideRow> = sqlx::query_as(
+        "SELECT t.id, t.rider_id, ur.full_name AS rider_name, t.driver_id, \
+                ud.full_name AS driver_name, t.status::text AS status, t.final_fare, \
+                t.payment_method, t.cancel_reason, t.cancelled_by_role, \
+                rt.stars AS driver_stars, t.created_at, t.accepted_at, t.completed_at \
+         FROM trips t \
+         JOIN users ur ON ur.id = t.rider_id \
+         LEFT JOIN users ud ON ud.id = t.driver_id \
+         LEFT JOIN ratings rt ON rt.trip_id = t.id AND rt.role = 'rider_rates_driver' \
+         WHERE t.rider_id = $1 ORDER BY t.created_at DESC LIMIT 20",
+    )
+    .bind(id)
+    .fetch_all(&st.db)
+    .await?;
+
+    Ok(Json(RiderDetail {
+        id,
+        phone,
+        full_name,
+        status,
+        created_at,
+        total_rides,
+        completed_rides,
+        cancelled_rides,
+        total_spend,
+        avg_rating,
+        rating_count,
+        recent_trips,
+    }))
+}
+
+// ── Per-driver analytics ─────────────────────────────────────────────────────
+// Separate from auth's /v1/admin/drivers/{id} (KYC profile — driver row PK) —
+// this takes the underlying *user* id, since that's what trips/ratings/
+// ledger_entries key on. Named distinctly (not nested under /v1/admin/drivers)
+// so the gateway's existing PathPrefix(`/v1/admin/drivers`) rule, already
+// routed to auth, doesn't need touching.
+
+#[derive(Serialize)]
+struct DriverAnalytics {
+    user_id: Uuid,
+    total_trips: i64,
+    completed_trips: i64,
+    cancelled_trips: i64,
+    total_earnings: Decimal,
+    avg_rating: Option<f64>,
+    rating_count: i64,
+    recent_trips: Vec<RideRow>,
+}
+
+async fn driver_analytics(
+    State(st): State<AppState>,
+    _staff: StaffUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<DriverAnalytics>> {
+    let (total_trips, completed_trips, cancelled_trips): (i64, i64, i64) = sqlx::query_as(
+        "SELECT count(*), \
+                count(*) FILTER (WHERE status = 'completed'), \
+                count(*) FILTER (WHERE status = 'cancelled') \
+         FROM trips WHERE driver_id = $1",
+    )
+    .bind(id)
+    .fetch_one(&st.db)
+    .await?;
+
+    let total_earnings: Decimal = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(driver_payout), 0) FROM ledger_entries WHERE driver_id = $1",
+    )
+    .bind(id)
+    .fetch_one(&st.db)
+    .await?;
+
+    let (avg_rating, rating_count): (Option<f64>, i64) = sqlx::query_as(
+        "SELECT AVG(stars)::float8, count(*) FROM ratings \
+         WHERE ratee_id = $1 AND role = 'rider_rates_driver'",
+    )
+    .bind(id)
+    .fetch_one(&st.db)
+    .await?;
+
+    let recent_trips: Vec<RideRow> = sqlx::query_as(
+        "SELECT t.id, t.rider_id, ur.full_name AS rider_name, t.driver_id, \
+                ud.full_name AS driver_name, t.status::text AS status, t.final_fare, \
+                t.payment_method, t.cancel_reason, t.cancelled_by_role, \
+                rt.stars AS driver_stars, t.created_at, t.accepted_at, t.completed_at \
+         FROM trips t \
+         JOIN users ur ON ur.id = t.rider_id \
+         LEFT JOIN users ud ON ud.id = t.driver_id \
+         LEFT JOIN ratings rt ON rt.trip_id = t.id AND rt.role = 'rider_rates_driver' \
+         WHERE t.driver_id = $1 ORDER BY t.created_at DESC LIMIT 20",
+    )
+    .bind(id)
+    .fetch_all(&st.db)
+    .await?;
+
+    Ok(Json(DriverAnalytics {
+        user_id: id,
+        total_trips,
+        completed_trips,
+        cancelled_trips,
+        total_earnings,
+        avg_rating,
+        rating_count,
+        recent_trips,
+    }))
 }

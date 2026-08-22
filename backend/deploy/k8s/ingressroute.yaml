@@ -81,6 +81,7 @@ spec:
         || PathPrefix(`/v1/admin/analytics`) || PathPrefix(`/v1/admin/cancellations`)
         || PathPrefix(`/v1/admin/credit-plans`) || PathPrefix(`/v1/admin/flags`)
         || PathPrefix(`/v1/admin/leaderboard`) || PathPrefix(`/v1/admin/ledger`)
+        || PathPrefix(`/v1/admin/riders`) || PathPrefix(`/v1/admin/driver-analytics`)
         || PathPrefix(`/v1/admin/reports`) || PathPrefix(`/v1/admin/rides`)
         || PathPrefix(`/v1/admin/sos`)
         || PathPrefix(`/v1/admin/surge`) || PathPrefix(`/v1/admin/trips`)
@@ -106,6 +107,7 @@ spec:
         || PathPrefix(`/v1/payout-accounts`) || PathPrefix(`/v1/disputes`)
         || PathPrefix(`/v1/payments`)
         || PathPrefix(`/v1/admin/payouts`) || PathPrefix(`/v1/admin/disputes`)
+        || PathPrefix(`/v1/admin/credits`)
       services:
         - name: saarathi-payments
           port: 80

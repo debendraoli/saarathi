@@ -30,6 +30,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/payouts", get(list_payouts).post(request_payout))
         .route("/v1/psp/payout/callback", post(payout_callback))
         .route("/v1/admin/payouts", get(admin_payouts))
+        .route("/v1/admin/credits/topup", post(admin_topup))
 }
 
 /// Nepal Time is UTC+5:45 (matches the NPT convention used in saarathi-rides).
@@ -482,6 +483,74 @@ async fn admin_payouts(
     .fetch_all(&st.db)
     .await?;
     Ok(Json(rows))
+}
+
+#[derive(Deserialize)]
+struct AdminTopupRequest {
+    user_id: Uuid,
+    /// "rider" credits their prepaid ride/order wallet; "driver" credits their
+    /// prepaid credit balance (the one the per-ride commission draws from) —
+    /// never the withdrawable earnings wallet, which only ever grows from
+    /// actual completed trips.
+    kind: String,
+    amount: Decimal,
+}
+
+/// Staff-initiated credit, bypassing the PSP entirely (no checkout, no
+/// verify-topup round trip) — for goodwill credits, dispute resolution, or
+/// onboarding incentives. Admin/super-admin only, same maker-checker bar as
+/// credit-plan approval; every grant is attributed to the staff member via
+/// the ledger `reference` so it's auditable after the fact.
+async fn admin_topup(
+    State(st): State<AppState>,
+    StaffUser(claims): StaffUser,
+    headers: HeaderMap,
+    Json(body): Json<AdminTopupRequest>,
+) -> AppResult<Json<Value>> {
+    if !claims.can_approve() {
+        return Err(AppError::Forbidden);
+    }
+    if body.amount <= Decimal::ZERO {
+        return Err(AppError::bad(
+            ErrorCode::AmountInvalid,
+            "amount must be positive",
+        ));
+    }
+    if !matches!(body.kind.as_str(), "rider" | "driver") {
+        return Err(AppError::BadRequest(
+            "kind must be 'rider' or 'driver'".into(),
+        ));
+    }
+    let key = idempotency_key(&headers)?;
+
+    let mut tx = st.db.begin().await?;
+    if let Reservation::Replay { status: _, body } =
+        idempotency::reserve(&mut tx, &key, claims.sub, "admin.credits.topup").await?
+    {
+        tx.commit().await?;
+        return Ok(Json(body));
+    }
+
+    let reference = format!("staff:{}", claims.sub);
+    let balance = if body.kind == "driver" {
+        wallet::credit_driver(&mut tx, body.user_id, body.amount, "admin_topup", Some(&reference))
+            .await?
+    } else {
+        wallet::credit_rider(
+            &mut tx,
+            body.user_id,
+            body.amount,
+            "admin_topup",
+            Some(&reference),
+            None,
+        )
+        .await?
+    };
+
+    let response = json!({ "ok": true, "balance": balance });
+    idempotency::store(&mut tx, &key, claims.sub, "admin.credits.topup", 200, &response).await?;
+    tx.commit().await?;
+    Ok(Json(response))
 }
 
 #[cfg(test)]

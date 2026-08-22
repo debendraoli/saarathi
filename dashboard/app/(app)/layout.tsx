@@ -20,6 +20,7 @@ import {
     Tag,
     ToggleRight,
     Trophy,
+    Users,
     Wallet,
     Zap,
     type LucideIcon,
@@ -47,6 +48,10 @@ const NAV: NavGroup[] = [
       { href: "/reports", label: "Reports", icon: Flag },
       { href: "/complaints", label: "Complaints", icon: MessageSquare },
     ],
+  },
+  {
+    title: "Riders",
+    items: [{ href: "/riders", label: "Riders", icon: Users }],
   },
   {
     title: "Drivers",

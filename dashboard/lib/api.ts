@@ -556,7 +556,58 @@ export const rides = {
     }),
   partnerDeactivateCampaign: (pid: string, id: string) =>
     ridesRequest<{ ok: boolean }>(`/v1/partner/${pid}/campaigns/${id}/deactivate`, { method: "POST" }),
+
+  // Riders directory + per-driver analytics
+  riders: (q?: string) =>
+    ridesRequest<RiderRow[]>(`/v1/admin/riders${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  riderDetail: (id: string) => ridesRequest<RiderDetail>(`/v1/admin/riders/${id}`),
+  driverAnalytics: (userId: string) =>
+    ridesRequest<DriverAnalytics>(`/v1/admin/driver-analytics/${userId}`),
+
+  // Staff-initiated credit top-up (bypasses the PSP) — rider or driver.
+  adminTopup: (userId: string, kind: "rider" | "driver", amount: number) =>
+    ridesRequest<{ ok: boolean; balance: string }>("/v1/admin/credits/topup", {
+      method: "POST",
+      headers: { "x-idempotency-key": crypto.randomUUID() },
+      body: JSON.stringify({ user_id: userId, kind, amount }),
+    }),
 };
+
+export interface RiderRow {
+  id: string;
+  phone: string;
+  full_name: string | null;
+  status: string;
+  created_at: string;
+  total_rides: number;
+  total_spend: string;
+}
+
+export interface RiderDetail {
+  id: string;
+  phone: string;
+  full_name: string | null;
+  status: string;
+  created_at: string;
+  total_rides: number;
+  completed_rides: number;
+  cancelled_rides: number;
+  total_spend: string;
+  avg_rating: number | null;
+  rating_count: number;
+  recent_trips: RideRow[];
+}
+
+export interface DriverAnalytics {
+  user_id: string;
+  total_trips: number;
+  completed_trips: number;
+  cancelled_trips: number;
+  total_earnings: string;
+  avg_rating: number | null;
+  rating_count: number;
+  recent_trips: RideRow[];
+}
 
 export interface FleetAnalytics {
   active_drivers: number;

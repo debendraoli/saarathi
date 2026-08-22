@@ -1,23 +1,28 @@
 "use client";
 
-import { api, type DriverDetail, type DriverDocument } from "@/lib/api";
+import { TopupModal } from "@/components/TopupModal";
+import { api, auth, rides, type DriverAnalytics, type DriverDetail, type DriverDocument } from "@/lib/api";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 
 export default function DriverDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const router = useRouter();
   const [data, setData] = useState<DriverDetail | null>(null);
+  const [analytics, setAnalytics] = useState<DriverAnalytics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
+  const [showTopup, setShowTopup] = useState(false);
+  const canTopup = ["super_admin", "admin"].includes(auth.user?.role ?? "");
 
   async function load() {
     setError(null);
     try {
-      setData(await api.driverDetail(id));
+      const d = await api.driverDetail(id);
+      setData(d);
+      // Best-effort — analytics keys on the user id, not the driver row id.
+      rides.driverAnalytics(d.user.id).then(setAnalytics).catch(() => {});
     } catch (e) {
       setError((e as Error).message);
     }
@@ -88,6 +93,44 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
         <div className="error">Rejected: {driver.rejection_reason}</div>
       )}
 
+      {canTopup && (
+        <div className="row">
+          <button className="btn primary" onClick={() => setShowTopup(true)}>
+            Top up credits
+          </button>
+        </div>
+      )}
+
+      {analytics && (
+        <div className="stat-grid">
+          <div className="stat">
+            <div className="label">Total trips</div>
+            <div className="value">{analytics.total_trips}</div>
+          </div>
+          <div className="stat">
+            <div className="label">Completed</div>
+            <div className="value">{analytics.completed_trips}</div>
+          </div>
+          <div className="stat">
+            <div className="label">Cancelled</div>
+            <div className="value">{analytics.cancelled_trips}</div>
+          </div>
+          <div className="stat">
+            <div className="label">Earnings</div>
+            <div className="value">NPR {analytics.total_earnings}</div>
+          </div>
+          <div className="stat">
+            <div className="label">Rating</div>
+            <div className="value">
+              {analytics.avg_rating != null ? `${analytics.avg_rating.toFixed(1)} ★` : "—"}
+            </div>
+            {analytics.rating_count > 0 && (
+              <div className="subtle" style={{ fontSize: 12.5 }}>{analytics.rating_count} ratings</div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="grid-2">
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Applicant</h3>
@@ -139,6 +182,39 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
         )}
       </div>
 
+      {analytics && analytics.recent_trips.length > 0 && (
+        <div className="card" style={{ padding: 0 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Rider</th>
+                <th>Status</th>
+                <th>Fare</th>
+                <th>Pay</th>
+                <th>Rating</th>
+                <th>When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {analytics.recent_trips.map((t) => (
+                <tr key={t.id}>
+                  <td>{t.rider_name ?? t.rider_id.slice(0, 8)}</td>
+                  <td>
+                    <span className={`badge ${t.status === "completed" ? "approved" : t.status === "cancelled" ? "rejected" : "under_review"}`}>
+                      {t.status.replace("_", " ")}
+                    </span>
+                  </td>
+                  <td>NPR {t.final_fare}</td>
+                  <td className="subtle">{t.payment_method}</td>
+                  <td>{t.driver_stars ? "★".repeat(t.driver_stars) : "—"}</td>
+                  <td className="subtle">{new Date(t.created_at).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {!decided && (
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Decision</h3>
@@ -174,6 +250,14 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
           )}
         </div>
       )}
+
+      <TopupModal
+        open={showTopup}
+        onClose={() => setShowTopup(false)}
+        userId={user.id}
+        kind="driver"
+        onDone={() => load()}
+      />
     </div>
   );
 }
