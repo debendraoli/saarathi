@@ -13,6 +13,8 @@ pub struct AppState {
     pub redis: redis::aio::ConnectionManager,
     pub router: Arc<RoutingClient>,
     pub http: reqwest::Client,
+    /// NATS bus for order-lifecycle notifications. `None` if unavailable.
+    pub nats: Option<async_nats::Client>,
 }
 
 impl saarathi_core::authn::HasJwtSecret for AppState {

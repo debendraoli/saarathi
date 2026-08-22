@@ -135,6 +135,7 @@ async fn create_report(
         saarathi_core::domain::notif::TRANSACTIONAL,
         "Report received",
         "Our team will review it shortly.",
+        None,
     )
     .await;
     Ok(Json(json!({ "id": report_id, "status": "open" })))

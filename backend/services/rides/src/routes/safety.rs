@@ -89,6 +89,7 @@ async fn trigger(
             saarathi_core::domain::notif::SAFETY,
             "SOS raised on your trip",
             "Emergency alert — Ops has been notified.",
+            None,
         )
         .await;
     }

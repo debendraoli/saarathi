@@ -445,7 +445,94 @@ async fn update_status(
         )
         .await;
     }
+    if m.status.as_str() != body.status {
+        notify_status_change(&st, &m, id, claims.sub, &body.status).await;
+    }
     Ok(Json(trip))
+}
+
+/// Notify whichever side of the trip didn't just act — a status change is
+/// always something that happens *to* the other party, not to the one who
+/// triggered it (a driver marking "arriving" is news to the rider, not to
+/// themselves). Fire-and-forget: never blocks or fails the status update.
+async fn notify_status_change(
+    st: &AppState,
+    m: &TripMoney,
+    trip_id: Uuid,
+    actor: Uuid,
+    status: &str,
+) {
+    let Some(driver_id) = m.driver_id else { return };
+    let link = Some(format!("saarathi://trip/{trip_id}"));
+    match status {
+        "arriving" => {
+            // Enrich with the driver's actual vehicle so the rider can spot
+            // them on the street, not just a generic "driver is close" ping.
+            let vehicle: Option<(String, String, String)> = sqlx::query_as(
+                "SELECT class::text, COALESCE(model, ''), COALESCE(plate_number, '') \
+                 FROM vehicles WHERE driver_id = $1",
+            )
+            .bind(driver_id)
+            .fetch_optional(&st.db)
+            .await
+            .ok()
+            .flatten();
+            let body = match vehicle {
+                Some((_, model, plate)) if !plate.is_empty() => {
+                    let model = if model.is_empty() { "vehicle".to_string() } else { model };
+                    format!("Your driver is arriving on {model} ({plate}).")
+                }
+                _ => "Your driver is arriving at your pickup point.".to_string(),
+            };
+            crate::notify::send(
+                &st.nats,
+                m.rider_id,
+                saarathi_core::domain::notif::TRANSACTIONAL,
+                "Driver arriving",
+                &body,
+                link.clone(),
+            )
+            .await;
+        }
+        "in_progress" => {
+            crate::notify::send(
+                &st.nats,
+                m.rider_id,
+                saarathi_core::domain::notif::TRANSACTIONAL,
+                "Trip started",
+                "Your trip is on its way to the destination.",
+                link.clone(),
+            )
+            .await;
+        }
+        "completed" => {
+            crate::notify::send(
+                &st.nats,
+                m.rider_id,
+                saarathi_core::domain::notif::TRANSACTIONAL,
+                "Trip completed",
+                "You've arrived. Thanks for riding with Saarathi!",
+                link.clone(),
+            )
+            .await;
+        }
+        "cancelled" => {
+            // Whoever didn't cancel gets told; a driver-less trip only has a rider.
+            let recipient = if actor == m.rider_id { Some(driver_id) } else { Some(m.rider_id) };
+            if let Some(recipient) = recipient {
+                crate::notify::send(
+                    &st.nats,
+                    recipient,
+                    saarathi_core::domain::notif::TRANSACTIONAL,
+                    "Trip cancelled",
+                    "The trip was cancelled.",
+                    link.clone(),
+                )
+                .await;
+            }
+        }
+        _ => {}
+    }
 }
 
 async fn get_trip(

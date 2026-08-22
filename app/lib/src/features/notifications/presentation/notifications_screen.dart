@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../core/router/deep_links.dart';
 import '../../../shared/widgets/common.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../data/notifications_repository.dart';
@@ -74,13 +76,21 @@ class NotificationsScreen extends ConsumerWidget {
                     ),
                   ),
                   subtitle: n.body == null ? null : Text(n.body!),
-                  onTap: n.read
+                  onTap: (n.read && n.link == null)
                       ? null
                       : () async {
-                          await ref
-                              .read(notificationsRepositoryProvider)
-                              .markRead(n.id);
-                          ref.invalidate(inboxProvider);
+                          if (!n.read) {
+                            await ref
+                                .read(notificationsRepositoryProvider)
+                                .markRead(n.id);
+                            ref.invalidate(inboxProvider);
+                          }
+                          final link = n.link;
+                          if (link == null) return;
+                          final target = routeForDeepLink(Uri.parse(link));
+                          if (target != null && context.mounted) {
+                            context.push(target);
+                          }
                         },
                 );
               },

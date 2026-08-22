@@ -21,7 +21,10 @@ pub fn routes() -> Router<AppState> {
             axum::routing::delete(delete_location),
         )
         .route("/v1/me/location-ping", post(location_ping))
-        .route("/v1/me/push-token", post(save_push_token))
+        .route(
+            "/v1/me/push-token",
+            post(save_push_token).delete(delete_push_token),
+        )
         .route(
             "/v1/me/preferences",
             get(get_preferences).put(update_preferences),
@@ -175,6 +178,26 @@ async fn save_push_token(
     .bind(body.platform)
     .execute(&st.db)
     .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct PushTokenUnregister {
+    token: String,
+}
+
+/// Drop this device's token on sign-out, so a shared/reused device stops
+/// getting a signed-out user's pushes until someone logs back in on it.
+async fn delete_push_token(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<PushTokenUnregister>,
+) -> AppResult<Json<Value>> {
+    sqlx::query("DELETE FROM device_tokens WHERE token = $1 AND user_id = $2")
+        .bind(body.token.trim())
+        .bind(claims.sub)
+        .execute(&st.db)
+        .await?;
     Ok(Json(json!({ "ok": true })))
 }
 

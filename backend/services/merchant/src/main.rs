@@ -9,6 +9,7 @@
 mod auth;
 mod config;
 mod error;
+mod notify;
 mod routes;
 mod state;
 
@@ -52,6 +53,15 @@ async fn main() -> anyhow::Result<()> {
         .timeout(Duration::from_secs(5))
         .build()?;
 
+    // NATS bus for order notifications (non-fatal: orders run fine if the bus is down).
+    let nats = match async_nats::connect(&config.nats_url).await {
+        Ok(c) => Some(c),
+        Err(e) => {
+            tracing::warn!(error = %e, "NATS unavailable; order notifications will be skipped");
+            None
+        }
+    };
+
     let port = config.port;
     let state = AppState {
         db,
@@ -59,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
         redis,
         router,
         http,
+        nats,
     };
 
     let app = Router::new()

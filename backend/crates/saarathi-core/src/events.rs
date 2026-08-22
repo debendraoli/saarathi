@@ -18,4 +18,9 @@ pub struct NotifyRequest {
     pub class: String,
     pub title: String,
     pub body: String,
+    /// Deep link the client should open on tap, e.g. `saarathi://trip/<id>`.
+    /// `None` for notifications with nothing to navigate to (safety pings,
+    /// marketing copy).
+    #[serde(default)]
+    pub link: Option<String>,
 }

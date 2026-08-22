@@ -258,6 +258,7 @@ async fn accept_offer(
         saarathi_core::domain::notif::TRANSACTIONAL,
         "Driver on the way",
         "Your driver accepted the trip and is heading to your pickup.",
+        Some(format!("saarathi://trip/{id}")),
     )
     .await;
     Ok(Json(trip))

@@ -1,14 +1,11 @@
-//! Notification publishing. Trips don't write the inbox anymore — they publish a
-//! `NotifyRequest` to NATS and the standalone `saarathi-notify` service persists
-//! it and runs the push/SMS ladder. Fire-and-forget: a bus blip never fails a
-//! ride.
+//! Notification publishing. Mirrors rides' notify.rs: order events don't write
+//! the inbox directly, they publish a `NotifyRequest` to NATS and the
+//! standalone `saarathi-notify` service persists it and runs the push ladder.
+//! Fire-and-forget: a bus blip never fails an order.
 
 use saarathi_core::events::{NotifyRequest, NOTIFY_SUBJECT};
 use uuid::Uuid;
 
-/// Publish a notification request for `user_id` onto the bus. No-op (logged) if
-/// NATS isn't connected. `link`, when given, is the `saarathi://…` deep link a
-/// tap on the notification should open.
 pub async fn send(
     nats: &Option<async_nats::Client>,
     user_id: Uuid,

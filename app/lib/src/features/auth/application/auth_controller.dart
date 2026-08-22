@@ -93,6 +93,9 @@ class AuthController extends Notifier<AuthState> {
   }
 
   Future<void> signOut() async {
+    // Must happen before clearing tokens — unregister needs the still-valid
+    // session to prove which device/user pairing to drop.
+    await PushService.instance.unregister(ref.read(apiClientProvider));
     await _tokens.clear();
     state = const AuthState(status: AuthStatus.unauthenticated);
   }

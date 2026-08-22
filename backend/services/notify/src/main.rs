@@ -125,13 +125,16 @@ async fn deliver(
     req: &NotifyRequest,
     fcm: Option<&fcm::FcmSender>,
 ) -> anyhow::Result<()> {
-    sqlx::query("INSERT INTO notifications (user_id, class, title, body) VALUES ($1, $2, $3, $4)")
-        .bind(req.user_id)
-        .bind(&req.class)
-        .bind(&req.title)
-        .bind(&req.body)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO notifications (user_id, class, title, body, link) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(req.user_id)
+    .bind(&req.class)
+    .bind(&req.title)
+    .bind(&req.body)
+    .bind(&req.link)
+    .execute(pool)
+    .await?;
     if notif::CRITICAL.contains(&req.class.as_str()) {
         tracing::info!(user_id = %req.user_id, class = %req.class, title = %req.title,
             "notification escalated (critical)");
@@ -146,7 +149,10 @@ async fn deliver(
                 .await
                 .unwrap_or_default();
         for (token,) in tokens {
-            if let Err(e) = sender.send(&token, &req.title, &req.body).await {
+            if let Err(e) = sender
+                .send(&token, &req.title, &req.body, req.link.as_deref())
+                .await
+            {
                 tracing::warn!(error = %e, "notify: FCM send failed");
             }
         }
@@ -164,6 +170,7 @@ struct Notification {
     class: String,
     title: String,
     body: Option<String>,
+    link: Option<String>,
     read_at: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
 }
@@ -173,7 +180,7 @@ async fn inbox(
     AuthUser(claims): AuthUser,
 ) -> Result<Json<Value>, StatusCode> {
     let items: Vec<Notification> = sqlx::query_as(
-        "SELECT id, class, title, body, read_at, created_at FROM notifications \
+        "SELECT id, class, title, body, link, read_at, created_at FROM notifications \
          WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100",
     )
     .bind(claims.sub)

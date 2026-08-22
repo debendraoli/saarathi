@@ -11,3 +11,4 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at DESC);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS link text;  -- deep link to open on tap, e.g. saarathi://trip/<id>

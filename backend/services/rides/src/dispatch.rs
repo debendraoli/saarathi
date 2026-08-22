@@ -364,6 +364,7 @@ pub async fn run_dispatcher(st: AppState) {
                 saarathi_core::domain::notif::TRANSACTIONAL,
                 "No driver found",
                 "We couldn't find a nearby driver for your trip. Please try requesting again.",
+                None,
             )
             .await;
             tracing::info!(trip = %tid, "dispatch: search timed out, cancelled");

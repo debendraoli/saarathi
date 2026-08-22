@@ -13,6 +13,7 @@ class AppNotification {
     required this.klass,
     required this.read,
     this.body,
+    this.link,
     this.createdAt,
   });
 
@@ -21,6 +22,7 @@ class AppNotification {
   final String klass;
   final bool read;
   final String? body;
+  final String? link;
   final DateTime? createdAt;
 
   factory AppNotification.fromJson(Map<String, dynamic> j) => AppNotification(
@@ -29,6 +31,7 @@ class AppNotification {
         klass: (j['class'] as String?) ?? 'info',
         read: j['read_at'] != null,
         body: j['body'] as String?,
+        link: j['link'] as String?,
         createdAt: DateTime.tryParse((j['created_at'] as String?) ?? ''),
       );
 }

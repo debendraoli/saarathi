@@ -22,6 +22,8 @@ pub struct Config {
     pub internal_service_secret: String,
     pub delivery_base_fare: Decimal,
     pub delivery_per_km: Decimal,
+    /// NATS bus for order-lifecycle notifications ("new order", "order approved", …).
+    pub nats_url: String,
 }
 
 impl Config {
@@ -42,6 +44,7 @@ impl Config {
             internal_service_secret: opt("INTERNAL_SERVICE_SECRET").unwrap_or_default(),
             delivery_base_fare: dec_env("DELIVERY_BASE_FARE", "30"),
             delivery_per_km: dec_env("DELIVERY_PER_KM", "15"),
+            nats_url: opt("NATS_URL").unwrap_or_else(|| "nats://localhost:4222".into()),
         })
     }
 }

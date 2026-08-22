@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 /// Foreground/local notifications. Production push (FCM/APNs) layers on top of
@@ -11,17 +13,30 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
   bool _ready = false;
 
+  /// Emits the notification's `link` (if any) when the user taps a locally
+  /// shown notification — i.e. one we displayed ourselves while the app was
+  /// in the foreground. Background/terminated taps go through FCM's own
+  /// onMessageOpenedApp / getInitialMessage instead (see PushService).
+  final _tapController = StreamController<String>.broadcast();
+  Stream<String> get onTap => _tapController.stream;
+
   Future<void> init() async {
     if (_ready) return;
     const settings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       iOS: DarwinInitializationSettings(),
     );
-    await _plugin.initialize(settings: settings);
+    await _plugin.initialize(
+      settings: settings,
+      onDidReceiveNotificationResponse: (response) {
+        final link = response.payload;
+        if (link != null && link.isNotEmpty) _tapController.add(link);
+      },
+    );
     _ready = true;
   }
 
-  Future<void> show(String title, String? body) async {
+  Future<void> show(String title, String? body, {String? link}) async {
     if (!_ready) await init();
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
@@ -38,6 +53,7 @@ class NotificationService {
       title: title,
       body: body,
       notificationDetails: details,
+      payload: link,
     );
   }
 }

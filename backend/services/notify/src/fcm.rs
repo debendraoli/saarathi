@@ -111,19 +111,29 @@ impl FcmSender {
         Ok(tok)
     }
 
-    /// Send one notification to one device token. Returns Ok on 2xx.
-    pub async fn send(&self, token: &str, title: &str, body: &str) -> anyhow::Result<()> {
+    /// Send one notification to one device token. `link`, when present, rides
+    /// along as a data field so a tap can navigate straight to the relevant
+    /// screen instead of just opening the app. Returns Ok on 2xx.
+    pub async fn send(
+        &self,
+        token: &str,
+        title: &str,
+        body: &str,
+        link: Option<&str>,
+    ) -> anyhow::Result<()> {
         let access = self.access_token().await?;
         let url = format!(
             "https://fcm.googleapis.com/v1/projects/{}/messages:send",
             self.project_id
         );
-        let payload = serde_json::json!({
-            "message": {
-                "token": token,
-                "notification": { "title": title, "body": body }
-            }
+        let mut message = serde_json::json!({
+            "token": token,
+            "notification": { "title": title, "body": body }
         });
+        if let Some(link) = link {
+            message["data"] = serde_json::json!({ "link": link });
+        }
+        let payload = serde_json::json!({ "message": message });
         self.http
             .post(&url)
             .bearer_auth(access)

@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import 'core/notifications/notification_nav.dart';
 import 'core/prefs.dart';
 import 'core/router/app_router.dart';
 import 'core/router/deep_links.dart';
@@ -17,6 +18,7 @@ class SaarathiApp extends ConsumerWidget {
     final router = ref.watch(goRouterProvider);
     final locale = ref.watch(localeControllerProvider);
     ref.watch(deepLinkHandlerProvider); // forwards saarathi:// links to routes
+    ref.watch(notificationNavProvider); // routes tapped notifications
 
     return MaterialApp.router(
       title: 'Saarathi',

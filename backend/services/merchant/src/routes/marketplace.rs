@@ -392,6 +392,20 @@ async fn place_order(
     .map_err(AppError::Other)?;
     tx.commit().await?;
 
+    let owner_id: Uuid = sqlx::query_scalar("SELECT owner_user_id FROM merchants WHERE id = $1")
+        .bind(body.merchant_id)
+        .fetch_one(&st.db)
+        .await?;
+    crate::notify::send(
+        &st.nats,
+        owner_id,
+        saarathi_core::domain::notif::TRANSACTIONAL,
+        "New order arrived",
+        &format!("A new order (NPR {}) just came in.", total.round_dp(0)),
+        Some(format!("saarathi://order/{order_id}")),
+    )
+    .await;
+
     order_json(&st, order_id, claims.sub, false).await
 }
 
@@ -531,12 +545,74 @@ async fn update_order_status(
     }
     tx.commit().await?;
 
+    notify_status_change(&st, id, merchant_id, customer_id, is_merchant, &body.status, refunding).await;
+
     // On 'ready', spawn the courier delivery trip via rides' internal API.
     if body.status == "ready" {
         spawn_courier(&st, id).await?;
     }
 
     order_json(&st, id, claims.sub, claims.is_staff()).await
+}
+
+/// Tell whichever side of the order didn't just act: the merchant driving the
+/// order notifies the customer, a customer cancelling notifies the merchant.
+async fn notify_status_change(
+    st: &AppState,
+    order_id: Uuid,
+    merchant_id: Uuid,
+    customer_id: Uuid,
+    changed_by_merchant: bool,
+    status: &str,
+    refunding: bool,
+) {
+    let link = Some(format!("saarathi://order/{order_id}"));
+    if !changed_by_merchant {
+        // Only reachable for a customer-initiated cancel (see the guard above).
+        let Ok(owner_id) =
+            sqlx::query_scalar::<_, Uuid>("SELECT owner_user_id FROM merchants WHERE id = $1")
+                .bind(merchant_id)
+                .fetch_one(&st.db)
+                .await
+        else {
+            return;
+        };
+        crate::notify::send(
+            &st.nats,
+            owner_id,
+            saarathi_core::domain::notif::TRANSACTIONAL,
+            "Order cancelled",
+            "The customer cancelled this order.",
+            link,
+        )
+        .await;
+        return;
+    }
+
+    let (title, body): (&str, String) = match status {
+        "confirmed" => ("Order approved", "Your order has been approved and will be prepared shortly.".into()),
+        "preparing" => ("Order is preparing", "Your order is being prepared.".into()),
+        "picked_up" => ("Order picked up", "Your order has been picked up and is on its way.".into()),
+        "delivered" => ("Order delivered", "Your order has been delivered. Enjoy!".into()),
+        "cancelled" | "rejected" => {
+            let verb = if status == "cancelled" { "cancelled" } else { "rejected" };
+            let refund_note = if refunding { " Your payment has been refunded to your wallet." } else { "" };
+            ("Order cancelled", format!("The merchant {verb} your order.{refund_note}"))
+        }
+        // "ready" and "placed" don't get a customer-facing message here — "ready"
+        // is covered once a courier accepts the delivery trip (rides' own
+        // "Driver on the way" notification), and "placed" is the initial state.
+        _ => return,
+    };
+    crate::notify::send(
+        &st.nats,
+        customer_id,
+        saarathi_core::domain::notif::TRANSACTIONAL,
+        title,
+        &body,
+        link,
+    )
+    .await;
 }
 
 #[derive(Serialize)]
