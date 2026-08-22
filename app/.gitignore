@@ -22,3 +22,6 @@ lib/l10n/app_localizations*.dart
 *.jks
 ios/Runner/GoogleService-Info.plist
 android/app/google-services.json
+# Unused — Firebase.initializeApp() relies on the native config above, not
+# this. flutterfire configure regenerates it every run; not worth tracking.
+lib/firebase_options.dart
