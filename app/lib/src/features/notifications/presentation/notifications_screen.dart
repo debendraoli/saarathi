@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../data/notifications_repository.dart';
 
 class NotificationsScreen extends ConsumerWidget {
@@ -27,7 +28,7 @@ class NotificationsScreen extends ConsumerWidget {
         ],
       ),
       body: inbox.when(
-        loading: () => const LoadingView(),
+        loading: () => const SkeletonList(),
         error: (_, __) => ErrorRetry(
           message: l.errorNetwork,
           onRetry: () => ref.invalidate(inboxProvider),

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../../marketplace/domain/models.dart';
 import '../data/merchant_repository.dart';
 
@@ -71,7 +73,7 @@ class _MerchantOrdersScreenState extends ConsumerState<MerchantOrdersScreen> {
           ),
           Expanded(
             child: async.when(
-              loading: () => const LoadingView(),
+              loading: () => const SkeletonList(),
               error: (_, __) => ErrorRetry(
                 message: l.errorNetwork,
                 onRetry: () =>
@@ -127,6 +129,11 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   }
 
   Future<void> _advance(String status) async {
+    if (status == 'rejected') {
+      Haptics.warning();
+    } else {
+      Haptics.success();
+    }
     setState(() => _busy = true);
     try {
       await ref
@@ -134,6 +141,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           .advance(widget.order.id, status);
       ref.invalidate(merchantOrdersProvider(widget.merchantId));
     } catch (_) {
+      Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(AppL10n.of(context).errorNetwork)),

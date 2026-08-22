@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../ride/domain/models.dart';
 import '../data/driver_kyc_repository.dart';
@@ -73,8 +74,10 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
             ),
           );
       await ref.read(authControllerProvider.notifier).refresh();
+      Haptics.success();
       if (mounted) context.pushReplacement(Routes.kyc);
     } catch (_) {
+      Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(AppL10n.of(context).errorGeneric)));

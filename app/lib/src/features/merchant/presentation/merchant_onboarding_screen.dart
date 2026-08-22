@@ -6,6 +6,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../data/merchant_repository.dart';
 
 /// Self-service merchant registration: name, type, contact, PAN/VAT + pin.
@@ -59,8 +60,10 @@ class _MerchantOnboardingScreenState
             panVat: _panVat.text.trim(),
           );
       ref.invalidate(myMerchantsProvider);
+      Haptics.success();
       if (mounted) context.go(Routes.merchantDashboard);
     } catch (_) {
+      Haptics.error();
       if (mounted) {
         setState(() => _busy = false);
         ScaffoldMessenger.of(context).showSnackBar(

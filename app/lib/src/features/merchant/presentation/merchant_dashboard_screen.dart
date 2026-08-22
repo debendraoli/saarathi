@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../../marketplace/domain/models.dart';
 import '../data/merchant_repository.dart';
 
@@ -21,7 +23,7 @@ class MerchantDashboardScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: Text(l.merchantStore)),
       body: async.when(
-        loading: () => const LoadingView(),
+        loading: () => const SkeletonList(),
         error: (_, __) => ErrorRetry(
           message: l.errorNetwork,
           onRetry: () => ref.invalidate(myMerchantsProvider),
@@ -58,6 +60,7 @@ class _StoreCardState extends ConsumerState<_StoreCard> {
   bool _busy = false;
 
   Future<void> _toggle(bool value) async {
+    Haptics.tap();
     setState(() => _busy = true);
     try {
       final now = await ref
@@ -65,6 +68,7 @@ class _StoreCardState extends ConsumerState<_StoreCard> {
           .setOpen(widget.merchant.id, value);
       if (mounted) setState(() => _open = now);
     } catch (_) {
+      Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(AppL10n.of(context).errorNetwork)),

@@ -7,6 +7,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../data/driver_kyc_repository.dart';
 import '../domain/models.dart';
 
@@ -64,7 +65,7 @@ class _KycDocumentsScreenState extends ConsumerState<KycDocumentsScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(l.uploadDocuments)),
       body: kyc.when(
-        loading: () => const LoadingView(),
+        loading: () => const SkeletonList(),
         error: (_, __) => ErrorRetry(
           message: l.errorNetwork,
           onRetry: () => ref.invalidate(driverKycProvider),
@@ -226,8 +227,10 @@ class _DocRowState extends ConsumerState<_DocRow> {
       await ref
           .read(driverKycRepositoryProvider)
           .uploadDocument(widget.kind.wire, file.path);
+      Haptics.success();
       ref.invalidate(driverKycProvider);
     } catch (_) {
+      Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(AppL10n.of(context).errorGeneric)));

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../data/places_repository.dart';
 import 'address_search_screen.dart';
 
@@ -58,8 +60,10 @@ class SavedPlacesScreen extends ConsumerWidget {
       await ref
           .read(placesRepositoryProvider)
           .add(label, hit.point, address: hit.address);
+      Haptics.success();
       ref.invalidate(savedPlacesProvider);
     } catch (_) {
+      Haptics.error();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(AppL10n.of(context).errorNetwork)),
@@ -92,11 +96,13 @@ class SavedPlacesScreen extends ConsumerWidget {
       ),
     );
     if (confirmed != true) return;
+    Haptics.warning();
 
     try {
       await ref.read(placesRepositoryProvider).remove(place.id);
       ref.invalidate(savedPlacesProvider);
     } catch (_) {
+      Haptics.error();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(AppL10n.of(context).errorNetwork)),
@@ -118,7 +124,7 @@ class SavedPlacesScreen extends ConsumerWidget {
         label: Text(l.addPlace),
       ),
       body: async.when(
-        loading: () => const LoadingView(),
+        loading: () => const SkeletonList(),
         error: (_, __) => ErrorRetry(
           message: l.errorNetwork,
           onRetry: () => ref.invalidate(savedPlacesProvider),

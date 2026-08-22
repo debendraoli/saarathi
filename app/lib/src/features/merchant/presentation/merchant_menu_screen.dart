@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../../marketplace/domain/models.dart';
 import '../data/merchant_repository.dart';
 
@@ -25,7 +27,7 @@ class MerchantMenuScreen extends ConsumerWidget {
         label: Text(l.merchantAddItem),
       ),
       body: async.when(
-        loading: () => const LoadingView(),
+        loading: () => const SkeletonList(),
         error: (_, __) => ErrorRetry(
           message: l.errorNetwork,
           onRetry: () => ref.invalidate(merchantMenuProvider(merchant.id)),
@@ -74,6 +76,7 @@ class _ItemTileState extends ConsumerState<_ItemTile> {
   bool _busy = false;
 
   Future<void> _toggle(bool value) async {
+    Haptics.tap();
     setState(() => _busy = true);
     try {
       await ref
@@ -81,6 +84,7 @@ class _ItemTileState extends ConsumerState<_ItemTile> {
           .setItemAvailable(widget.item.id, value);
       if (mounted) setState(() => _available = value);
     } catch (_) {
+      Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(AppL10n.of(context).errorNetwork)),
@@ -150,8 +154,10 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
             category: _category.text.trim(),
             description: _description.text.trim(),
           );
+      Haptics.success();
       if (mounted) Navigator.pop(context, true);
     } catch (_) {
+      Haptics.error();
       if (mounted) {
         setState(() => _busy = false);
         ScaffoldMessenger.of(context).showSnackBar(

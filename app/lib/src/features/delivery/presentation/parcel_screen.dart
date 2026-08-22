@@ -7,6 +7,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../../ride/domain/models.dart';
 import '../../ride/presentation/widgets/map_view.dart';
 import '../data/delivery_repository.dart';
@@ -91,8 +92,10 @@ class _ParcelScreenState extends ConsumerState<ParcelScreen> {
               pickupNote: _note.text.trim(),
             ),
           );
+      Haptics.success();
       if (mounted) context.go('${Routes.trip}/${trip.id}');
     } catch (_) {
+      Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(AppL10n.of(context).errorGeneric)));

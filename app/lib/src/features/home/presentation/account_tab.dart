@@ -5,6 +5,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/prefs.dart';
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../merchant/data/merchant_repository.dart';
 
@@ -87,7 +88,10 @@ class AccountTab extends ConsumerWidget {
         ),
         const SizedBox(height: 24),
         OutlinedButton.icon(
-          onPressed: () => ref.read(authControllerProvider.notifier).signOut(),
+          onPressed: () {
+            Haptics.warning();
+            ref.read(authControllerProvider.notifier).signOut();
+          },
           icon: const Icon(Icons.logout_rounded),
           label: const Text('Sign out'),
         ),
