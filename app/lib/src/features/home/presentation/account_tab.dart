@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/foreground/driver_foreground_service.dart';
+import '../../../core/notifications/push_service.dart';
 import '../../../core/prefs.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
@@ -53,6 +54,7 @@ class AccountTab extends ConsumerWidget {
             ),
           ),
         ),
+        const _NotificationPermissionCard(),
         merchants.maybeWhen(
           data: (list) => list.isEmpty
               ? const SizedBox.shrink()
@@ -152,6 +154,81 @@ class AccountTab extends ConsumerWidget {
     if (name != null && name.isNotEmpty) {
       await ref.read(authControllerProvider.notifier).updateName(name);
     }
+  }
+}
+
+/// Surfaces a denied OS notification permission — otherwise every push and
+/// local notification (driver arriving, order approved, …) is silently
+/// dropped with nothing in the UI to explain why. Hidden entirely once
+/// granted; only action available is "open settings" since re-requesting
+/// from inside the app is a no-op after the first denial on both Android 13+
+/// and iOS.
+class _NotificationPermissionCard extends StatefulWidget {
+  const _NotificationPermissionCard();
+
+  @override
+  State<_NotificationPermissionCard> createState() =>
+      _NotificationPermissionCardState();
+}
+
+class _NotificationPermissionCardState
+    extends State<_NotificationPermissionCard> with WidgetsBindingObserver {
+  bool _granted = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Coming back from the system settings screen — pick up the new value.
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  Future<void> _refresh() async {
+    await PushService.instance.refreshPermissionStatus();
+    if (mounted) setState(() => _granted = PushService.instance.permissionGranted);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_granted) return const SizedBox.shrink();
+    final l = AppL10n.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Card(
+        color: scheme.errorContainer,
+        child: ListTile(
+          contentPadding: const EdgeInsets.all(12),
+          leading: Icon(Icons.notifications_off_rounded,
+              color: scheme.onErrorContainer),
+          title: Text(
+            l.notificationsOffTitle,
+            style: TextStyle(
+                fontWeight: FontWeight.w700, color: scheme.onErrorContainer),
+          ),
+          subtitle: Text(l.notificationsOffBody,
+              style: TextStyle(color: scheme.onErrorContainer)),
+          trailing: TextButton(
+            onPressed: () {
+              Haptics.tap();
+              PushService.instance.openSettings();
+            },
+            child: Text(l.enable),
+          ),
+        ),
+      ),
+    );
   }
 }
 

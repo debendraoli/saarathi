@@ -80,6 +80,8 @@
   "locationOffBody": "Your device location (GPS) is off. Turn it on for accurate pickup and nearby results.",
   "enable": "Turn on",
   "locationOffShort": "We can't see where you are",
+  "notificationsOffTitle": "Notifications are off",
+  "notificationsOffBody": "You won't be told when your driver arrives, an order is approved, or a trip status changes.",
   "promoTitle": "Namaste, Dang!",
   "promoBody": "Launch offer — ride and order at introductory rates.",
   "infoSafetyTitle": "Safe rides",

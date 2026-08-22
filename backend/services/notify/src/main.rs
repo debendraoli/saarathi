@@ -25,6 +25,7 @@ use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use uuid::Uuid;
 
 mod fcm;
+mod sms;
 
 #[derive(Clone)]
 struct AppState {
@@ -71,9 +72,10 @@ async fn main() -> anyhow::Result<()> {
     // Consume notification requests off the bus. If NATS is down we still serve
     // the (read-only) inbox — delivery resumes when the bus returns.
     let fcm = fcm::FcmSender::from_env();
+    let sms = sms::SmsSender::from_env().map(Arc::new);
     match async_nats::connect(&nats_url).await {
         Ok(client) => {
-            tokio::spawn(consume(client, pool.clone(), fcm.clone()));
+            tokio::spawn(consume(client, pool.clone(), fcm.clone(), sms.clone()));
             tracing::info!(%nats_url, "notify: subscribed to {NOTIFY_SUBJECT}");
         }
         Err(e) => tracing::warn!(error = %e, "notify: NATS unavailable; inbox is read-only"),
@@ -100,7 +102,12 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// NATS consumer loop: durable inbox row + push/SMS escalation for critical classes.
-async fn consume(client: async_nats::Client, pool: PgPool, fcm: Option<Arc<fcm::FcmSender>>) {
+async fn consume(
+    client: async_nats::Client,
+    pool: PgPool,
+    fcm: Option<Arc<fcm::FcmSender>>,
+    sms: Option<Arc<sms::SmsSender>>,
+) {
     let mut sub = match client.subscribe(NOTIFY_SUBJECT).await {
         Ok(s) => s,
         Err(e) => {
@@ -111,7 +118,7 @@ async fn consume(client: async_nats::Client, pool: PgPool, fcm: Option<Arc<fcm::
     while let Some(msg) = sub.next().await {
         match serde_json::from_slice::<NotifyRequest>(&msg.payload) {
             Ok(req) => {
-                if let Err(e) = deliver(&pool, &req, fcm.as_deref()).await {
+                if let Err(e) = deliver(&pool, &req, fcm.as_deref(), sms.as_deref()).await {
                     tracing::warn!(error = %e, "notify: delivery failed");
                 }
             }
@@ -124,6 +131,7 @@ async fn deliver(
     pool: &PgPool,
     req: &NotifyRequest,
     fcm: Option<&fcm::FcmSender>,
+    sms: Option<&sms::SmsSender>,
 ) -> anyhow::Result<()> {
     sqlx::query(
         "INSERT INTO notifications (user_id, class, title, body, link) VALUES ($1, $2, $3, $4, $5)",
@@ -135,12 +143,12 @@ async fn deliver(
     .bind(&req.link)
     .execute(pool)
     .await?;
-    if notif::CRITICAL.contains(&req.class.as_str()) {
-        tracing::info!(user_id = %req.user_id, class = %req.class, title = %req.title,
-            "notification escalated (critical)");
-    }
 
-    // Fan out to the user's registered devices via FCM (when configured).
+    // Fan out to the user's registered devices via FCM (when configured). A
+    // stale token (FCM UNREGISTERED) is pruned on the spot — no point paying
+    // for it on every future notification, and it'd otherwise sit forever
+    // since nothing else ever revisits `device_tokens`.
+    let mut any_push_sent = false;
     if let Some(sender) = fcm {
         let tokens: Vec<(String,)> =
             sqlx::query_as("SELECT token FROM device_tokens WHERE user_id = $1")
@@ -149,11 +157,46 @@ async fn deliver(
                 .await
                 .unwrap_or_default();
         for (token,) in tokens {
-            if let Err(e) = sender
+            match sender
                 .send(&token, &req.title, &req.body, req.link.as_deref())
                 .await
             {
-                tracing::warn!(error = %e, "notify: FCM send failed");
+                Ok(()) => any_push_sent = true,
+                Err(fcm::SendError::StaleToken) => {
+                    let _ = sqlx::query("DELETE FROM device_tokens WHERE token = $1")
+                        .bind(&token)
+                        .execute(pool)
+                        .await;
+                    tracing::info!(%token, "notify: pruned stale FCM token");
+                }
+                Err(fcm::SendError::Other(e)) => {
+                    tracing::warn!(error = %e, "notify: FCM send failed");
+                }
+            }
+        }
+    }
+
+    // Critical classes (safety/transactional/compliance) fall back to SMS
+    // when push didn't land — no registered device, every token was stale,
+    // or FCM isn't configured on this deployment. Not for every class: a
+    // marketing notification with no push is just... not delivered, which
+    // is fine.
+    if notif::CRITICAL.contains(&req.class.as_str()) && !any_push_sent {
+        if let Some(sender) = sms {
+            let phone: Option<String> =
+                sqlx::query_scalar("SELECT phone FROM users WHERE id = $1")
+                    .bind(req.user_id)
+                    .fetch_optional(pool)
+                    .await
+                    .ok()
+                    .flatten();
+            if let Some(phone) = phone {
+                if let Err(e) = sender.send(&phone, &req.title, &req.body).await {
+                    tracing::warn!(error = %e, "notify: SMS fallback failed");
+                } else {
+                    tracing::info!(user_id = %req.user_id, class = %req.class,
+                        "notify: critical notification escalated to SMS (push unreachable)");
+                }
             }
         }
     }

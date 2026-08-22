@@ -10,6 +10,22 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// Outcome of one send attempt. `StaleToken` means the token itself is dead
+/// (FCM's `UNREGISTERED`, HTTP 404) — the caller should stop sending to it
+/// rather than retry, and drop it from `device_tokens`. `Other` covers
+/// anything else (auth, quota, transient network) — worth logging, not worth
+/// deleting a token over.
+pub enum SendError {
+    StaleToken,
+    Other(anyhow::Error),
+}
+
+impl From<anyhow::Error> for SendError {
+    fn from(e: anyhow::Error) -> Self {
+        SendError::Other(e)
+    }
+}
+
 #[derive(Deserialize)]
 struct ServiceAccount {
     client_email: String,
@@ -120,7 +136,7 @@ impl FcmSender {
         title: &str,
         body: &str,
         link: Option<&str>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), SendError> {
         let access = self.access_token().await?;
         let url = format!(
             "https://fcm.googleapis.com/v1/projects/{}/messages:send",
@@ -134,13 +150,25 @@ impl FcmSender {
             message["data"] = serde_json::json!({ "link": link });
         }
         let payload = serde_json::json!({ "message": message });
-        self.http
+        let resp = self
+            .http
             .post(&url)
             .bearer_auth(access)
             .json(&payload)
             .send()
-            .await?
-            .error_for_status()?;
+            .await
+            .map_err(anyhow::Error::from)?;
+        // FCM v1 reports a deregistered/invalid token as 404 UNREGISTERED —
+        // the one case worth distinguishing since it means "stop sending to
+        // this token", not just "this attempt failed".
+        if resp.status().as_u16() == 404 {
+            return Err(SendError::StaleToken);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(SendError::Other(anyhow::anyhow!("fcm send {status}: {text}")));
+        }
         Ok(())
     }
 }

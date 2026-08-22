@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart' show openAppSettings;
 
 import '../network/api_client.dart';
 import 'notification_service.dart';
@@ -23,6 +24,15 @@ class PushService {
   String? _token;
   bool _ready = false;
   ApiClient? _lastApi;
+  AuthorizationStatus _authStatus = AuthorizationStatus.notDetermined;
+
+  /// Whether the OS will actually show this app's notifications — `false`
+  /// after a denial means every push and local notification is silently
+  /// dropped by the OS, so it's worth surfacing rather than leaving the user
+  /// wondering why "driver arriving" never showed up.
+  bool get permissionGranted =>
+      _authStatus == AuthorizationStatus.authorized ||
+      _authStatus == AuthorizationStatus.provisional;
 
   /// Emits the tapped notification's `link` for a background/terminated
   /// push. Foreground taps come from [NotificationService.onTap] instead —
@@ -40,7 +50,7 @@ class PushService {
     try {
       await Firebase.initializeApp();
       final messaging = FirebaseMessaging.instance;
-      await messaging.requestPermission();
+      _authStatus = (await messaging.requestPermission()).authorizationStatus;
       _token = await messaging.getToken();
       FirebaseMessaging.onMessage.listen((m) {
         final n = m.notification;
@@ -75,6 +85,25 @@ class PushService {
     } catch (_) {
       // Firebase not configured yet — push disabled, app runs normally.
     }
+  }
+
+  /// Re-checks OS permission without re-prompting — call after the user
+  /// might have changed it in system settings (e.g. on app resume).
+  Future<void> refreshPermissionStatus() async {
+    if (!_ready) return;
+    try {
+      final settings = await FirebaseMessaging.instance.getNotificationSettings();
+      _authStatus = settings.authorizationStatus;
+    } catch (_) {/* Firebase not configured */}
+  }
+
+  /// Opens this app's OS settings page — the only way back in once a
+  /// permission prompt has already been denied once (re-requesting from the
+  /// app is a no-op on both Android 13+ and iOS at that point).
+  Future<void> openSettings() async {
+    try {
+      await openAppSettings();
+    } catch (_) {/* best effort */}
   }
 
   /// Register (or refresh) this device's push token for the signed-in user.
