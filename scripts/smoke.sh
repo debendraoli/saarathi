@@ -23,6 +23,7 @@ PAYMENTS="${PAYMENTS:-$GW}"
 CAMPAIGNS="${CAMPAIGNS:-$GW}"
 PARTNERS="${PARTNERS:-$GW}"
 MERCHANT="${MERCHANT:-$GW}"
+PLACESVC="${PLACESVC:-$GW}"  # named distinctly — $PLACES is already a rider's saved-places count below
 ROUTING="${ROUTING:-http://localhost:8084}"  # internal (rides→routing); not exposed via gateway
 ADMIN_PHONE="${SEED_DEV_ADMIN_PHONE:-+9779800000000}"
 
@@ -40,6 +41,7 @@ j "http://localhost:8084/health" | jq -e '.status=="ok"' >/dev/null && echo "  r
 j "http://localhost:8085/health" | jq -e '.status=="ok"' >/dev/null && echo "  payments ok"
 j "http://localhost:8086/health" | jq -e '.status=="ok"' >/dev/null && echo "  campaigns ok"
 j "http://localhost:8087/health" | jq -e '.status=="ok"' >/dev/null && echo "  partners ok"
+j "http://localhost:8089/health" | jq -e '.status=="ok"' >/dev/null && echo "  places ok"
 # The gateway routes an unauthenticated call to notify → 401 proves path routing.
 GWCODE=$(curl -sS -o /dev/null -w '%{http_code}' "$GW/v1/notifications")
 [ "$GWCODE" = "401" ] || { echo "  gateway not routing (got $GWCODE)"; exit 1; }
@@ -780,5 +782,50 @@ BAL1=$(j "$PARTNERS/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOK
 INTACT=$(j "$PARTNERS/v1/partner/$PID/ledger/verify" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.chain_intact')
 [ "$INTACT" = "true" ] || { echo "  partner ledger chain broken"; exit 1; }
 echo "  corporate tab: wallet ${BAL0} -> ${BAL1}, ride_charges=$CHARGED, rider paid NPR 0; ledger intact=$INTACT"
+
+step "map contribution: distance-reject -> submit -> approve -> points -> badge -> redeem -> wallet credit"
+CPHONE="+97795$(( RANDOM % 900000 + 100000 ))"
+CTOKEN=$(login "$CPHONE" | jq -r '.access_token')
+printf 'proof photo bytes' > /tmp/saarathi_place_photo.jpg
+
+# The photo was (claimed) taken ~25km from the pin being contributed -> reject
+# before it ever reaches a reviewer.
+FARCODE=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$PLACESVC/v1/places/contributions" \
+  -H "authorization: Bearer $CTOKEN" \
+  -F category=building -F name="Far Building" -F lat=28.0336 -F lng=82.4836 \
+  -F capture_lat=28.1 -F capture_lng=82.6 -F photo=@/tmp/saarathi_place_photo.jpg)
+[ "$FARCODE" = "400" ] || { echo "  distant capture should be rejected (got $FARCODE)"; exit 1; }
+
+# Ten approved "building"-category submissions -> 100 points (10 each) ->
+# enough to redeem, enough to cross the "explorer" badge threshold (5), and
+# navigable -> should surface in address search once approved.
+for i in $(seq 1 10); do
+  CID=$(j -X POST "$PLACESVC/v1/places/contributions" -H "authorization: Bearer $CTOKEN" \
+    -F category=building -F name="Test Place $i" -F lat=28.0336 -F lng=82.4836 \
+    -F capture_lat=28.0337 -F capture_lng=82.4837 -F photo=@/tmp/saarathi_place_photo.jpg | jq -r '.id')
+  [ -n "$CID" ] && [ "$CID" != "null" ] || { echo "  contribution submit failed"; exit 1; }
+  j -X POST "$PLACESVC/v1/admin/places/contributions/$CID/approve" -H "authorization: Bearer $ADMIN_TOKEN" >/dev/null
+done
+
+PTS=$(j "$PLACESVC/v1/places/points" -H "authorization: Bearer $CTOKEN" | jq -r '.balance')
+[ "$PTS" = "100" ] || { echo "  expected 100 points after 10 approvals, got $PTS"; exit 1; }
+BADGE=$(j "$PLACESVC/v1/places/points" -H "authorization: Bearer $CTOKEN" | jq -r '.badges[0].code')
+[ "$BADGE" = "explorer" ] || { echo "  explorer badge should auto-award at 5 approvals (got '$BADGE')"; exit 1; }
+
+CWALLET0=$(j "$PAYMENTS/v1/credits" -H "authorization: Bearer $CTOKEN" | jq -r '.balance')
+j -X POST "$PLACESVC/v1/places/points/redeem" -H "authorization: Bearer $CTOKEN" \
+  -H 'content-type: application/json' -d '{"points":100}' >/dev/null
+CWALLET1=$(j "$PAYMENTS/v1/credits" -H "authorization: Bearer $CTOKEN" | jq -r '.balance')
+awk -v a="$CWALLET0" -v b="$CWALLET1" 'BEGIN{exit !(b-a==10)}' \
+  || { echo "  redeeming 100 points should credit NPR 10 (wallet $CWALLET0 -> $CWALLET1)"; exit 1; }
+PTS2=$(j "$PLACESVC/v1/places/points" -H "authorization: Bearer $CTOKEN" | jq -r '.balance')
+[ "$PTS2" = "0" ] || { echo "  points balance should be 0 after full redemption (got $PTS2)"; exit 1; }
+echo "  10 approved -> 100 points, explorer badge, redeemed for NPR 10 (wallet $CWALLET0 -> $CWALLET1)"
+
+step "map contribution: approved building surfaces in rider address search"
+SEARCHHIT=$(j "$RIDES/v1/geo/search?q=Test%20Place" -H "authorization: Bearer $CTOKEN" \
+  | jq '[.[] | select(.label | startswith("Test Place"))] | length')
+[ "$SEARCHHIT" -ge 1 ] || { echo "  approved contribution should appear in address search"; exit 1; }
+echo "  approved contribution surfaced in /v1/geo/search"
 
 printf '\n✅ SMOKE OK\n'

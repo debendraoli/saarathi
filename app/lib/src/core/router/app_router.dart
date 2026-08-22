@@ -9,6 +9,9 @@ import '../../features/auth/presentation/otp_screen.dart';
 import '../../features/auth/presentation/phone_screen.dart';
 import '../../features/comms/presentation/call_screen.dart';
 import '../../features/comms/presentation/chat_screen.dart';
+import '../../features/contributions/presentation/contribute_screen.dart';
+import '../../features/contributions/presentation/my_contributions_screen.dart';
+import '../../features/contributions/presentation/points_badges_screen.dart';
 import '../../features/delivery/presentation/parcel_screen.dart';
 import '../../features/driver/presentation/become_driver_screen.dart';
 import '../../features/driver/presentation/kyc_documents_screen.dart';
@@ -64,6 +67,9 @@ class Routes {
   static const merchantOnboarding = '/store/apply';
   static const merchantOrders = '/store/orders';
   static const merchantMenu = '/store/menu';
+  static const contribute = '/places/contribute';
+  static const myContributions = '/places/mine';
+  static const pointsBadges = '/places/points';
 }
 
 /// One consistent motion language for every screen transition (Material's
@@ -296,6 +302,21 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           MerchantMenuScreen(merchant: state.extra as Merchant),
           key: state.pageKey,
         ),
+      ),
+      GoRoute(
+        path: Routes.contribute,
+        pageBuilder: (_, state) =>
+            _page(const ContributeScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.myContributions,
+        pageBuilder: (_, state) =>
+            _page(const MyContributionsScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.pointsBadges,
+        pageBuilder: (_, state) =>
+            _page(const PointsBadgesScreen(), key: state.pageKey),
       ),
     ],
   );

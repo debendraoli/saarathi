@@ -296,6 +296,34 @@ services:
       retries: 5
       start_period: 20s
 
+  # Community map contributions: submit → staff review → points/badges,
+  # redeemable via rides' shared wallet tables (needs rides to have migrated
+  # first, same as merchant/payments/campaigns already assume).
+  places:
+    <<: *svc-base
+    build:
+      context: .
+      dockerfile: services/places/Dockerfile
+    environment:
+      <<: *svc-env
+      PLACES_PORT: 8089
+      PLACES_STORAGE_DIR: /data/places
+    ports:
+      - "8089:8089"
+    volumes:
+      - places-data:/data/places
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rides:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8089/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
   # Fleet/partner domain: roster, fleet money, dashboards, fleet campaigns.
   partners:
     <<: *svc-base
@@ -396,7 +424,8 @@ services:
       - "3478:3478/tcp"
       - "49160-49200:49160-49200/udp"
 
-# Named volume for KYC documents so the non-root auth container owns the dir
-# (bind mounts would be created root-owned and block writes).
+# Named volumes so the non-root containers own their data dirs (bind mounts
+# would be created root-owned and block writes).
 volumes:
   kyc-data:
+  places-data:

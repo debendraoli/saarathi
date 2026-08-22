@@ -175,6 +175,22 @@ class _MenuDrawer extends ConsumerWidget {
               title: Text(l.tabAccount),
               onTap: () => go(Routes.account),
             ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.add_location_alt_rounded),
+              title: Text(l.contributeToMap),
+              onTap: () => go(Routes.contribute),
+            ),
+            ListTile(
+              leading: const Icon(Icons.history_rounded),
+              title: Text(l.myContributions),
+              onTap: () => go(Routes.myContributions),
+            ),
+            ListTile(
+              leading: const Icon(Icons.military_tech_rounded),
+              title: Text(l.myPointsBadges),
+              onTap: () => go(Routes.pointsBadges),
+            ),
           ],
         ),
       ),

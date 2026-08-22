@@ -81,6 +81,12 @@ http:
       middlewares: ["cors", "ratelimit"]
       rule: PathPrefix(`/v1/partner`) || PathPrefix(`/v1/admin/partners`)
 
+    places:
+      entryPoints: ["web"]
+      service: places
+      middlewares: ["cors", "ratelimit"]
+      rule: PathPrefix(`/v1/places`) || PathPrefix(`/v1/admin/places`)
+
     # Health aggregation for the ops dashboard: /status/<svc> → that service's
     # /health (routing included for visibility, though its API stays internal).
     health-auth:
@@ -123,6 +129,11 @@ http:
       service: partners
       middlewares: ["cors", "health-rewrite"]
       rule: Path(`/status/partners`)
+    health-places:
+      entryPoints: ["web"]
+      service: places
+      middlewares: ["cors", "health-rewrite"]
+      rule: Path(`/status/places`)
 
   middlewares:
     # Rewrite /status/<svc> to /health before forwarding to the service.
@@ -177,6 +188,10 @@ http:
       loadBalancer:
         servers:
           - url: http://partners:8087
+    places:
+      loadBalancer:
+        servers:
+          - url: http://places:8089
     # Referenced only by the /status/routing health router — routing's API
     # (/v1/route) is never exposed publicly.
     routing:

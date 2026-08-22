@@ -140,3 +140,12 @@ spec:
         - name: saarathi-partners
           port: 80
 
+    - kind: Rule
+      middlewares:
+        - name: cors
+        - name: ratelimit
+      match: PathPrefix(`/v1/places`) || PathPrefix(`/v1/admin/places`)
+      services:
+        - name: saarathi-places
+          port: 80
+

@@ -15,10 +15,20 @@ use crate::state::AppState;
 use axum::extract::{Query, State};
 use axum::{routing::get, Json, Router};
 use saarathi_core::geo_h3::cell_for;
+use saarathi_core::routing::{haversine_km, LatLng as CoreLatLng};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::OnceLock;
 use std::time::Duration;
+
+/// Community-contributed places (saarathi-places service) that are safe to
+/// surface as destinations — persistent places only, never the transient
+/// construction/closed-road alerts. Same shared-Postgres direct-table-read
+/// convention this service already uses for `users`/`vehicles` (owned by
+/// auth) rather than an internal HTTP call, since this is on the
+/// search-latency-sensitive path.
+const NAVIGABLE_CATEGORIES: [&str; 4] = ["organisation", "building", "landmark", "sign"];
+const MAX_CONTRIBUTED_RESULTS: usize = 3;
 
 /// Addresses don't move; 30 days is a self-healing backstop, not the primary
 /// invalidation mechanism (there isn't one — reverse-geocode results are
@@ -65,7 +75,11 @@ struct SearchQuery {
     lng: Option<f64>,
 }
 
-async fn search(_auth: AuthUser, Query(q): Query<SearchQuery>) -> AppResult<Json<Vec<GeoPlace>>> {
+async fn search(
+    State(st): State<AppState>,
+    _auth: AuthUser,
+    Query(q): Query<SearchQuery>,
+) -> AppResult<Json<Vec<GeoPlace>>> {
     let query = q.q.trim();
     if query.chars().count() < 2 {
         return Ok(Json(vec![]));
@@ -82,10 +96,59 @@ async fn search(_auth: AuthUser, Query(q): Query<SearchQuery>) -> AppResult<Json
         params.push(("lat", lat.to_string()));
         params.push(("lon", lng.to_string()));
     }
-    let places = fetch(&format!("{}/api", geocoder_url()), &params)
-        .await
-        .unwrap_or_default();
+    let mut places = contributed_places(&st, query, q.lat, q.lng).await;
+    places.extend(
+        fetch(&format!("{}/api", geocoder_url()), &params)
+            .await
+            .unwrap_or_default(),
+    );
     Ok(Json(places))
+}
+
+/// Approved, navigable community contributions matching the query text —
+/// capped and prepended ahead of the geocoder results, ranked by proximity
+/// to the bias point when one's given.
+async fn contributed_places(
+    st: &AppState,
+    query: &str,
+    bias_lat: Option<f64>,
+    bias_lng: Option<f64>,
+) -> Vec<GeoPlace> {
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        name: String,
+        lat: f64,
+        lng: f64,
+    }
+    let like = format!("%{query}%");
+    let mut rows: Vec<Row> = sqlx::query_as(
+        "SELECT name, lat, lng FROM place_contributions \
+         WHERE status = 'approved' AND category::text = ANY($1) AND name ILIKE $2 \
+         LIMIT 20",
+    )
+    .bind(&NAVIGABLE_CATEGORIES[..])
+    .bind(&like)
+    .fetch_all(&st.db)
+    .await
+    .unwrap_or_default();
+
+    if let (Some(lat), Some(lng)) = (bias_lat, bias_lng) {
+        let origin = CoreLatLng { lat, lng };
+        rows.sort_by(|a, b| {
+            let da = haversine_km(origin, CoreLatLng { lat: a.lat, lng: a.lng });
+            let db = haversine_km(origin, CoreLatLng { lat: b.lat, lng: b.lng });
+            da.total_cmp(&db)
+        });
+    }
+    rows.into_iter()
+        .take(MAX_CONTRIBUTED_RESULTS)
+        .map(|r| GeoPlace {
+            label: r.name,
+            address: "Contributed place".into(),
+            lat: r.lat,
+            lng: r.lng,
+        })
+        .collect()
 }
 
 #[derive(Deserialize)]

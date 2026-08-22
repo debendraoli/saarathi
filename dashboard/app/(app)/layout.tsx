@@ -9,6 +9,7 @@ import {
     Flag,
     HeartPulse,
     LogOut,
+    MapPinned,
     MessageSquare,
     Navigation,
     Receipt,
@@ -66,6 +67,10 @@ const NAV: NavGroup[] = [
   {
     title: "Marketplace",
     items: [{ href: "/merchants", label: "Merchants", icon: Store }],
+  },
+  {
+    title: "Community",
+    items: [{ href: "/places", label: "Map Contributions", icon: MapPinned }],
   },
   {
     title: "Growth",

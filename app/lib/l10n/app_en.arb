@@ -258,5 +258,42 @@
   "orderDelivered": "Delivered",
 
   "errorNetwork": "Network problem. Check your connection and try again.",
-  "errorGeneric": "Something went wrong. Please try again."
+  "errorGeneric": "Something went wrong. Please try again.",
+
+  "contributeToMap": "Contribute to map",
+  "myPointsBadges": "My points & badges",
+  "categoryOrganisation": "Organisation",
+  "categoryBuilding": "Building",
+  "categoryLandmark": "Chowk / Roundabout",
+  "categoryConstruction": "Construction",
+  "categoryClosedRoad": "Closed road",
+  "categorySign": "Sign",
+  "categoryOther": "Other",
+  "contributionNameHint": "What is it called?",
+  "contributionDescriptionHint": "Description (optional)",
+  "contributionLocationLabel": "Location",
+  "contributionUseCurrentLocation": "Use my current location",
+  "contributionChooseOnMap": "Adjust on map",
+  "contributionTakePhoto": "Take a photo here as proof",
+  "contributionRetakePhoto": "Retake photo",
+  "contributionPhotoHint": "The photo must be taken right now, at this location — gallery photos aren't accepted.",
+  "contributionSubmit": "Submit contribution",
+  "contributionSubmitted": "Submitted — a reviewer will take a look soon.",
+  "myContributions": "My contributions",
+  "noContributionsYet": "You haven't contributed any places yet",
+  "contributionStatusPending": "Pending review",
+  "contributionStatusApproved": "Approved",
+  "contributionStatusRejected": "Rejected",
+  "pointsBalance": "Points balance",
+  "pointsBalanceBody": "Earn points for every approved contribution. Redeem them for wallet credit.",
+  "badgesEarned": "Badges earned",
+  "noBadgesYet": "Keep contributing to earn your first badge",
+  "redeemPoints": "Redeem for wallet credit",
+  "redeemPointsConfirmTitle": "Redeem points?",
+  "redeemPointsConfirmBody": "This redeems your full points balance for wallet credit. This can't be undone.",
+  "redeemPointsBelowMin": "You need at least {min} points to redeem",
+  "@redeemPointsBelowMin": {
+    "placeholders": { "min": { "type": "int" } }
+  },
+  "redeemSuccess": "Redeemed! Your wallet has been credited."
 }
