@@ -1,5 +1,6 @@
 "use client";
 
+import { TripMap } from "@/components/TripMap";
 import { rides, type ActiveTrip, type TripLocation } from "@/lib/api";
 import { useEffect, useState } from "react";
 
@@ -8,6 +9,7 @@ export default function LivePage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [loc, setLoc] = useState<TripLocation | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const selectedTrip = trips.find((t) => t.id === selected) ?? null;
 
   async function load() {
     setError(null);
@@ -84,28 +86,25 @@ export default function LivePage() {
         </div>
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Driver position</h3>
-          {!selected ? (
+          {!selected || !selectedTrip ? (
             <p className="subtle">Select a trip.</p>
           ) : loc && loc.lat != null && loc.lng != null ? (
-            <dl className="kv">
-              <dt>Lat / Lng</dt>
-              <dd>
-                <a
-                  className="muted-link"
-                  href={`https://www.openstreetmap.org/?mlat=${loc.lat}&mlon=${loc.lng}#map=17/${loc.lat}/${loc.lng}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {loc.lat.toFixed(5)}, {loc.lng.toFixed(5)} ↗
-                </a>
-              </dd>
-              <dt>Heading</dt>
-              <dd>{loc.heading ?? "—"}°</dd>
-              <dt>Speed</dt>
-              <dd>{loc.speed ?? "—"} m/s</dd>
-              <dt>Updated</dt>
-              <dd>{loc.at ? new Date(loc.at * 1000).toLocaleTimeString() : "—"}</dd>
-            </dl>
+            <>
+              <TripMap
+                origin={{ lat: selectedTrip.origin_lat, lng: selectedTrip.origin_lng }}
+                dest={{ lat: selectedTrip.dest_lat, lng: selectedTrip.dest_lng }}
+                live={{ lat: loc.lat, lng: loc.lng }}
+                heightPx={280}
+              />
+              <dl className="kv" style={{ marginTop: 12 }}>
+                <dt>Heading</dt>
+                <dd>{loc.heading ?? "—"}°</dd>
+                <dt>Speed</dt>
+                <dd>{loc.speed ?? "—"} m/s</dd>
+                <dt>Updated</dt>
+                <dd>{loc.at ? new Date(loc.at * 1000).toLocaleTimeString() : "—"}</dd>
+              </dl>
+            </>
           ) : (
             <p className="subtle">Waiting for a location ping…</p>
           )}

@@ -70,11 +70,13 @@ flutter:
 flutter_launcher_icons:
   image_path: assets/images/app_icon.png
   android: true
-  # Matches AppTheme.ink (core/theme/app_theme.dart) — the same dark brand
-  # ink used for text-on-brand elsewhere, so the adaptive icon's background
-  # layer reads as intentional rather than a random fill color.
-  adaptive_icon_background: "#1A1200"
-  adaptive_icon_foreground: assets/images/app_icon.png
+  # White, matching the flat icon's own background — the source logo has a
+  # lot of transparent padding around it, so a dark fill here (tried #1A1200
+  # first) reads as a heavy dark border once composited. The foreground is a
+  # separate, more tightly-cropped transparent-background render so it
+  # survives the OS's circle/squircle mask without the logo getting clipped.
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: assets/images/app_icon_foreground.png
   # ios/ isn't generated in this checkout yet (see README's first-time setup);
   # flip this to true and rerun once it exists — flutter_launcher_icons can't
   # write into a platform folder that isn't there.

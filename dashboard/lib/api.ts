@@ -432,6 +432,7 @@ export const rides = {
   // Live tracking
   activeTrips: () => ridesRequest<ActiveTrip[]>("/v1/admin/trips/active"),
   tripLocation: (id: string) => ridesRequest<TripLocation>(`/v1/rides/${id}/location`),
+  tripRoute: (id: string) => ridesRequest<TripRoute>(`/v1/admin/trips/${id}/route`),
 
   // SOS
   listSos: () => ridesRequest<SosIncident[]>("/v1/admin/sos"),
@@ -694,6 +695,16 @@ export interface TripLocation {
   speed: number | null;
   at: number | null;
   by: string | null;
+}
+
+export interface TripRoute {
+  trip_id: string;
+  status: string;
+  origin_lat: number;
+  origin_lng: number;
+  dest_lat: number;
+  dest_lng: number;
+  breadcrumbs: { lat: number; lng: number; at: string }[];
 }
 
 export interface SosIncident {

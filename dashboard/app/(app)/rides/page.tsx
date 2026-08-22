@@ -1,6 +1,8 @@
 "use client";
 
-import { rides, type RideRow } from "@/lib/api";
+import { Modal } from "@/components/Modal";
+import { TripMap } from "@/components/TripMap";
+import { rides, type RideRow, type TripRoute } from "@/lib/api";
 import { useEffect, useState } from "react";
 
 const TABS = ["all", "requested", "accepted", "in_progress", "completed", "cancelled"];
@@ -9,6 +11,19 @@ export default function RidesPage() {
   const [status, setStatus] = useState("all");
   const [rows, setRows] = useState<RideRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [routeFor, setRouteFor] = useState<string | null>(null);
+  const [route, setRoute] = useState<TripRoute | null>(null);
+  const [routeError, setRouteError] = useState<string | null>(null);
+
+  function viewRoute(id: string) {
+    setRouteFor(id);
+    setRoute(null);
+    setRouteError(null);
+    rides
+      .tripRoute(id)
+      .then(setRoute)
+      .catch((e) => setRouteError((e as Error).message));
+  }
 
   useEffect(() => {
     let active = true;
@@ -55,7 +70,7 @@ export default function RidesPage() {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id}>
+              <tr key={r.id} onClick={() => viewRoute(r.id)}>
                 <td>{r.rider_name ?? r.rider_id.slice(0, 8)}</td>
                 <td>{r.driver_name ?? (r.driver_id ? r.driver_id.slice(0, 8) : "—")}</td>
                 <td>
@@ -76,6 +91,31 @@ export default function RidesPage() {
           </tbody>
         </table>
       </div>
+
+      <Modal
+        open={routeFor !== null}
+        onClose={() => setRouteFor(null)}
+        title="Trip route"
+        wide
+      >
+        {routeError && <div className="error">{routeError}</div>}
+        {!routeError && !route && <p className="subtle">Loading…</p>}
+        {route && (
+          <>
+            <p className="subtle" style={{ marginTop: 0 }}>
+              {route.breadcrumbs.length > 0
+                ? `${route.breadcrumbs.length} recorded points · status: ${route.status.replace("_", " ")}`
+                : `No location pings recorded for this trip · status: ${route.status.replace("_", " ")}`}
+            </p>
+            <TripMap
+              origin={{ lat: route.origin_lat, lng: route.origin_lng }}
+              dest={{ lat: route.dest_lat, lng: route.dest_lng }}
+              breadcrumbs={route.breadcrumbs}
+              heightPx={480}
+            />
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

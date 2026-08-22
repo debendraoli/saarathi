@@ -22,6 +22,7 @@ pub fn routes() -> Router<AppState> {
             post(post_location).get(get_location),
         )
         .route("/v1/admin/trips/active", get(active_trips))
+        .route("/v1/admin/trips/{id}/route", get(trip_route))
 }
 
 fn redis_err(e: redis::RedisError) -> AppError {
@@ -155,4 +156,68 @@ async fn active_trips(
     .fetch_all(&st.db)
     .await?;
     Ok(Json(rows))
+}
+
+#[derive(Serialize)]
+struct BreadcrumbPoint {
+    lat: f64,
+    lng: f64,
+    at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+struct TripRoute {
+    trip_id: Uuid,
+    status: String,
+    origin_lat: f64,
+    origin_lng: f64,
+    dest_lat: f64,
+    dest_lng: f64,
+    breadcrumbs: Vec<BreadcrumbPoint>,
+}
+
+/// Start-to-end path reconstruction for ops review — the "God View" trail.
+/// Breadcrumbs come from `trip_events` (every location ping posted during the
+/// trip, kind='location'), which is an append-only durable log unlike the
+/// Redis "latest position" used for live tracking — it's the only place a
+/// *completed* trip's path still exists.
+async fn trip_route(
+    State(st): State<AppState>,
+    _staff: StaffUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<TripRoute>> {
+    let trip: Option<(String, f64, f64, f64, f64)> = sqlx::query_as(
+        "SELECT status::text, origin_lat, origin_lng, dest_lat, dest_lng \
+         FROM trips WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&st.db)
+    .await?;
+    let (status, origin_lat, origin_lng, dest_lat, dest_lng) = trip.ok_or(AppError::NotFound)?;
+
+    let events: Vec<(Value, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "SELECT payload, created_at FROM trip_events \
+         WHERE trip_id = $1 AND kind = 'location' ORDER BY created_at ASC",
+    )
+    .bind(id)
+    .fetch_all(&st.db)
+    .await?;
+    let breadcrumbs = events
+        .into_iter()
+        .filter_map(|(payload, at)| {
+            let lat = payload.get("lat")?.as_f64()?;
+            let lng = payload.get("lng")?.as_f64()?;
+            Some(BreadcrumbPoint { lat, lng, at })
+        })
+        .collect();
+
+    Ok(Json(TripRoute {
+        trip_id: id,
+        status,
+        origin_lat,
+        origin_lng,
+        dest_lat,
+        dest_lng,
+        breadcrumbs,
+    }))
 }
