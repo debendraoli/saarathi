@@ -172,12 +172,12 @@ async fn approve_driver(
     }
 
     // Activate the underlying user account.
-    sqlx::query(
+    let user_id: Uuid = sqlx::query_scalar(
         "UPDATE users SET status = 'active' \
-         WHERE id = (SELECT user_id FROM drivers WHERE id = $1)",
+         WHERE id = (SELECT user_id FROM drivers WHERE id = $1) RETURNING id",
     )
     .bind(id)
-    .execute(&mut *tx)
+    .fetch_one(&mut *tx)
     .await?;
 
     audit::record(
@@ -190,6 +190,17 @@ async fn approve_driver(
     )
     .await?;
     tx.commit().await?;
+
+    crate::notify::send(
+        &st.nats,
+        user_id,
+        saarathi_core::domain::notif::TRANSACTIONAL,
+        "You're verified!",
+        "Your driver KYC was approved — you can start accepting rides now.",
+        None,
+    )
+    .await;
+
     Ok(Json(json!({ "ok": true, "kyc_status": "approved" })))
 }
 
@@ -213,17 +224,17 @@ async fn reject_driver(
         ));
     }
 
-    let updated = sqlx::query(
+    let updated: Option<(Uuid,)> = sqlx::query_as(
         "UPDATE drivers SET kyc_status = 'rejected', reviewed_at = now(), reviewed_by = $2, \
          rejection_reason = $3, approved_at = NULL \
-         WHERE id = $1 AND kyc_status = 'under_review'",
+         WHERE id = $1 AND kyc_status = 'under_review' RETURNING user_id",
     )
     .bind(id)
     .bind(claims.sub)
     .bind(&body.reason)
-    .execute(&st.db)
+    .fetch_optional(&st.db)
     .await?;
-    if updated.rows_affected() == 0 {
+    let Some((user_id,)) = updated else {
         let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM drivers WHERE id = $1)")
             .bind(id)
             .fetch_one(&st.db)
@@ -236,7 +247,7 @@ async fn reject_driver(
         } else {
             AppError::NotFound
         });
-    }
+    };
 
     audit::record(
         &st.db,
@@ -247,6 +258,17 @@ async fn reject_driver(
         json!({ "reason": body.reason }),
     )
     .await?;
+
+    crate::notify::send(
+        &st.nats,
+        user_id,
+        saarathi_core::domain::notif::TRANSACTIONAL,
+        "KYC needs another look",
+        &format!("Your driver verification wasn't approved: {}", body.reason),
+        None,
+    )
+    .await;
+
     Ok(Json(json!({ "ok": true, "kyc_status": "rejected" })))
 }
 

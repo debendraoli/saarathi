@@ -10,6 +10,7 @@ mod config;
 mod db;
 mod error;
 mod models;
+mod notify;
 mod otp;
 mod otp_delivery;
 mod rate_limit;
@@ -60,6 +61,16 @@ async fn main() -> anyhow::Result<()> {
         config.sparrow.clone(),
     ));
 
+    // NATS bus for KYC-decision notifications (non-fatal: approvals still
+    // work if the bus is down, the applicant just doesn't get told).
+    let nats = match async_nats::connect(&config.nats_url).await {
+        Ok(c) => Some(c),
+        Err(e) => {
+            tracing::warn!(error = %e, "NATS unavailable; KYC notifications will be skipped");
+            None
+        }
+    };
+
     let docs = Arc::new(LocalDocumentStore::new(&config.kyc_storage_dir));
     let port = config.port;
     let state = AppState {
@@ -68,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
         docs,
         redis,
         otp_delivery,
+        nats,
     };
 
     let app = routes::router(state);

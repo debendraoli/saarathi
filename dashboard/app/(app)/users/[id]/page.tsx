@@ -29,7 +29,7 @@ export default function RiderDetailPage({ params }: { params: Promise<{ id: stri
   if (!data) {
     return (
       <div className="stack">
-        <Link href="/riders" className="muted-link">← Back to riders</Link>
+        <Link href="/users" className="muted-link">← Back to users</Link>
         {error ? <div className="error">{error}</div> : <p className="subtle">Loading…</p>}
       </div>
     );
@@ -37,7 +37,7 @@ export default function RiderDetailPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="stack">
-      <Link href="/riders" className="muted-link">← Back to riders</Link>
+      <Link href="/users" className="muted-link">← Back to users</Link>
 
       <div className="row">
         <h1 className="page-title" style={{ margin: 0 }}>{data.full_name ?? data.phone}</h1>

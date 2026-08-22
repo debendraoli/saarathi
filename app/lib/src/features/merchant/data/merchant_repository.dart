@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -42,21 +43,38 @@ class MerchantRepository {
     return res.cast<Map<String, dynamic>>().map(MenuItem.fromJson).toList();
   }
 
-  Future<void> addItem({
+  /// Returns the new item's id, so a just-picked photo can be uploaded right
+  /// after (the create call itself is plain JSON, not multipart).
+  Future<String> addItem({
     required String merchantId,
     required String name,
     required double price,
     String? category,
     String? description,
   }) async {
-    await _api.post('/v1/merchant/menu', body: {
+    final res = await _api.post('/v1/merchant/menu', body: {
       'merchant_id': merchantId,
       'name': name,
       'price': price.toStringAsFixed(2),
       if (category != null && category.isNotEmpty) 'category': category,
       if (description != null && description.isNotEmpty)
         'description': description,
+    }) as Map<String, dynamic>;
+    return res['id'] as String;
+  }
+
+  Future<void> uploadItemPhoto(String itemId, String filePath) async {
+    final form = FormData.fromMap({
+      'photo': await MultipartFile.fromFile(filePath),
     });
+    await _api.upload('/v1/merchant/menu/$itemId/photo', form);
+  }
+
+  Future<void> uploadMerchantPhoto(String merchantId, String filePath) async {
+    final form = FormData.fromMap({
+      'photo': await MultipartFile.fromFile(filePath),
+    });
+    await _api.upload('/v1/merchant/merchants/$merchantId/photo', form);
   }
 
   Future<void> setItemAvailable(String itemId, bool available) async {

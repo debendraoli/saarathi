@@ -1,5 +1,8 @@
+import 'dart:io' show File;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../shared/haptics.dart';
@@ -100,6 +103,18 @@ class _ItemTileState extends ConsumerState<_ItemTile> {
     final it = widget.item;
     return ListTile(
       contentPadding: EdgeInsets.zero,
+      leading: it.imageUrl == null
+          ? null
+          : ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.network(
+                it.imageUrl!,
+                width: 48,
+                height: 48,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox(width: 48, height: 48),
+              ),
+            ),
       title: Text(it.name),
       subtitle: Text(
         [
@@ -130,6 +145,7 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
   final _price = TextEditingController();
   final _category = TextEditingController();
   final _description = TextEditingController();
+  XFile? _photo;
   bool _busy = false;
 
   @override
@@ -141,19 +157,53 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
     super.dispose();
   }
 
+  Future<void> _pickPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded),
+              title: const Text('Camera'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('Gallery'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    final file = await ImagePicker().pickImage(source: source, imageQuality: 70);
+    if (file != null && mounted) setState(() => _photo = file);
+  }
+
   Future<void> _submit() async {
     final name = _name.text.trim();
     final price = double.tryParse(_price.text.trim());
     if (name.isEmpty || price == null || price <= 0) return;
     setState(() => _busy = true);
     try {
-      await ref.read(merchantRepositoryProvider).addItem(
+      final itemId = await ref.read(merchantRepositoryProvider).addItem(
             merchantId: widget.merchantId,
             name: name,
             price: price,
             category: _category.text.trim(),
             description: _description.text.trim(),
           );
+      final photo = _photo;
+      if (photo != null) {
+        await ref
+            .read(merchantRepositoryProvider)
+            .uploadItemPhoto(itemId, photo.path)
+            .catchError((_) {}); // non-blocking — the item itself was created
+      }
       Haptics.success();
       if (mounted) Navigator.pop(context, true);
     } catch (_) {
@@ -205,6 +255,18 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
           TextField(
             controller: _description,
             decoration: InputDecoration(labelText: l.merchantItemDescription),
+          ),
+          const SizedBox(height: 12),
+          if (_photo != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.file(File(_photo!.path), height: 120, fit: BoxFit.cover),
+            ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _pickPhoto,
+            icon: const Icon(Icons.camera_alt_rounded),
+            label: Text(_photo == null ? 'Add a photo' : 'Change photo'),
           ),
           const SizedBox(height: 16),
           FilledButton(

@@ -21,6 +21,8 @@ pub struct AppState {
     /// limiter fails open in that case (see `crate::rate_limit`).
     pub redis: Option<redis::aio::ConnectionManager>,
     pub otp_delivery: Arc<OtpDelivery>,
+    /// NATS bus for KYC-decision notifications. `None` if unavailable.
+    pub nats: Option<async_nats::Client>,
 }
 
 impl saarathi_core::authn::HasJwtSecret for AppState {

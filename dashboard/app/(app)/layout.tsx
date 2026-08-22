@@ -6,6 +6,7 @@ import {
     BarChart3,
     Briefcase,
     Building2,
+    Car,
     CreditCard,
     Flag,
     HeartPulse,
@@ -52,13 +53,14 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-    title: "Riders",
-    items: [{ href: "/riders", label: "Riders", icon: Users }],
+    title: "Users",
+    items: [{ href: "/users", label: "Users", icon: Users }],
   },
   {
     title: "Drivers",
     items: [
       { href: "/drivers", label: "Driver KYC", icon: ShieldCheck, countKey: "kyc" },
+      { href: "/drivers/all", label: "All Drivers", icon: Car },
       { href: "/leaderboards", label: "Leaderboards", icon: Trophy },
     ],
   },

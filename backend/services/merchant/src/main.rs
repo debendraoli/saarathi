@@ -12,6 +12,7 @@ mod error;
 mod notify;
 mod routes;
 mod state;
+mod store;
 
 use axum::{routing::get, Json, Router};
 use config::Config;
@@ -21,6 +22,7 @@ use sqlx::postgres::PgPoolOptions;
 use state::AppState;
 use std::sync::Arc;
 use std::time::Duration;
+use store::LocalDocumentStore;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 
 #[tokio::main]
@@ -33,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
+    store::ensure_dir(&config.merchant_storage_dir)?;
 
     let db = PgPoolOptions::new()
         .max_connections(10)
@@ -62,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    let docs = Arc::new(LocalDocumentStore::new(&config.merchant_storage_dir));
     let port = config.port;
     let state = AppState {
         db,
@@ -70,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
         router,
         http,
         nats,
+        docs,
     };
 
     let app = Router::new()

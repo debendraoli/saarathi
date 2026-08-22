@@ -116,12 +116,17 @@ class _Header extends StatelessWidget {
               CircleAvatar(
                 radius: 26,
                 backgroundColor: scheme.primaryContainer,
-                child: Icon(
-                  merchant.vertical == 'grocery'
-                      ? Icons.local_grocery_store_rounded
-                      : Icons.restaurant_rounded,
-                  color: scheme.onPrimaryContainer,
-                ),
+                backgroundImage: merchant.imageUrl == null
+                    ? null
+                    : NetworkImage(merchant.imageUrl!),
+                child: merchant.imageUrl != null
+                    ? null
+                    : Icon(
+                        merchant.vertical == 'grocery'
+                            ? Icons.local_grocery_store_rounded
+                            : Icons.restaurant_rounded,
+                        color: scheme.onPrimaryContainer,
+                      ),
               ),
               const SizedBox(width: 12),
               Expanded(

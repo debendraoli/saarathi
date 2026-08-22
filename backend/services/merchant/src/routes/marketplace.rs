@@ -9,8 +9,10 @@ use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::routes::zone;
 use crate::state::AppState;
-use axum::extract::{Path, Query, State};
-use axum::http::HeaderMap;
+use axum::body::Bytes;
+use axum::extract::{Multipart, Path, Query, State};
+use axum::http::{header, HeaderMap, StatusCode};
+use axum::response::IntoResponse;
 use axum::{
     routing::{get, post},
     Json, Router,
@@ -39,6 +41,13 @@ pub fn routes() -> Router<AppState> {
             "/v1/merchant/menu/{id}/availability",
             post(set_item_availability),
         )
+        .route("/v1/merchant/menu/{id}/photo", post(upload_item_photo))
+        .route("/v1/items/{id}/photo", get(item_photo))
+        .route(
+            "/v1/merchant/merchants/{id}/photo",
+            post(upload_merchant_photo),
+        )
+        .route("/v1/merchants/{id}/photo", get(merchant_photo))
         .route("/v1/merchant/open", post(set_open))
         // Self-service onboarding (any signed-in user can register a store).
         .route("/v1/merchant/apply", post(apply_merchant))
@@ -821,6 +830,110 @@ async fn add_menu_item(
     Ok(Json(json!({ "id": id })))
 }
 
+/// Pulls the single `photo` field out of a multipart body. Shared by both the
+/// shop-photo and item-photo uploads below.
+async fn read_photo_field(mut multipart: Multipart) -> AppResult<Vec<u8>> {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?
+    {
+        if field.name() == Some("photo") {
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| AppError::BadRequest(e.to_string()))?;
+            if data.is_empty() {
+                return Err(AppError::BadRequest("empty photo".into()));
+            }
+            return Ok(data.to_vec());
+        }
+    }
+    Err(AppError::BadRequest("missing 'photo' field".into()))
+}
+
+async fn upload_item_photo(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    multipart: Multipart,
+) -> AppResult<Json<Value>> {
+    let merchant_id: Uuid =
+        sqlx::query_scalar("SELECT merchant_id FROM menu_items WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&st.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+    if !owns_or_staff(&st, claims.sub, claims.is_staff(), merchant_id).await? {
+        return Err(AppError::Forbidden);
+    }
+    let bytes = read_photo_field(multipart).await?;
+    let key = format!("items/{id}/{}", Uuid::new_v4());
+    st.docs.put(&key, bytes).await.map_err(AppError::Other)?;
+    sqlx::query("UPDATE menu_items SET photo_storage_key = $2, image_key = $3 WHERE id = $1")
+        .bind(id)
+        .bind(&key)
+        .bind(format!("/v1/items/{id}/photo"))
+        .execute(&st.db)
+        .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn item_photo(
+    State(st): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<impl IntoResponse> {
+    let key: Option<String> =
+        sqlx::query_scalar("SELECT photo_storage_key FROM menu_items WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&st.db)
+            .await?
+            .flatten();
+    let key = key.ok_or(AppError::NotFound)?;
+    let bytes = st.docs.get(&key).await.map_err(AppError::Other)?;
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, "application/octet-stream".parse().unwrap());
+    Ok((StatusCode::OK, headers, Bytes::from(bytes)))
+}
+
+async fn upload_merchant_photo(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    multipart: Multipart,
+) -> AppResult<Json<Value>> {
+    if !owns_or_staff(&st, claims.sub, claims.is_staff(), id).await? {
+        return Err(AppError::Forbidden);
+    }
+    let bytes = read_photo_field(multipart).await?;
+    let key = format!("merchants/{id}/{}", Uuid::new_v4());
+    st.docs.put(&key, bytes).await.map_err(AppError::Other)?;
+    sqlx::query("UPDATE merchants SET photo_storage_key = $2, image_key = $3 WHERE id = $1")
+        .bind(id)
+        .bind(&key)
+        .bind(format!("/v1/merchants/{id}/photo"))
+        .execute(&st.db)
+        .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn merchant_photo(
+    State(st): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<impl IntoResponse> {
+    let key: Option<String> =
+        sqlx::query_scalar("SELECT photo_storage_key FROM merchants WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&st.db)
+            .await?
+            .flatten();
+    let key = key.ok_or(AppError::NotFound)?;
+    let bytes = st.docs.get(&key).await.map_err(AppError::Other)?;
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, "application/octet-stream".parse().unwrap());
+    Ok((StatusCode::OK, headers, Bytes::from(bytes)))
+}
+
 #[derive(Deserialize)]
 struct SetOpen {
     merchant_id: Uuid,
@@ -884,6 +997,17 @@ async fn apply_merchant(
     .bind(body.lng)
     .fetch_one(&st.db)
     .await?;
+
+    crate::notify::send(
+        &st.nats,
+        claims.sub,
+        saarathi_core::domain::notif::TRANSACTIONAL,
+        "Store registered",
+        "Your store is set up. Add your menu and open when you're ready to take orders.",
+        Some("saarathi://merchant/dashboard".to_string()),
+    )
+    .await;
+
     Ok(Json(json!({ "id": id })))
 }
 

@@ -1,5 +1,6 @@
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../ride/domain/models.dart' show asDouble;
 
 // Marketplace domain models (shared by customer + merchant surfaces).
@@ -29,6 +30,8 @@ class Merchant {
   final String? phone;
   final double? distanceKm;
   final String? imageKey;
+
+  String? get imageUrl => _asImageUrl(imageKey);
 
   factory Merchant.fromJson(Map<String, dynamic> j) => Merchant(
         id: j['id'] as String,
@@ -79,12 +82,16 @@ class MenuItem {
       );
 }
 
-/// Treats an `image_key` that is already an absolute URL as the image source.
-/// (Object-storage keys would be resolved against a media base later.)
+/// `image_key` is either an absolute URL (seeded demo photos), a relative
+/// API path (an uploaded shop/item photo, e.g. `/v1/items/<id>/photo` —
+/// resolved against the configured API base rather than baked in at upload
+/// time, since that base differs per build/device), or null.
 String? _asImageUrl(Object? key) {
   final s = key as String?;
   if (s == null || s.isEmpty) return null;
-  return s.startsWith('http') ? s : null;
+  if (s.startsWith('http')) return s;
+  if (s.startsWith('/')) return '${AppConfig.apiBase}$s';
+  return null;
 }
 
 /// A cross-merchant item search hit (item + its merchant + distance).

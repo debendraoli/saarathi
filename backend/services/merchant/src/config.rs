@@ -24,6 +24,8 @@ pub struct Config {
     pub delivery_per_km: Decimal,
     /// NATS bus for order-lifecycle notifications ("new order", "order approved", …).
     pub nats_url: String,
+    /// Where store/menu-item photos live on disk (dev only — see `store.rs`).
+    pub merchant_storage_dir: String,
 }
 
 impl Config {
@@ -45,6 +47,8 @@ impl Config {
             delivery_base_fare: dec_env("DELIVERY_BASE_FARE", "30"),
             delivery_per_km: dec_env("DELIVERY_PER_KM", "15"),
             nats_url: opt("NATS_URL").unwrap_or_else(|| "nats://localhost:4222".into()),
+            merchant_storage_dir: opt("MERCHANT_STORAGE_DIR")
+                .unwrap_or_else(|| "./.data/merchant".into()),
         })
     }
 }

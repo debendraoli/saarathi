@@ -27,6 +27,7 @@ pub struct Config {
     pub whatsapp: Option<crate::otp_delivery::WhatsAppConfig>,
     /// Sparrow SMS — OTP fallback channel. `None` if unconfigured.
     pub sparrow: Option<crate::otp_delivery::SparrowConfig>,
+    pub nats_url: String,
 }
 
 impl Config {
@@ -77,6 +78,7 @@ impl Config {
                 (Some(token), Some(from)) => Some(crate::otp_delivery::SparrowConfig { token, from }),
                 _ => None,
             },
+            nats_url: opt("NATS_URL").unwrap_or_else(|| "nats://localhost:4222".into()),
         })
     }
 }

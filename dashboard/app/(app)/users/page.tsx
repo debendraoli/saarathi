@@ -5,7 +5,7 @@ import { rides, type RiderRow } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-export default function RidersPage() {
+export default function UsersPage() {
   const router = useRouter();
   const [rows, setRows] = useState<RiderRow[]>([]);
   const [query, setQuery] = useState("");
@@ -34,8 +34,8 @@ export default function RidersPage() {
   return (
     <div className="stack">
       <div>
-        <h1 className="page-title">Riders</h1>
-        <p className="subtle">Every rider account, with lifetime trips and spend.</p>
+        <h1 className="page-title">Users</h1>
+        <p className="subtle">Every registered account, with lifetime trips and spend.</p>
       </div>
 
       <div className="toolbar">
@@ -68,7 +68,7 @@ export default function RidersPage() {
           </thead>
           <tbody>
             {slice.map((r) => (
-              <tr key={r.id} onClick={() => router.push(`/riders/${r.id}`)}>
+              <tr key={r.id} onClick={() => router.push(`/users/${r.id}`)}>
                 <td><b>{r.full_name ?? "—"}</b></td>
                 <td>{r.phone}</td>
                 <td>
@@ -84,7 +84,7 @@ export default function RidersPage() {
             {!loading && rows.length === 0 && (
               <tr>
                 <td colSpan={6} className="subtle" style={{ textAlign: "center", padding: 32 }}>
-                  No riders found.
+                  No users found.
                 </td>
               </tr>
             )}

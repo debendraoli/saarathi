@@ -581,6 +581,10 @@ export const rides = {
   riderDetail: (id: string) => ridesRequest<RiderDetail>(`/v1/admin/riders/${id}`),
   driverAnalytics: (userId: string) =>
     ridesRequest<DriverAnalytics>(`/v1/admin/driver-analytics/${userId}`),
+  driverDirectory: (q?: string) =>
+    ridesRequest<DriverDirectoryRow[]>(
+      `/v1/admin/driver-directory${q ? `?q=${encodeURIComponent(q)}` : ""}`,
+    ),
 
   // Staff-initiated credit top-up (bypasses the PSP) — rider or driver.
   adminTopup: (userId: string, kind: "rider" | "driver", amount: number) =>
@@ -614,6 +618,17 @@ export interface RiderDetail {
   avg_rating: number | null;
   rating_count: number;
   recent_trips: RideRow[];
+}
+
+export interface DriverDirectoryRow {
+  driver_id: string;
+  user_id: string;
+  phone: string;
+  full_name: string | null;
+  kyc_status: string;
+  created_at: string;
+  total_trips: number;
+  total_earnings: string;
 }
 
 export interface DriverAnalytics {

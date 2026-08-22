@@ -21,6 +21,8 @@ String? routeForDeepLink(Uri uri) {
       return '${Routes.order}/$id';
     case 'wallet':
       return Routes.wallet;
+    case 'merchant':
+      return Routes.merchantDashboard;
   }
   return null;
 }

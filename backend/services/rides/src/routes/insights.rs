@@ -20,6 +20,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/admin/riders", get(riders))
         .route("/v1/admin/riders/{id}", get(rider_detail))
         .route("/v1/admin/driver-analytics/{id}", get(driver_analytics))
+        .route("/v1/admin/driver-directory", get(driver_directory))
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -354,4 +355,54 @@ async fn driver_analytics(
         rating_count,
         recent_trips,
     }))
+}
+
+// ── Driver directory ─────────────────────────────────────────────────────────
+// Every driver (any KYC status), unlike auth's /v1/admin/drivers which is the
+// review queue (status=queue|rejected only) — this is the "browse everyone"
+// counterpart to the riders directory above, same reasoning for living here:
+// trip/earnings aggregates only exist in rides' own schema. Returns the
+// `drivers` row id (not just the user id) so the dashboard can link straight
+// into auth's existing per-driver KYC detail page.
+
+#[derive(Serialize, sqlx::FromRow)]
+struct DriverDirectoryRow {
+    driver_id: Uuid,
+    user_id: Uuid,
+    phone: String,
+    full_name: Option<String>,
+    kyc_status: String,
+    created_at: DateTime<Utc>,
+    total_trips: i64,
+    total_earnings: Decimal,
+}
+
+async fn driver_directory(
+    State(st): State<AppState>,
+    _staff: StaffUser,
+    Query(q): Query<RidersQuery>,
+) -> AppResult<Json<Vec<DriverDirectoryRow>>> {
+    let query = q.q.trim().to_string();
+    let rows: Vec<DriverDirectoryRow> = sqlx::query_as(
+        "SELECT d.id AS driver_id, u.id AS user_id, u.phone, u.full_name, \
+                d.kyc_status::text AS kyc_status, u.created_at, \
+                COALESCE(t.total_trips, 0) AS total_trips, \
+                COALESCE(le.total_earnings, 0) AS total_earnings \
+         FROM drivers d \
+         JOIN users u ON u.id = d.user_id \
+         LEFT JOIN ( \
+             SELECT driver_id, count(*) FILTER (WHERE status = 'completed') AS total_trips \
+             FROM trips GROUP BY driver_id \
+         ) t ON t.driver_id = u.id \
+         LEFT JOIN ( \
+             SELECT driver_id, SUM(driver_payout) AS total_earnings \
+             FROM ledger_entries GROUP BY driver_id \
+         ) le ON le.driver_id = u.id \
+         WHERE ($1 = '' OR u.phone ILIKE '%' || $1 || '%' OR u.full_name ILIKE '%' || $1 || '%') \
+         ORDER BY u.created_at DESC LIMIT 200",
+    )
+    .bind(&query)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(rows))
 }

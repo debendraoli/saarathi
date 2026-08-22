@@ -1,12 +1,16 @@
+import 'dart:io' show File;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
+import '../../places/data/places_repository.dart';
 import '../data/merchant_repository.dart';
 
 /// Self-service merchant registration: name, type, contact, PAN/VAT + pin.
@@ -26,13 +30,48 @@ class _MerchantOnboardingScreenState
   final _panVat = TextEditingController();
   String _vertical = 'food';
   LatLng? _point;
+  String? _pointLabel;
+  XFile? _photo;
   bool _busy = false;
+
+  Future<void> _pickPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded),
+              title: const Text('Camera'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('Gallery'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    final file = await ImagePicker().pickImage(source: source, imageQuality: 70);
+    if (file != null && mounted) setState(() => _photo = file);
+  }
 
   @override
   void initState() {
     super.initState();
-    ensureLocationPermission().then((_) => currentLatLng()).then((p) {
-      if (mounted) setState(() => _point = p);
+    ensureLocationPermission().then((_) => currentLatLng()).then((p) async {
+      if (!mounted) return;
+      setState(() => _point = p);
+      final hit = await ref
+          .read(placesRepositoryProvider)
+          .reverse(p)
+          .catchError((_) => null);
+      if (mounted && hit != null) setState(() => _pointLabel = hit.label);
     });
   }
 
@@ -51,7 +90,7 @@ class _MerchantOnboardingScreenState
     if (name.isEmpty || point == null) return;
     setState(() => _busy = true);
     try {
-      await ref.read(merchantRepositoryProvider).apply(
+      final id = await ref.read(merchantRepositoryProvider).apply(
             name: name,
             vertical: _vertical,
             point: point,
@@ -59,6 +98,13 @@ class _MerchantOnboardingScreenState
             phone: _phone.text.trim(),
             panVat: _panVat.text.trim(),
           );
+      final photo = _photo;
+      if (photo != null) {
+        await ref
+            .read(merchantRepositoryProvider)
+            .uploadMerchantPhoto(id, photo.path)
+            .catchError((_) {}); // non-blocking — the store itself was created
+      }
       ref.invalidate(myMerchantsProvider);
       Haptics.success();
       if (mounted) context.go(Routes.merchantDashboard);
@@ -121,8 +167,23 @@ class _MerchantOnboardingScreenState
             subtitle: Text(
               _point == null
                   ? '…'
-                  : '${_point!.latitude.toStringAsFixed(5)}, ${_point!.longitude.toStringAsFixed(5)}',
+                  : _pointLabel ??
+                      '${_point!.latitude.toStringAsFixed(5)}, ${_point!.longitude.toStringAsFixed(5)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
+          ),
+          const SizedBox(height: 16),
+          if (_photo != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.file(File(_photo!.path), height: 140, fit: BoxFit.cover),
+            ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _pickPhoto,
+            icon: const Icon(Icons.camera_alt_rounded),
+            label: Text(_photo == null ? 'Add a shop photo' : 'Change photo'),
           ),
           const SizedBox(height: 20),
           FilledButton(

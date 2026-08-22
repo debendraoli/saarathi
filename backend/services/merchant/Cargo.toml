@@ -30,3 +30,4 @@ tower-http = { workspace = true }
 reqwest = { workspace = true }
 redis = { workspace = true }
 async-nats = { workspace = true }
+async-trait = { workspace = true }

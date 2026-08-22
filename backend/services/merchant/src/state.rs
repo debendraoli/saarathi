@@ -2,6 +2,7 @@
 //! `saarathi_core::authn` — see `crate::auth` for this service's wiring.
 
 use crate::config::Config;
+use crate::store::DocumentStore;
 use saarathi_core::routing::RoutingClient;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ pub struct AppState {
     pub http: reqwest::Client,
     /// NATS bus for order-lifecycle notifications. `None` if unavailable.
     pub nats: Option<async_nats::Client>,
+    pub docs: Arc<dyn DocumentStore>,
 }
 
 impl saarathi_core::authn::HasJwtSecret for AppState {

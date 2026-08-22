@@ -2410,6 +2410,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "argon2",
+ "async-nats",
  "async-trait",
  "axum",
  "chrono",
@@ -2487,6 +2488,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-nats",
+ "async-trait",
  "axum",
  "chrono",
  "dotenvy",

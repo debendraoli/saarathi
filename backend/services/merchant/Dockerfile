@@ -17,7 +17,9 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd -r -u 10001 saarathi
+    && useradd -r -u 10001 -m saarathi \
+    && mkdir -p /data/merchant \
+    && chown -R saarathi:saarathi /data
 COPY --from=builder /usr/local/bin/service /usr/local/bin/service
 USER saarathi
 EXPOSE 8088

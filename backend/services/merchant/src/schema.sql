@@ -41,6 +41,11 @@ ALTER TABLE merchants ADD COLUMN IF NOT EXISTS pan_vat text;
 -- which is the invalidation strategy: the cache can never be stale because
 -- nothing else can change `zone_polygon` out from under it.
 ALTER TABLE merchants ADD COLUMN IF NOT EXISTS zone_polygon jsonb;
+-- Raw storage key for an uploaded shop photo (opaque, resolved via
+-- DocumentStore) — distinct from `image_key`, which is the client-facing
+-- src (a URL or a relative API path) and may point at a seeded demo photo
+-- instead. Null until the owner uploads one.
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS photo_storage_key text;
 
 CREATE TABLE IF NOT EXISTS menu_items (
     id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -54,6 +59,7 @@ CREATE TABLE IF NOT EXISTS menu_items (
     created_at   timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS menu_items_merchant_idx ON menu_items (merchant_id);
+ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS photo_storage_key text;
 
 CREATE TABLE IF NOT EXISTS orders (
     id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),

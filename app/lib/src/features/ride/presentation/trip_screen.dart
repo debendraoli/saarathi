@@ -271,6 +271,10 @@ class _StatusSheet extends ConsumerWidget {
                 onPressed: () async {
                   Haptics.warning();
                   await ref.read(rideRepositoryProvider).cancel(trip.id);
+                  // The home screen's search-bar lock reads this trip list —
+                  // without invalidating it, a just-cancelled trip still
+                  // looks "active" and the lock never lifts.
+                  ref.invalidate(myTripsProvider);
                   if (context.mounted) context.go(Routes.home);
                 },
                 child: Text(l.cancelRide),
@@ -286,7 +290,10 @@ class _StatusSheet extends ConsumerWidget {
                 )
               else
                 FilledButton(
-                  onPressed: () => context.go(Routes.home),
+                  onPressed: () {
+                    ref.invalidate(myTripsProvider);
+                    context.go(Routes.home);
+                  },
                   child: Text(l.actionDone),
                 ),
             ],
@@ -304,6 +311,7 @@ class _StatusSheet extends ConsumerWidget {
           .read(rideRepositoryProvider)
           .rate(tripId, result.stars, comment: result.comment);
     } catch (_) {/* non-blocking */}
+    ref.invalidate(myTripsProvider);
     if (context.mounted) context.go(Routes.home);
   }
 }

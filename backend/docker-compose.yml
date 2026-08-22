@@ -280,8 +280,11 @@ services:
       MERCHANT_PORT: 8088
       ROUTING_SERVICE_URL: http://routing:8084
       RIDES_SERVICE_URL: http://rides:8082
+      MERCHANT_STORAGE_DIR: /data/merchant
     ports:
       - "8088:8088"
+    volumes:
+      - merchant-data:/data/merchant
     depends_on:
       postgres:
         condition: service_healthy
@@ -429,3 +432,4 @@ services:
 volumes:
   kyc-data:
   places-data:
+  merchant-data:
