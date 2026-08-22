@@ -208,6 +208,38 @@ pub async fn nearby_count(
     Ok(nearby(st, lng, lat, radius_km).await?.len())
 }
 
+/// Approximate positions of online drivers within `radius_km`, for the
+/// rider-facing "searching" map animation only — not used for dispatch, so
+/// unlike `nearby()` this never returns driver ids, and each point is jittered
+/// (~40m) to avoid letting a rider pin a specific driver's exact location by
+/// repeatedly polling.
+pub async fn nearby_positions(
+    st: &AppState,
+    lng: f64,
+    lat: f64,
+    radius_km: f64,
+) -> anyhow::Result<Vec<(f64, f64)>> {
+    use rand::Rng;
+    let origin = CoreLatLng { lat, lng };
+    let candidates = candidates_in_disk(st, lat, lng, radius_km).await?;
+    let mut rng = rand::thread_rng();
+    let mut out: Vec<(f64, f64)> = candidates
+        .into_iter()
+        .filter_map(|c| {
+            let d = haversine_km(origin, CoreLatLng { lat: c.lat, lng: c.lng });
+            if d > radius_km {
+                return None;
+            }
+            // ~0.00036 deg ≈ 40m at this latitude range; good enough for a
+            // coarse jitter without needing a proper projection.
+            let mut jitter = || rng.gen_range(-0.00036..0.00036);
+            Some((c.lat + jitter(), c.lng + jitter()))
+        })
+        .collect();
+    out.truncate(25);
+    Ok(out)
+}
+
 /// A driver is eligible if their heartbeat is fresh and they opted into this job type.
 async fn eligible(st: &AppState, driver_id: Uuid, job_type: &str) -> anyhow::Result<bool> {
     let mut r = st.redis.clone();

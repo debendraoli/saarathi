@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -60,30 +62,53 @@ class TripScreen extends ConsumerWidget {
                 trip.vehicleClass ?? 'two_wheeler',
               ),
             ));
+            final searching = trip.status == TripStatus.searching ||
+                trip.status == TripStatus.requested;
+            final fixedPins = [
+              MapPin(
+                trip.origin,
+                Icons.trip_origin,
+                Theme.of(context).colorScheme.primary,
+              ),
+              MapPin(
+                trip.dest,
+                Icons.location_on_rounded,
+                Theme.of(context).colorScheme.secondary,
+              ),
+              if (driverLoc != null)
+                MapPin(
+                  driverLoc,
+                  Icons.navigation_rounded,
+                  Theme.of(context).colorScheme.tertiary,
+                ),
+            ];
             return Stack(
               children: [
-                MapView(
-                  center: driverLoc ?? trip.origin,
-                  route: route.valueOrNull ?? [trip.origin, trip.dest],
-                  pins: [
-                    MapPin(
-                      trip.origin,
-                      Icons.trip_origin,
-                      Theme.of(context).colorScheme.primary,
-                    ),
-                    MapPin(
-                      trip.dest,
-                      Icons.location_on_rounded,
-                      Theme.of(context).colorScheme.secondary,
-                    ),
-                    if (driverLoc != null)
-                      MapPin(
-                        driverLoc,
-                        Icons.navigation_rounded,
-                        Theme.of(context).colorScheme.tertiary,
+                searching
+                    ? _SearchRadar(
+                        origin: trip.origin,
+                        builder: (context, driverPins, circles) => MapView(
+                          center: trip.origin,
+                          route: route.valueOrNull ?? [trip.origin, trip.dest],
+                          circles: circles,
+                          pins: [
+                            ...fixedPins,
+                            for (final p in driverPins)
+                              MapPin(
+                                p,
+                                Icons.two_wheeler_rounded,
+                                Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                          ],
+                        ),
+                      )
+                    : MapView(
+                        center: driverLoc ?? trip.origin,
+                        route: route.valueOrNull ?? [trip.origin, trip.dest],
+                        pins: fixedPins,
                       ),
-                  ],
-                ),
                 // Invisible: routes incoming calls to the call screen.
                 _CallWatcher(tripId: tripId),
                 // Invisible: the driver streams position during an active trip.
@@ -139,6 +164,98 @@ class TripScreen extends ConsumerWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+/// Drives the "searching" map animation: polls approximate nearby-driver
+/// positions and gives them a small continuous organic wander (so they read
+/// as "moving around" between polls, not just snapping every few seconds),
+/// plus three concentric rings pulsing outward from the pickup point like a
+/// radar ping. Purely cosmetic — these aren't real-time driver positions,
+/// just a sense that the search radius is active and drivers are nearby.
+class _SearchRadar extends ConsumerStatefulWidget {
+  const _SearchRadar({required this.origin, required this.builder});
+
+  final LatLng origin;
+  final Widget Function(
+    BuildContext context,
+    List<LatLng> driverPins,
+    List<MapCircle> circles,
+  ) builder;
+
+  @override
+  ConsumerState<_SearchRadar> createState() => _SearchRadarState();
+}
+
+class _SearchRadarState extends ConsumerState<_SearchRadar>
+    with SingleTickerProviderStateMixin {
+  static const _radiusKm = 2.5;
+  static const _wanderDeg = 0.0009; // ~90m wander radius at this latitude
+  static const _ringCount = 3;
+
+  late final AnimationController _ticker;
+  Timer? _poll;
+  List<LatLng> _base = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 6),
+    )..repeat();
+    _fetch();
+    _poll = Timer.periodic(const Duration(seconds: 5), (_) => _fetch());
+  }
+
+  Future<void> _fetch() async {
+    try {
+      final pts = await ref
+          .read(rideRepositoryProvider)
+          .nearbyDrivers(widget.origin, radiusKm: _radiusKm);
+      if (mounted) setState(() => _base = pts);
+    } catch (_) {/* keep the last known positions */}
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AnimatedBuilder(
+      animation: _ticker,
+      builder: (context, _) {
+        final t = _ticker.value * 2 * math.pi;
+        final driverPins = [
+          for (var i = 0; i < _base.length; i++)
+            LatLng(
+              _base[i].latitude + _wanderDeg * math.cos(t + i * 2.4),
+              _base[i].longitude + _wanderDeg * math.sin(t + i * 2.4),
+            ),
+        ];
+        final circles = [
+          for (var ring = 0; ring < _ringCount; ring++)
+            _pulseRing(scheme, ring),
+        ];
+        return widget.builder(context, driverPins, circles);
+      },
+    );
+  }
+
+  MapCircle _pulseRing(ColorScheme scheme, int ring) {
+    final progress = (_ticker.value + ring / _ringCount) % 1.0;
+    final fade = 1 - progress;
+    return MapCircle(
+      center: widget.origin,
+      radiusMeters: _radiusKm * 1000 * progress,
+      color: scheme.primary.withValues(alpha: fade * 0.14),
+      borderColor: scheme.primary.withValues(alpha: fade * 0.55),
     );
   }
 }

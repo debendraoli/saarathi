@@ -5,7 +5,7 @@ use crate::dispatch;
 use crate::error::{AppError, AppResult};
 use crate::models::{Trip, TRIP_COLS};
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::{
     routing::{get, post},
     Json, Router,
@@ -23,6 +23,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/driver/heartbeat", post(heartbeat))
         .route("/v1/driver/offline", post(go_offline))
         .route("/v1/driver/offers", get(my_offers))
+        .route("/v1/rides/nearby-drivers", get(nearby_drivers))
         .route("/v1/rides/{id}/offer/accept", post(accept_offer))
         .route("/v1/rides/{id}/offer/decline", post(decline_offer))
         .route("/v1/admin/rides/{id}/assign", post(ops_assign))
@@ -141,6 +142,39 @@ async fn my_offers(
     .fetch_all(&st.db)
     .await?;
     Ok(Json(offers))
+}
+
+#[derive(Deserialize)]
+struct NearbyDriversQuery {
+    lat: f64,
+    lng: f64,
+    #[serde(default)]
+    radius_km: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct NearbyDriverPoint {
+    lat: f64,
+    lng: f64,
+}
+
+/// Approximate nearby-driver positions for the rider-facing "searching" map
+/// animation — any authed user, not just the trip's own rider, since this is
+/// purely cosmetic (points are jittered, see `dispatch::nearby_positions`)
+/// and doesn't need to be scoped to a specific trip.
+async fn nearby_drivers(
+    State(st): State<AppState>,
+    AuthUser(_claims): AuthUser,
+    Query(q): Query<NearbyDriversQuery>,
+) -> AppResult<Json<Vec<NearbyDriverPoint>>> {
+    let radius_km = q.radius_km.unwrap_or(3.0).clamp(0.5, 5.0);
+    let points = dispatch::nearby_positions(&st, q.lng, q.lat, radius_km).await?;
+    Ok(Json(
+        points
+            .into_iter()
+            .map(|(lat, lng)| NearbyDriverPoint { lat, lng })
+            .collect(),
+    ))
 }
 
 /// Accept-then-cancel trips (by this driver) allowed in the trailing window

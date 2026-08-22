@@ -104,6 +104,20 @@ class RideRepository {
         '/v1/rides/$id/sos',
         body: {'lat': lat, 'lng': lng, if (note != null) 'note': note},
       );
+
+  /// Approximate (jittered) online-driver positions near [center], purely for
+  /// the "searching" map animation — not real dispatch candidates.
+  Future<List<LatLng>> nearbyDrivers(LatLng center, {double radiusKm = 3}) async {
+    final res = await _api.get('/v1/rides/nearby-drivers', query: {
+      'lat': center.latitude,
+      'lng': center.longitude,
+      'radius_km': radiusKm,
+    });
+    return [
+      for (final p in (res as List))
+        LatLng(asDouble((p as Map)['lat']), asDouble(p['lng'])),
+    ];
+  }
 }
 
 final rideRepositoryProvider = Provider<RideRepository>((ref) {

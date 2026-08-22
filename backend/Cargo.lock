@@ -2621,6 +2621,7 @@ dependencies = [
  "h3o",
  "hmac",
  "jsonwebtoken",
+ "rand 0.8.7",
  "redis",
  "reqwest",
  "rust_decimal",
