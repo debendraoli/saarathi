@@ -12,3 +12,7 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Fastlane: CI writes the Play service-account key here at release time.
+fastlane/play-store-key.json
+fastlane/report.xml

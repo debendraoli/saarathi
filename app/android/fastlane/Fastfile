@@ -1,0 +1,16 @@
+default_platform(:android)
+
+platform :android do
+  desc "Upload the already-built App Bundle to Google Play. Run `flutter build appbundle --release` first."
+  lane :upload_release do |options|
+    upload_to_play_store(
+      track: options[:track] || "internal",
+      aab: options[:aab] || "../build/app/outputs/bundle/release/app-release.aab",
+      # Store listing text/screenshots are managed by hand in the Play
+      # Console, not from this repo — only the binary itself ships from CI.
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+end

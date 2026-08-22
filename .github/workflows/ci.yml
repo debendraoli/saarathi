@@ -27,6 +27,22 @@ jobs:
       - run: cargo clippy --all-targets --workspace -- -D warnings
       - run: cargo test --workspace
 
+  app:
+    name: App (analyze, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
   dashboard:
     name: Dashboard (build)
     runs-on: ubuntu-latest

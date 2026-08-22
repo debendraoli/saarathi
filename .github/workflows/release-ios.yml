@@ -1,0 +1,78 @@
+name: Release (iOS → TestFlight)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+jobs:
+  release-ios:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: app
+
+      # Real Firebase config is never committed (see app/.gitignore) — CI
+      # writes it from a repo secret just for this run.
+      - name: Write Firebase config
+        run: echo "${{ secrets.GOOGLESERVICE_INFO_PLIST_BASE64 }}" | base64 -d > ios/Runner/GoogleService-Info.plist
+
+      # Standard Apple-recommended pattern for CI signing: import the
+      # distribution cert + provisioning profile into a throwaway keychain
+      # scoped to this job, rather than touching the runner's login keychain.
+      - name: Import signing certificate + provisioning profile
+        env:
+          IOS_DIST_CERT_BASE64: ${{ secrets.IOS_DIST_CERT_BASE64 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/ci-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/dist-cert.p12"
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+
+          echo "$IOS_DIST_CERT_BASE64" | base64 -d > "$CERT_PATH"
+          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -d > "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$IOS_DIST_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+
+          mkdir -p ~/Library/MobileDevice/"Provisioning Profiles"
+          cp "$PROFILE_PATH" ~/Library/MobileDevice/"Provisioning Profiles"/profile.mobileprovision
+
+      - run: flutter pub get
+
+      - name: Build Flutter iOS artifacts (unsigned)
+        run: |
+          flutter build ios --release --no-codesign \
+            --dart-define=SAARATHI_API_BASE=${{ secrets.SAARATHI_API_BASE_PROD }}
+
+      - name: Archive + upload to TestFlight
+        working-directory: app/ios
+        env:
+          BUNDLE_GEMFILE: ../Gemfile
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_TEAM_ID: ${{ secrets.APP_STORE_CONNECT_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          IOS_PROVISIONING_PROFILE_SPECIFIER: ${{ secrets.IOS_PROVISIONING_PROFILE_SPECIFIER }}
+        run: bundle exec fastlane ios beta

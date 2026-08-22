@@ -1,0 +1,72 @@
+name: Release (Android → Google Play)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      track:
+        description: "Play Store track"
+        required: true
+        default: internal
+        type: choice
+        options: [internal, alpha, beta, production]
+
+jobs:
+  release-android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: app
+
+      # Real Firebase config + release keystore are never committed (see
+      # app/.gitignore) — CI writes them from repo secrets just for this run.
+      - name: Write Firebase config
+        run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > android/app/google-services.json
+
+      - name: Write release keystore + key.properties
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/upload-keystore.jks
+          cat > android/key.properties <<EOF
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          storeFile=upload-keystore.jks
+          EOF
+
+      - run: flutter pub get
+
+      - name: Build App Bundle
+        run: |
+          flutter build appbundle --release \
+            --dart-define=SAARATHI_API_BASE=${{ secrets.SAARATHI_API_BASE_PROD }}
+
+      - name: Write Play Store service-account key
+        run: echo '${{ secrets.PLAY_STORE_JSON_KEY }}' > android/fastlane/play-store-key.json
+
+      - name: Upload to Google Play
+        working-directory: app/android
+        env:
+          PLAY_STORE_JSON_KEY_PATH: play-store-key.json
+          BUNDLE_GEMFILE: ../Gemfile
+        run: |
+          bundle exec fastlane android upload_release \
+            track:${{ github.event.inputs.track || 'internal' }}

@@ -14,14 +14,12 @@ English + नेपाली. Talks to the backend API gateway (Traefik, `:8080`
 
 ## First-time setup
 
-This repo ships `lib/`, `pubspec.yaml`, and config. The native runner folders
-(`android/`, `ios/`, `web/`) are generated locally so they are not committed:
+`android/` and `ios/` are committed (Android and iOS only — no macOS/web).
+Firebase config (`google-services.json` / `GoogleService-Info.plist`) is
+gitignored since it's a real project key; see "Push (FCM)" below.
 
 ```bash
 cd app
-# Generate platform folders without touching lib/ or pubspec.yaml
-flutter create --org com.saarathi --project-name saarathi \
-  --platforms=android,ios,web .
 flutter pub get
 ```
 
@@ -57,30 +55,23 @@ lib/src/
   l10n/        app_en.arb · app_ne.arb
 ```
 
-## Native config (add after `flutter create`)
+## Native config
 
-The generated runners need these to actually run:
+Already set up in the committed `android/`/`ios/` runners — permissions,
+the flutter_foreground_task service declaration, the `saarathi://` deep-link
+intent-filter/URL type, and (iOS) the `NS*UsageDescription` keys.
 
-- **Android** (`android/app/src/main/AndroidManifest.xml` + `build.gradle`):
-  permissions `INTERNET`, `ACCESS_FINE_LOCATION`, `CAMERA`, `RECORD_AUDIO`,
-  `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`,
-  `WAKE_LOCK`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`; declare the
-  flutter_foreground_task service
-  (`com.pravera.flutter_foreground_task.service.ForegroundService`,
-  `android:foregroundServiceType="location"`); `minSdkVersion 21+`; for dev
-  against a plaintext gateway add `android:usesCleartextTraffic="true"`; a
-  deep-link `<intent-filter>` for scheme `saarathi`.
-- **iOS** (`ios/Runner/Info.plist`): `NSLocationWhenInUseUsageDescription`,
-  `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`,
-  `NSPhotoLibraryUsageDescription`; a `CFBundleURLTypes` entry for scheme
-  `saarathi`; for localhost dev, an `NSAppTransportSecurity` exception.
 - **WebRTC**: point at Coturn via
   `--dart-define=SAARATHI_TURN_URL=…` (or the app fetches ephemeral creds from
   the backend `/v1/rtc/ice`, which are minted from the Coturn `TURN_SECRET`).
-- **Push (FCM)**: run `flutterfire configure` to generate
-  `firebase_options.dart` + `google-services.json` / `GoogleService-Info.plist`,
-  then push works end-to-end (`PushService` is already wired and registers the
-  device token via `POST /v1/me/push-token`). Until then push is auto-disabled.
+- **Push (FCM)**: drop `google-services.json` at `android/app/` and
+  `GoogleService-Info.plist` at `ios/Runner/` (both gitignored — get them
+  from the Firebase console for project `saarathi-e6596`, app IDs
+  `com.saarathi.app` on both platforms). `PushService` is already wired and
+  registers the device token via `POST /v1/me/push-token`; push is
+  auto-disabled until the config file is present.
+- **App store releases**: see [RELEASE.md](RELEASE.md) for the CI pipeline
+  and one-time Apple/Google setup.
 
 ## Not yet built (next passes)
 
