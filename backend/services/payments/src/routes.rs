@@ -493,7 +493,13 @@ struct AdminTopupRequest {
     /// never the withdrawable earnings wallet, which only ever grows from
     /// actual completed trips.
     kind: String,
+    /// The base amount staff is crediting — before any plan bonus.
     amount: Decimal,
+    /// An active `credit_plans` row to apply. When given, `amount` must fall
+    /// within the plan's [min_amount, max_amount] and its bonus_percent is
+    /// added on top — the same plan a rider would see and pick from
+    /// self-serve, just applied on staff's behalf instead of over the PSP.
+    plan_id: Option<Uuid>,
 }
 
 /// Staff-initiated credit, bypassing the PSP entirely (no checkout, no
@@ -531,32 +537,60 @@ async fn admin_topup(
         return Ok(Json(body));
     }
 
+    // credit_plans is owned by rides' schema — same cross-service direct-read
+    // convention this service already uses for credit_accounts/driver_wallets.
+    let mut bonus_percent = Decimal::ZERO;
+    let mut plan_name: Option<String> = None;
+    if let Some(plan_id) = body.plan_id {
+        let plan: Option<(String, Decimal, Decimal, Decimal, String)> = sqlx::query_as(
+            "SELECT name, min_amount, max_amount, bonus_percent, status FROM credit_plans WHERE id = $1",
+        )
+        .bind(plan_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let (name, min_amount, max_amount, plan_bonus, status) =
+            plan.ok_or_else(|| AppError::BadRequest("credit plan not found".into()))?;
+        if status != "active" {
+            return Err(AppError::BadRequest("credit plan is not active".into()));
+        }
+        if body.amount < min_amount || body.amount > max_amount {
+            return Err(AppError::bad(
+                ErrorCode::AmountInvalid,
+                format!("amount must be between NPR {min_amount} and NPR {max_amount} for this plan"),
+            ));
+        }
+        bonus_percent = plan_bonus;
+        plan_name = Some(name);
+    }
+    let bonus = (body.amount * bonus_percent / Decimal::from(100)).round_dp(2);
+    let total = body.amount + bonus;
+
     let reference = format!("staff:{}", claims.sub);
     let balance = if body.kind == "driver" {
-        wallet::credit_driver(&mut tx, body.user_id, body.amount, "admin_topup", Some(&reference))
-            .await?
+        wallet::credit_driver(&mut tx, body.user_id, total, "admin_topup", Some(&reference)).await?
     } else {
-        wallet::credit_rider(
-            &mut tx,
-            body.user_id,
-            body.amount,
-            "admin_topup",
-            Some(&reference),
-            None,
-        )
-        .await?
+        wallet::credit_rider(&mut tx, body.user_id, total, "admin_topup", Some(&reference), None)
+            .await?
     };
 
-    let response = json!({ "ok": true, "balance": balance });
+    let response = json!({ "ok": true, "balance": balance, "credited": total, "bonus": bonus });
     idempotency::store(&mut tx, &key, claims.sub, "admin.credits.topup", 200, &response).await?;
     tx.commit().await?;
 
+    let notif_body = if bonus > Decimal::ZERO {
+        format!(
+            "NPR {} was added to your account by Saarathi support (NPR {} + {} bonus from the {} plan).",
+            total, body.amount, bonus, plan_name.unwrap_or_default()
+        )
+    } else {
+        format!("NPR {total} was added to your account by Saarathi support.")
+    };
     crate::notify::send(
         &st.nats,
         body.user_id,
         saarathi_core::domain::notif::TRANSACTIONAL,
         "Credits added",
-        &format!("NPR {} was added to your account by Saarathi support.", body.amount),
+        &notif_body,
         Some("saarathi://wallet/topup".to_string()),
     )
     .await;

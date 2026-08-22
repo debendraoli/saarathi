@@ -3,9 +3,17 @@
 import { Pagination, SearchInput, usePaged } from "@/components/Toolbar";
 import { rides, type DriverDirectoryRow } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 export default function AllDriversPage() {
+  return (
+    <Suspense fallback={null}>
+      <AllDriversPageInner />
+    </Suspense>
+  );
+}
+
+function AllDriversPageInner() {
   const router = useRouter();
   const [rows, setRows] = useState<DriverDirectoryRow[]>([]);
   const [query, setQuery] = useState("");
@@ -68,7 +76,7 @@ export default function AllDriversPage() {
           </thead>
           <tbody>
             {slice.map((r) => (
-              <tr key={r.driver_id} onClick={() => router.push(`/drivers/${r.driver_id}`)}>
+              <tr key={r.driver_id} onClick={() => router.push(`/drivers/${r.driver_id}?from=all`)}>
                 <td><b>{r.full_name ?? "—"}</b></td>
                 <td>{r.phone}</td>
                 <td>

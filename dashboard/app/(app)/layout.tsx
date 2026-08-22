@@ -28,8 +28,8 @@ import {
     type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
 type CountKey = "kyc" | "sos" | "reports" | "complaints" | "places";
 type NavItem = { href: string; label: string; icon: LucideIcon; countKey?: CountKey };
@@ -106,8 +106,16 @@ const NAV: NavGroup[] = [
 const ALL_ITEMS = NAV.flatMap((g) => g.items);
 
 /** The single best-matching nav href (longest prefix), so overlapping routes
- *  like /partner vs /partners never both light up. */
-function activeHref(pathname: string): string | null {
+ *  like /partner vs /partners never both light up. `driverListFrom` handles
+ *  one specific ambiguity: /drivers/[id] is linked from both the KYC queue
+ *  and the general directory, and a plain prefix match always resolves it to
+ *  "/drivers" (the queue) — which then highlights the wrong sidebar item and
+ *  implies you're looking at review-queue context when you came from the
+ *  full driver list instead. */
+function activeHref(pathname: string, driverListFrom: string | null): string | null {
+  if (driverListFrom === "all" && /^\/drivers\/[^/]+$/.test(pathname)) {
+    return "/drivers/all";
+  }
   let best: string | null = null;
   for (const { href } of ALL_ITEMS) {
     if (
@@ -123,8 +131,17 @@ function activeHref(pathname: string): string | null {
 const COUNT_POLL_MS = 30_000;
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={null}>
+      <AppLayoutInner>{children}</AppLayoutInner>
+    </Suspense>
+  );
+}
+
+function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const driverListFrom = useSearchParams().get("from");
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [counts, setCounts] = useState<Partial<Record<CountKey, number>>>({});
@@ -168,7 +185,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (!ready) return null;
 
-  const active = activeHref(pathname);
+  const active = activeHref(pathname, driverListFrom);
   const title = ALL_ITEMS.find((i) => i.href === active)?.label ?? "";
 
   function logout() {

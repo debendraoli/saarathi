@@ -1,12 +1,21 @@
 "use client";
 
+import { Modal } from "@/components/Modal";
 import { TopupModal } from "@/components/TopupModal";
-import { api, auth, rides, type DriverAnalytics, type DriverDetail, type DriverDocument } from "@/lib/api";
+import { TripMap } from "@/components/TripMap";
+import { api, auth, rides, type DriverAnalytics, type DriverDetail, type DriverDocument, type TripRoute } from "@/lib/api";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { use, useEffect, useState } from "react";
 
 export default function DriverDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  // Both the KYC queue and the general directory link here — send "back"
+  // wherever the staff member actually came from instead of always the
+  // queue, and keep the sidebar highlighting that same page (see layout.tsx).
+  const fromAll = useSearchParams().get("from") === "all";
+  const backHref = fromAll ? "/drivers/all" : "/drivers";
+  const backLabel = fromAll ? "← Back to drivers" : "← Back to queue";
   const [data, setData] = useState<DriverDetail | null>(null);
   const [analytics, setAnalytics] = useState<DriverAnalytics | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -15,6 +24,19 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
   const [reason, setReason] = useState("");
   const [showTopup, setShowTopup] = useState(false);
   const canTopup = ["super_admin", "admin"].includes(auth.user?.role ?? "");
+  const [routeFor, setRouteFor] = useState<string | null>(null);
+  const [route, setRoute] = useState<TripRoute | null>(null);
+  const [routeError, setRouteError] = useState<string | null>(null);
+
+  function viewRoute(tripId: string) {
+    setRouteFor(tripId);
+    setRoute(null);
+    setRouteError(null);
+    rides
+      .tripRoute(tripId)
+      .then(setRoute)
+      .catch((e) => setRouteError((e as Error).message));
+  }
 
   async function load() {
     setError(null);
@@ -68,7 +90,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
   if (!data) {
     return (
       <div className="stack">
-        <Link href="/drivers" className="muted-link">← Back to queue</Link>
+        <Link href={backHref} className="muted-link">{backLabel}</Link>
         {error ? <div className="error">{error}</div> : <p className="subtle">Loading…</p>}
       </div>
     );
@@ -79,7 +101,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="stack">
-      <Link href="/drivers" className="muted-link">← Back to queue</Link>
+      <Link href={backHref} className="muted-link">{backLabel}</Link>
 
       <div className="row">
         <h1 className="page-title" style={{ margin: 0 }}>
@@ -197,7 +219,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
             </thead>
             <tbody>
               {analytics.recent_trips.map((t) => (
-                <tr key={t.id}>
+                <tr key={t.id} onClick={() => viewRoute(t.id)}>
                   <td>{t.rider_name ?? t.rider_id.slice(0, 8)}</td>
                   <td>
                     <span className={`badge ${t.status === "completed" ? "approved" : t.status === "cancelled" ? "rejected" : "under_review"}`}>
@@ -258,6 +280,26 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
         kind="driver"
         onDone={() => load()}
       />
+
+      <Modal open={routeFor !== null} onClose={() => setRouteFor(null)} title="Trip route" wide>
+        {routeError && <div className="error">{routeError}</div>}
+        {!routeError && !route && <p className="subtle">Loading…</p>}
+        {route && (
+          <>
+            <p className="subtle" style={{ marginTop: 0 }}>
+              {route.breadcrumbs.length > 0
+                ? `${route.breadcrumbs.length} recorded points · status: ${route.status.replace("_", " ")}`
+                : `No location pings recorded for this trip · status: ${route.status.replace("_", " ")}`}
+            </p>
+            <TripMap
+              origin={{ lat: route.origin_lat, lng: route.origin_lng }}
+              dest={{ lat: route.dest_lat, lng: route.dest_lng }}
+              breadcrumbs={route.breadcrumbs}
+              heightPx={480}
+            />
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

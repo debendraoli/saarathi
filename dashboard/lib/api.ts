@@ -587,12 +587,17 @@ export const rides = {
     ),
 
   // Staff-initiated credit top-up (bypasses the PSP) — rider or driver.
-  adminTopup: (userId: string, kind: "rider" | "driver", amount: number) =>
-    ridesRequest<{ ok: boolean; balance: string }>("/v1/admin/credits/topup", {
-      method: "POST",
-      headers: { "x-idempotency-key": crypto.randomUUID() },
-      body: JSON.stringify({ user_id: userId, kind, amount }),
-    }),
+  // `planId` applies that plan's bonus on top of `amount` (validated
+  // server-side against the plan's min/max range).
+  adminTopup: (userId: string, kind: "rider" | "driver", amount: number, planId?: string) =>
+    ridesRequest<{ ok: boolean; balance: string; credited: string; bonus: string }>(
+      "/v1/admin/credits/topup",
+      {
+        method: "POST",
+        headers: { "x-idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify({ user_id: userId, kind, amount, plan_id: planId }),
+      },
+    ),
 };
 
 export interface RiderRow {

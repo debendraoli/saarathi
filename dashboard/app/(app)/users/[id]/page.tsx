@@ -1,7 +1,9 @@
 "use client";
 
+import { Modal } from "@/components/Modal";
 import { TopupModal } from "@/components/TopupModal";
-import { auth, rides, type RiderDetail } from "@/lib/api";
+import { TripMap } from "@/components/TripMap";
+import { auth, rides, type RiderDetail, type TripRoute } from "@/lib/api";
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
@@ -11,6 +13,19 @@ export default function RiderDetailPage({ params }: { params: Promise<{ id: stri
   const [error, setError] = useState<string | null>(null);
   const [showTopup, setShowTopup] = useState(false);
   const canTopup = ["super_admin", "admin"].includes(auth.user?.role ?? "");
+  const [routeFor, setRouteFor] = useState<string | null>(null);
+  const [route, setRoute] = useState<TripRoute | null>(null);
+  const [routeError, setRouteError] = useState<string | null>(null);
+
+  function viewRoute(tripId: string) {
+    setRouteFor(tripId);
+    setRoute(null);
+    setRouteError(null);
+    rides
+      .tripRoute(tripId)
+      .then(setRoute)
+      .catch((e) => setRouteError((e as Error).message));
+  }
 
   async function load() {
     setError(null);
@@ -106,7 +121,7 @@ export default function RiderDetailPage({ params }: { params: Promise<{ id: stri
           </thead>
           <tbody>
             {data.recent_trips.map((t) => (
-              <tr key={t.id}>
+              <tr key={t.id} onClick={() => viewRoute(t.id)}>
                 <td>{t.driver_name ?? (t.driver_id ? t.driver_id.slice(0, 8) : "—")}</td>
                 <td>
                   <span className={`badge ${t.status === "completed" ? "approved" : t.status === "cancelled" ? "rejected" : "under_review"}`}>
@@ -137,6 +152,26 @@ export default function RiderDetailPage({ params }: { params: Promise<{ id: stri
         kind="rider"
         onDone={() => load()}
       />
+
+      <Modal open={routeFor !== null} onClose={() => setRouteFor(null)} title="Trip route" wide>
+        {routeError && <div className="error">{routeError}</div>}
+        {!routeError && !route && <p className="subtle">Loading…</p>}
+        {route && (
+          <>
+            <p className="subtle" style={{ marginTop: 0 }}>
+              {route.breadcrumbs.length > 0
+                ? `${route.breadcrumbs.length} recorded points · status: ${route.status.replace("_", " ")}`
+                : `No location pings recorded for this trip · status: ${route.status.replace("_", " ")}`}
+            </p>
+            <TripMap
+              origin={{ lat: route.origin_lat, lng: route.origin_lng }}
+              dest={{ lat: route.dest_lat, lng: route.dest_lng }}
+              breadcrumbs={route.breadcrumbs}
+              heightPx={480}
+            />
+          </>
+        )}
+      </Modal>
     </div>
   );
 }
