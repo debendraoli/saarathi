@@ -75,4 +75,6 @@ class DriverForegroundService {
 
   static Future<bool> get isBatteryOptimizationIgnored =>
       FlutterForegroundTask.isIgnoringBatteryOptimizations;
+
+  static Future<bool> get isRunning => FlutterForegroundTask.isRunningService;
 }

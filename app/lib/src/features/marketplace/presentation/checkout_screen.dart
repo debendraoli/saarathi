@@ -8,6 +8,7 @@ import '../../../core/location.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
+import '../../../shared/widgets/wallet_balance_hint.dart';
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
 import '../application/cart_controller.dart';
@@ -191,6 +192,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   selected: {_payment},
                   onSelectionChanged: (s) => setState(() => _payment = s.first),
                 ),
+                if (_payment == 'wallet')
+                  WalletBalanceHint(amount: cart.subtotal),
               ],
             ),
       bottomNavigationBar: cart.isEmpty

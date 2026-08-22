@@ -81,10 +81,8 @@ class AccountTab extends ConsumerWidget {
             onTap: () => context.push(Routes.wallet),
           ),
         ),
-        if (user?.isDriver ?? false) ...[
-          const SizedBox(height: 16),
-          const _BackgroundRunningCard(),
-        ],
+        const SizedBox(height: 16),
+        const _BackgroundRunningCard(),
         const SizedBox(height: 16),
         Card(
           child: ListTile(
@@ -165,6 +163,8 @@ class _BackgroundRunningCard extends StatefulWidget {
 class _BackgroundRunningCardState extends State<_BackgroundRunningCard>
     with WidgetsBindingObserver {
   bool? _ignoringOptimizations;
+  bool _serviceRunning = false;
+  bool _serviceBusy = false;
 
   @override
   void initState() {
@@ -188,7 +188,25 @@ class _BackgroundRunningCardState extends State<_BackgroundRunningCard>
   Future<void> _refresh() async {
     if (kIsWeb || !Platform.isAndroid) return;
     final ignoring = await DriverForegroundService.isBatteryOptimizationIgnored;
-    if (mounted) setState(() => _ignoringOptimizations = ignoring);
+    final running = await DriverForegroundService.isRunning;
+    if (mounted) {
+      setState(() {
+        _ignoringOptimizations = ignoring;
+        _serviceRunning = running;
+      });
+    }
+  }
+
+  Future<void> _toggleService(bool value) async {
+    setState(() => _serviceBusy = true);
+    Haptics.tap();
+    if (value) {
+      await DriverForegroundService.start();
+    } else {
+      await DriverForegroundService.stop();
+    }
+    if (mounted) setState(() => _serviceBusy = false);
+    await _refresh();
   }
 
   @override
@@ -251,6 +269,34 @@ class _BackgroundRunningCardState extends State<_BackgroundRunningCard>
                   child: Text(l.batteryExclusion),
                 ),
               ],
+              const Divider(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(l.stickyNotification,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600)),
+                        Text(l.stickyNotificationBody,
+                            style: Theme.of(context).textTheme.bodySmall),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _serviceBusy
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2.2),
+                        )
+                      : Switch(
+                          value: _serviceRunning,
+                          onChanged: _toggleService,
+                        ),
+                ],
+              ),
             ] else
               Text(l.batteryExclusionIosNote,
                   style: Theme.of(context).textTheme.bodySmall),

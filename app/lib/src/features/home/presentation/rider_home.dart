@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
@@ -32,13 +33,31 @@ class RiderHome extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
     final isDriver = ref.watch(authControllerProvider).user?.isDriver ?? false;
+    // The backend only allows one active *ride* per rider at a time (parcel
+    // deliveries are a separate concern and aren't gated) — lock the ride-
+    // booking entry points here too instead of letting the request round-trip
+    // just to bounce off that guard with a confusing error.
+    final trips = ref.watch(myTripsProvider).valueOrNull ?? const [];
+    final hasActiveRide =
+        trips.any((t) => t.isActive && t.tripType != 'delivery');
+
+    void onWhereToTap() {
+      if (hasActiveRide) {
+        Haptics.tap();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l.activeRideBlocksNew)),
+        );
+        return;
+      }
+      openWhereTo(context);
+    }
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         const _ActiveTripCard(),
-        _WhereToCard(onTap: () => openWhereTo(context)),
-        const _RecentDropoffs(),
+        _WhereToCard(onTap: onWhereToTap, locked: hasActiveRide),
+        if (!hasActiveRide) const _RecentDropoffs(),
         const SizedBox(height: 20),
         GridView.count(
           crossAxisCount: 4,
@@ -50,7 +69,8 @@ class RiderHome extends ConsumerWidget {
             _Service(
               icon: Icons.two_wheeler_rounded,
               label: l.modeRider,
-              onTap: () => openWhereTo(context),
+              onTap: onWhereToTap,
+              locked: hasActiveRide,
             ),
             _Service(
               icon: Icons.restaurant_rounded,
@@ -330,36 +350,43 @@ class _ActiveTripCard extends ConsumerWidget {
 }
 
 class _WhereToCard extends StatelessWidget {
-  const _WhereToCard({required this.onTap});
+  const _WhereToCard({required this.onTap, this.locked = false});
   final VoidCallback onTap;
+  final bool locked;
 
   @override
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
-    return Card(
-      color: scheme.primaryContainer,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(
-            children: [
-              Icon(Icons.search_rounded, color: scheme.onPrimaryContainer),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  l.whereTo,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: scheme.onPrimaryContainer,
-                        fontWeight: FontWeight.w700,
-                      ),
+    return Opacity(
+      opacity: locked ? 0.6 : 1,
+      child: Card(
+        color: scheme.primaryContainer,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                Icon(locked ? Icons.lock_outline_rounded : Icons.search_rounded,
+                    color: scheme.onPrimaryContainer),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    locked ? l.activeRideBlocksNew : l.whereTo,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: scheme.onPrimaryContainer,
+                          fontWeight: FontWeight.w700,
+                          fontSize: locked ? 15 : null,
+                        ),
+                  ),
                 ),
-              ),
-              Icon(Icons.arrow_forward_rounded,
-                  color: scheme.onPrimaryContainer),
-            ],
+                if (!locked)
+                  Icon(Icons.arrow_forward_rounded,
+                      color: scheme.onPrimaryContainer),
+              ],
+            ),
           ),
         ),
       ),
@@ -368,19 +395,24 @@ class _WhereToCard extends StatelessWidget {
 }
 
 class _Service extends StatelessWidget {
-  const _Service({required this.icon, required this.label, this.onTap})
-      : soon = false;
+  const _Service({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.locked = false,
+  }) : soon = false;
 
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
+  final bool locked;
   final bool soon;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Opacity(
-      opacity: soon ? 0.5 : 1,
+      opacity: soon || locked ? 0.5 : 1,
       child: InkWell(
         onTap: soon ? null : onTap,
         borderRadius: BorderRadius.circular(16),

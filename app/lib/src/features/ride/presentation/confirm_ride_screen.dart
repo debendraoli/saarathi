@@ -7,6 +7,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/wallet_balance_hint.dart';
 import '../application/ride_controller.dart';
 import '../data/ride_repository.dart';
 import '../domain/models.dart';
@@ -121,7 +122,7 @@ class _ConfirmRideScreenState extends ConsumerState<ConfirmRideScreen> {
   }
 }
 
-class _FareCard extends StatelessWidget {
+class _FareCard extends ConsumerWidget {
   const _FareCard({
     required this.fare,
     required this.payment,
@@ -137,7 +138,7 @@ class _FareCard extends StatelessWidget {
   final VoidCallback onBook;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
     final surge = fare.surgeMultiplier > 1.0;
     return Column(
@@ -193,6 +194,7 @@ class _FareCard extends StatelessWidget {
           selected: {payment},
           onSelectionChanged: (s) => onPayment(s.first),
         ),
+        if (payment == 'wallet') WalletBalanceHint(amount: fare.finalFare),
         const SizedBox(height: 12),
         FilledButton(
           onPressed: booking ? null : onBook,

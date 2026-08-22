@@ -18,14 +18,34 @@ class AuthController extends Notifier<AuthState> {
   AuthRepository get _repo => ref.read(authRepositoryProvider);
   TokenStore get _tokens => ref.read(tokenStoreProvider);
 
+  /// The splash screen's entrance animation runs on this same clock — on a
+  /// fast connection (or a cached/instant token check) the network work
+  /// below can finish well inside that animation, and without this floor the
+  /// router would yank the splash away mid-animation the instant status
+  /// changes. A flat minimum keeps the transition feeling intentional either
+  /// way, and costs nothing on a slow connection where the real work already
+  /// takes longer than this.
+  static const _minSplashDuration = Duration(milliseconds: 900);
+
   Future<void> _bootstrap() async {
+    final started = DateTime.now();
+    Future<void> settle() {
+      final elapsed = DateTime.now().difference(started);
+      final remaining = _minSplashDuration - elapsed;
+      return remaining > Duration.zero
+          ? Future.delayed(remaining)
+          : Future.value();
+    }
+
     final access = await _tokens.access;
     if (access == null) {
+      await settle();
       state = state.copyWith(status: AuthStatus.unauthenticated);
       return;
     }
     try {
       final user = await _repo.me();
+      await settle();
       state = AuthState(
         status: AuthStatus.authenticated,
         user: user,
@@ -34,6 +54,7 @@ class AuthController extends Notifier<AuthState> {
       _registerPush();
     } catch (_) {
       await _tokens.clear();
+      await settle();
       state = state.copyWith(status: AuthStatus.unauthenticated);
     }
   }
