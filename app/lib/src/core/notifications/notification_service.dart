@@ -22,8 +22,11 @@ class NotificationService {
 
   Future<void> init() async {
     if (_ready) return;
+    // The status-bar icon must be an alpha-only silhouette, not the
+    // full-color launcher icon — Android renders a color icon as a blank
+    // white square in the notification tray on API 21+.
     const settings = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      android: AndroidInitializationSettings('@drawable/ic_stat_notify'),
       iOS: DarwinInitializationSettings(),
     );
     await _plugin.initialize(

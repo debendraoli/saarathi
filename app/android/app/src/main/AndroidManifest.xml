@@ -53,6 +53,12 @@
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
             android:foregroundServiceType="location"
             android:exported="false" />
+        <!-- Status-bar icon for background/terminated FCM notifications — must
+             be an alpha-only silhouette (ic_stat_notify), not the full-color
+             launcher icon, or Android renders it as a blank white square. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_notify" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
