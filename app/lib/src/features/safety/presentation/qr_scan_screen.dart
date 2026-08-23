@@ -47,11 +47,13 @@ class _QrScanScreenState extends State<QrScanScreen> {
               ),
             ),
           ),
-          const Align(
+          Align(
             alignment: Alignment.bottomCenter,
             child: Padding(
-              padding: EdgeInsets.only(bottom: 48),
-              child: Text(
+              padding: EdgeInsets.only(
+                bottom: 48 + MediaQuery.of(context).padding.bottom,
+              ),
+              child: const Text(
                 'Point at the vehicle sticker',
                 style: TextStyle(color: Colors.white, fontSize: 16),
               ),

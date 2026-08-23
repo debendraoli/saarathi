@@ -81,12 +81,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         ],
       ),
       endDrawer: const _MenuDrawer(),
-      body: Column(
-        children: [
-          if (!online) const _OfflineBar(),
-          if (gpsOff) const _LocationOffBar(),
-          Expanded(child: home),
-        ],
+      // Bottom-only: the AppBar already accounts for the top inset. Neither
+      // RiderHome nor DriverHome's scrollable content did anything for the
+      // bottom system nav bar on its own, so the last card/button in either
+      // one sat flush against it.
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            if (!online) const _OfflineBar(),
+            if (gpsOff) const _LocationOffBar(),
+            Expanded(child: home),
+          ],
+        ),
       ),
     );
   }

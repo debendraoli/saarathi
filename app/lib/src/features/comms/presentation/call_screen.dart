@@ -99,7 +99,12 @@ class _CallScreenState extends ConsumerState<CallScreen> {
           Align(
             alignment: Alignment.bottomCenter,
             child: Padding(
-              padding: const EdgeInsets.only(bottom: 48),
+              // 48 is the intentional visual gap above the controls; the
+              // system nav bar inset is added on top of that, not instead of
+              // it, since it varies by device (3-button vs. gesture nav).
+              padding: EdgeInsets.only(
+                bottom: 48 + MediaQuery.of(context).padding.bottom,
+              ),
               child: incoming
                   ? _incomingControls(scheme)
                   : _activeControls(scheme),

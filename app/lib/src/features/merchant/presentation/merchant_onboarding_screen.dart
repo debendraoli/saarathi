@@ -57,7 +57,8 @@ class _MerchantOnboardingScreenState
       ),
     );
     if (source == null) return;
-    final file = await ImagePicker().pickImage(source: source, imageQuality: 70);
+    final file =
+        await ImagePicker().pickImage(source: source, imageQuality: 70);
     if (file != null && mounted) setState(() => _photo = file);
   }
 
@@ -124,82 +125,86 @@ class _MerchantOnboardingScreenState
     final l = AppL10n.of(context);
     return Scaffold(
       appBar: AppBar(title: Text(l.becomeMerchant)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text(l.becomeMerchantBody,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  )),
-          const SizedBox(height: 20),
-          Text(l.storeType, style: Theme.of(context).textTheme.labelLarge),
-          const SizedBox(height: 8),
-          SegmentedButton<String>(
-            segments: [
-              ButtonSegment(
-                value: 'food',
-                icon: const Icon(Icons.restaurant_rounded),
-                label: Text(l.food),
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text(l.becomeMerchantBody,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    )),
+            const SizedBox(height: 20),
+            Text(l.storeType, style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              segments: [
+                ButtonSegment(
+                  value: 'food',
+                  icon: const Icon(Icons.restaurant_rounded),
+                  label: Text(l.food),
+                ),
+                ButtonSegment(
+                  value: 'grocery',
+                  icon: const Icon(Icons.local_grocery_store_rounded),
+                  label: Text(l.grocery),
+                ),
+              ],
+              selected: {_vertical},
+              onSelectionChanged: (s) => setState(() => _vertical = s.first),
+            ),
+            const SizedBox(height: 16),
+            _Field(controller: _name, label: l.merchantStoreName),
+            _Field(
+              controller: _phone,
+              label: l.phoneNumber,
+              keyboardType: TextInputType.phone,
+            ),
+            _Field(controller: _panVat, label: l.panVat),
+            _Field(controller: _address, label: l.addressOptional),
+            const SizedBox(height: 8),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.my_location_rounded),
+              title: Text(l.useCurrentLocation),
+              subtitle: Text(
+                _point == null
+                    ? '…'
+                    : _pointLabel ??
+                        '${_point!.latitude.toStringAsFixed(5)}, ${_point!.longitude.toStringAsFixed(5)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              ButtonSegment(
-                value: 'grocery',
-                icon: const Icon(Icons.local_grocery_store_rounded),
-                label: Text(l.grocery),
+            ),
+            const SizedBox(height: 16),
+            if (_photo != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Image.file(File(_photo!.path),
+                    height: 140, fit: BoxFit.cover),
               ),
-            ],
-            selected: {_vertical},
-            onSelectionChanged: (s) => setState(() => _vertical = s.first),
-          ),
-          const SizedBox(height: 16),
-          _Field(controller: _name, label: l.merchantStoreName),
-          _Field(
-            controller: _phone,
-            label: l.phoneNumber,
-            keyboardType: TextInputType.phone,
-          ),
-          _Field(controller: _panVat, label: l.panVat),
-          _Field(controller: _address, label: l.addressOptional),
-          const SizedBox(height: 8),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.my_location_rounded),
-            title: Text(l.useCurrentLocation),
-            subtitle: Text(
-              _point == null
-                  ? '…'
-                  : _pointLabel ??
-                      '${_point!.latitude.toStringAsFixed(5)}, ${_point!.longitude.toStringAsFixed(5)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _pickPhoto,
+              icon: const Icon(Icons.camera_alt_rounded),
+              label: Text(_photo == null ? 'Add a shop photo' : 'Change photo'),
             ),
-          ),
-          const SizedBox(height: 16),
-          if (_photo != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: Image.file(File(_photo!.path), height: 140, fit: BoxFit.cover),
+            const SizedBox(height: 20),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+              ),
+              onPressed: _busy || _point == null ? null : _submit,
+              child: _busy
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(l.registerStore),
             ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _pickPhoto,
-            icon: const Icon(Icons.camera_alt_rounded),
-            label: Text(_photo == null ? 'Add a shop photo' : 'Change photo'),
-          ),
-          const SizedBox(height: 20),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-            ),
-            onPressed: _busy || _point == null ? null : _submit,
-            child: _busy
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Text(l.registerStore),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

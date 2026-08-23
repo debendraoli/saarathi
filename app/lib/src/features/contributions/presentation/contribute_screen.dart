@@ -141,100 +141,106 @@ class _ContributeScreenState extends ConsumerState<ContributeScreen> {
       appBar: AppBar(title: Text(l.contributeToMap)),
       body: _loadingLocation
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Text(l.contributionLocationLabel,
-                    style: Theme.of(context).textTheme.labelLarge),
-                const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: SizedBox(
-                    height: 200,
-                    child: MapView(
-                      controller: _mapController,
-                      center: _point ?? const LatLng(28.033, 82.484),
-                      zoom: 17,
-                      onTap: (p) => setState(() => _point = p),
-                      pins: [
-                        if (_point != null)
-                          MapPin(
-                            _point!,
-                            Icons.location_on_rounded,
-                            Theme.of(context).colorScheme.secondary,
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final c in ContributionCategory.values)
-                      ChoiceChip(
-                        label: Text(_categoryLabel(l, c)),
-                        selected: _category == c,
-                        onSelected: (_) => setState(() => _category = c),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _name,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration:
-                      InputDecoration(labelText: l.contributionNameHint),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _description,
-                  textCapitalization: TextCapitalization.sentences,
-                  maxLines: 3,
-                  decoration: InputDecoration(
-                      labelText: l.contributionDescriptionHint),
-                ),
-                const SizedBox(height: 20),
-                Text(l.contributionPhotoHint,
-                    style: Theme.of(context).textTheme.bodySmall),
-                const SizedBox(height: 8),
-                if (_photo != null)
+          // Bottom-only: the AppBar already accounts for the top inset: this
+          // is specifically for the submit button clearing the system nav bar.
+          : SafeArea(
+              top: false,
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Text(l.contributionLocationLabel,
+                      style: Theme.of(context).textTheme.labelLarge),
+                  const SizedBox(height: 8),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(16),
-                    child: Image.file(
-                      File(_photo!.path),
-                      height: 180,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
+                    child: SizedBox(
+                      height: 200,
+                      child: MapView(
+                        controller: _mapController,
+                        center: _point ?? const LatLng(28.033, 82.484),
+                        zoom: 17,
+                        onTap: (p) => setState(() => _point = p),
+                        pins: [
+                          if (_point != null)
+                            MapPin(
+                              _point!,
+                              Icons.location_on_rounded,
+                              Theme.of(context).colorScheme.secondary,
+                            ),
+                        ],
+                      ),
                     ),
                   ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _capturing ? null : _capturePhoto,
-                  icon: _capturing
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.camera_alt_rounded),
-                  label: Text(
-                      _photo == null ? l.contributionTakePhoto : l.contributionRetakePhoto),
-                ),
-                const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: _canSubmit ? _submit : null,
-                  child: _submitting
-                      ? const SizedBox(
-                          height: 22,
-                          width: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.4),
-                        )
-                      : Text(l.contributionSubmit),
-                ),
-              ],
+                  const SizedBox(height: 20),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final c in ContributionCategory.values)
+                        ChoiceChip(
+                          label: Text(_categoryLabel(l, c)),
+                          selected: _category == c,
+                          onSelected: (_) => setState(() => _category = c),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _name,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration:
+                        InputDecoration(labelText: l.contributionNameHint),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _description,
+                    textCapitalization: TextCapitalization.sentences,
+                    maxLines: 3,
+                    decoration: InputDecoration(
+                        labelText: l.contributionDescriptionHint),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(l.contributionPhotoHint,
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(height: 8),
+                  if (_photo != null)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Image.file(
+                        File(_photo!.path),
+                        height: 180,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _capturing ? null : _capturePhoto,
+                    icon: _capturing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.camera_alt_rounded),
+                    label: Text(_photo == null
+                        ? l.contributionTakePhoto
+                        : l.contributionRetakePhoto),
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton(
+                    onPressed: _canSubmit ? _submit : null,
+                    child: _submitting
+                        ? const SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2.4),
+                          )
+                        : Text(l.contributionSubmit),
+                  ),
+                ],
+              ),
             ),
     );
   }

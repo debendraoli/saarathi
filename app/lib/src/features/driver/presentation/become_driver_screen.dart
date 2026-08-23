@@ -92,63 +92,68 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
     final l = AppL10n.of(context);
     return Scaffold(
       appBar: AppBar(title: Text(l.becomeDriverTitle)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text('Vehicle', style: Theme.of(context).textTheme.labelLarge),
-          const SizedBox(height: 8),
-          SegmentedButton<VehicleClass>(
-            segments: [
-              ButtonSegment(
-                value: VehicleClass.twoWheeler,
-                icon: const Icon(Icons.two_wheeler_rounded),
-                label: Text(l.vehicleTwoWheeler),
-              ),
-              ButtonSegment(
-                value: VehicleClass.threeWheeler,
-                icon: const Icon(Icons.electric_rickshaw_rounded),
-                label: Text(l.vehicleThreeWheeler),
-              ),
-              ButtonSegment(
-                value: VehicleClass.fourWheeler,
-                icon: const Icon(Icons.directions_car_rounded),
-                label: Text(l.vehicleFourWheeler),
-              ),
-            ],
-            selected: {_class},
-            onSelectionChanged: (s) => setState(() => _class = s.first),
-          ),
-          const SizedBox(height: 16),
-          _Field(
-              controller: _plate, label: 'Plate number', hint: 'BA-1-PA-1234'),
-          _Field(controller: _make, label: 'Make (optional)'),
-          _Field(controller: _model, label: 'Model (optional)'),
-          const Divider(height: 32),
-          _Field(controller: _license, label: 'License number'),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Date of birth'),
-            subtitle: Text(
-              _dob == null
-                  ? 'Not set'
-                  : '${_dob!.year}-${_dob!.month}-${_dob!.day}',
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text('Vehicle', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 8),
+            SegmentedButton<VehicleClass>(
+              segments: [
+                ButtonSegment(
+                  value: VehicleClass.twoWheeler,
+                  icon: const Icon(Icons.two_wheeler_rounded),
+                  label: Text(l.vehicleTwoWheeler),
+                ),
+                ButtonSegment(
+                  value: VehicleClass.threeWheeler,
+                  icon: const Icon(Icons.electric_rickshaw_rounded),
+                  label: Text(l.vehicleThreeWheeler),
+                ),
+                ButtonSegment(
+                  value: VehicleClass.fourWheeler,
+                  icon: const Icon(Icons.directions_car_rounded),
+                  label: Text(l.vehicleFourWheeler),
+                ),
+              ],
+              selected: {_class},
+              onSelectionChanged: (s) => setState(() => _class = s.first),
             ),
-            trailing: const Icon(Icons.calendar_today_rounded),
-            onTap: _pickDob,
-          ),
-          _Field(controller: _address, label: 'Address'),
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: _busy || _plate.text.trim().isEmpty ? null : _submit,
-            child: _busy
-                ? const SizedBox(
-                    height: 22,
-                    width: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2.4),
-                  )
-                : Text(l.registerAction),
-          ),
-        ],
+            const SizedBox(height: 16),
+            _Field(
+                controller: _plate,
+                label: 'Plate number',
+                hint: 'BA-1-PA-1234'),
+            _Field(controller: _make, label: 'Make (optional)'),
+            _Field(controller: _model, label: 'Model (optional)'),
+            const Divider(height: 32),
+            _Field(controller: _license, label: 'License number'),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Date of birth'),
+              subtitle: Text(
+                _dob == null
+                    ? 'Not set'
+                    : '${_dob!.year}-${_dob!.month}-${_dob!.day}',
+              ),
+              trailing: const Icon(Icons.calendar_today_rounded),
+              onTap: _pickDob,
+            ),
+            _Field(controller: _address, label: 'Address'),
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: _busy || _plate.text.trim().isEmpty ? null : _submit,
+              child: _busy
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.4),
+                    )
+                  : Text(l.registerAction),
+            ),
+          ],
+        ),
       ),
     );
   }
