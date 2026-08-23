@@ -10,7 +10,7 @@ use std::sync::Arc;
 // Re-exported so existing `crate::state::{AuthUser, StaffUser}` imports keep
 // working — the extractors themselves now live in `crate::auth` (a thin
 // wrapper over `saarathi_core::authn`).
-pub use crate::auth::{AuthUser, StaffUser};
+pub use crate::auth::{AdminUser, AuthUser, StaffUser};
 
 #[derive(Clone)]
 pub struct AppState {

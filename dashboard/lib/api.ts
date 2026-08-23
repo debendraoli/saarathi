@@ -297,7 +297,29 @@ export const api = {
     request<{ ok: boolean }>(`/v1/notifications/${id}/read`, { method: "POST" }),
   markAllNotificationsRead: () =>
     request<{ marked: number }>("/v1/notifications/read-all", { method: "POST" }),
+
+  // ── Staff accounts (super_admin/admin only) ────────────────────────────────
+  listStaff: () => request<User[]>("/v1/admin/staff"),
+  createStaff: (body: { phone: string; full_name: string; role: StaffRole }) =>
+    request<User>("/v1/admin/staff", { method: "POST", body: JSON.stringify(body) }),
+  updateStaff: (id: string, body: Partial<{ role: StaffRole; full_name: string }>) =>
+    request<User>(`/v1/admin/staff/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deactivateStaff: (id: string) =>
+    request<User>(`/v1/admin/staff/${id}/deactivate`, { method: "POST" }),
+  reactivateStaff: (id: string) =>
+    request<User>(`/v1/admin/staff/${id}/reactivate`, { method: "POST" }),
 };
+
+export type StaffRole = Exclude<UserRole, "rider" | "driver">;
+export const STAFF_ROLES: StaffRole[] = [
+  "super_admin",
+  "admin",
+  "dispatcher",
+  "finance",
+  "compliance",
+  "support",
+  "analyst",
+];
 
 export interface AppNotification {
   id: string;

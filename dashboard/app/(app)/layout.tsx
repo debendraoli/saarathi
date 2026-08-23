@@ -22,6 +22,7 @@ import {
     Tag,
     ToggleRight,
     Trophy,
+    UserCog,
     Users,
     Wallet,
     Zap,
@@ -32,7 +33,13 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
 type CountKey = "kyc" | "sos" | "reports" | "complaints" | "places";
-type NavItem = { href: string; label: string; icon: LucideIcon; countKey?: CountKey };
+type NavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  countKey?: CountKey;
+  staffOnly?: boolean; // super_admin/admin only — matches the backend's AdminUser gate
+};
 type NavGroup = { title: string; items: NavItem[] };
 
 const NAV: NavGroup[] = [
@@ -99,6 +106,7 @@ const NAV: NavGroup[] = [
     items: [
       { href: "/flags", label: "Feature Flags", icon: ToggleRight },
       { href: "/health", label: "Services", icon: HeartPulse },
+      { href: "/staff", label: "Staff", icon: UserCog, staffOnly: true },
     ],
   },
 ];
@@ -187,6 +195,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
   const active = activeHref(pathname, driverListFrom);
   const title = ALL_ITEMS.find((i) => i.href === active)?.label ?? "";
+  const isAdmin = ["super_admin", "admin"].includes(user?.role ?? "");
 
   function logout() {
     auth.clear();
@@ -202,7 +211,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         {NAV.map((group) => (
           <div key={group.title}>
             <div className="nav-section">{group.title}</div>
-            {group.items.map((item) => {
+            {group.items.filter((item) => !item.staffOnly || isAdmin).map((item) => {
               const Icon = item.icon;
               const count = item.countKey ? counts[item.countKey] : undefined;
               return (
