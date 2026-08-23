@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../shared/request_ring.dart';
 import '../../marketplace/domain/models.dart';
 
 /// Merchant-owner surface: the store(s) a user owns, their menu, and the live
@@ -133,12 +134,25 @@ final merchantMenuProvider = FutureProvider.autoDispose
 });
 
 /// Live order queue for a merchant, polled every 6s. `arg` is the merchant id.
+/// Rings once per genuinely new order id (not every poll tick), same pattern
+/// as [driverOffersProvider] — the "is this new" comparison lives here with
+/// the polling loop, not duplicated in whatever screen is watching.
 final merchantOrdersProvider = StreamProvider.autoDispose
     .family<List<CustomerOrder>, String>((ref, merchantId) async* {
   final repo = ref.watch(merchantRepositoryProvider);
+  var seen = <String>{};
+  ref.onDispose(RequestRing.stop);
   while (true) {
     final all = await repo.orders();
-    yield all.where((o) => o.merchantId == merchantId).toList();
+    final mine = all.where((o) => o.merchantId == merchantId).toList();
+    final ids = mine.map((o) => o.id).toSet();
+    if (ids.difference(seen).isNotEmpty) {
+      RequestRing.play();
+    } else if (ids.isEmpty) {
+      RequestRing.stop();
+    }
+    seen = ids;
+    yield mine;
     await Future<void>.delayed(const Duration(seconds: 6));
   }
 });

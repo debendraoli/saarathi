@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../core/foreground/driver_foreground_service.dart';
 import '../../../core/location.dart';
+import '../../../shared/request_ring.dart';
 import '../data/driver_repository.dart';
 import '../domain/models.dart';
 
@@ -83,17 +84,31 @@ final driverControllerProvider =
     NotifierProvider<DriverController, DriverStatus>(DriverController.new);
 
 /// Polls dispatch offers while the driver is online (short TTL, so poll often).
+/// Rings once per genuinely new offer id (not every poll tick) — comparing
+/// against the previous snapshot lives here, colocated with the polling loop
+/// itself, rather than duplicated in whatever widget happens to be watching.
 final driverOffersProvider =
     StreamProvider.autoDispose<List<DriverOffer>>((ref) async* {
   final online = ref.watch(driverControllerProvider).online;
   if (!online) {
+    RequestRing.stop();
     yield const [];
     return;
   }
   final repo = ref.watch(driverRepositoryProvider);
+  var seen = <String>{};
+  ref.onDispose(RequestRing.stop);
   while (true) {
     try {
-      yield await repo.offers();
+      final offers = await repo.offers();
+      final ids = offers.map((o) => o.tripId).toSet();
+      if (ids.difference(seen).isNotEmpty) {
+        RequestRing.play();
+      } else if (ids.isEmpty) {
+        RequestRing.stop();
+      }
+      seen = ids;
+      yield offers;
     } catch (_) {
       yield const [];
     }

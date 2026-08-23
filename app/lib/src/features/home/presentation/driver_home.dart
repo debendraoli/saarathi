@@ -7,6 +7,7 @@ import '../../../core/foreground/driver_foreground_service.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
+import '../../../shared/request_ring.dart';
 import '../../../shared/widgets/common.dart';
 import '../../driver/application/driver_controller.dart';
 import '../../driver/data/driver_kyc_repository.dart';
@@ -211,6 +212,7 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
 
   Future<void> _act(bool accept) async {
     setState(() => _busy = true);
+    RequestRing.stop();
     final repo = ref.read(driverRepositoryProvider);
     try {
       if (accept) {

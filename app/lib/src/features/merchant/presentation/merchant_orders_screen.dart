@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../shared/haptics.dart';
+import '../../../shared/request_ring.dart';
 import '../../../shared/widgets/common.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../marketplace/domain/models.dart';
@@ -134,6 +135,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     } else {
       Haptics.success();
     }
+    RequestRing.stop();
     setState(() => _busy = true);
     try {
       await ref
