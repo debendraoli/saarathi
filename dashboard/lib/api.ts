@@ -220,6 +220,12 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
 
+  suspendDriver: (id: string) =>
+    request<{ ok: boolean; status: string }>(`/v1/admin/drivers/${id}/suspend`, { method: "POST" }),
+
+  reactivateDriver: (id: string) =>
+    request<{ ok: boolean; status: string }>(`/v1/admin/drivers/${id}/reactivate`, { method: "POST" }),
+
   async documentBlobUrl(id: string): Promise<string> {
     const res = await raw(`/v1/admin/documents/${id}/content`, {}, true);
     if (!res.ok) throw new Error("could not load document");

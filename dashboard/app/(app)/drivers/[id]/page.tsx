@@ -1,6 +1,6 @@
 "use client";
 
-import { Modal } from "@/components/Modal";
+import { ConfirmModal, Modal } from "@/components/Modal";
 import { TopupModal } from "@/components/TopupModal";
 import { TripMap } from "@/components/TripMap";
 import { api, auth, rides, type DriverAnalytics, type DriverDetail, type DriverDocument, type TripRoute } from "@/lib/api";
@@ -23,10 +23,40 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [showTopup, setShowTopup] = useState(false);
-  const canTopup = ["super_admin", "admin"].includes(auth.user?.role ?? "");
+  const [showSuspend, setShowSuspend] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const isAdmin = ["super_admin", "admin"].includes(auth.user?.role ?? "");
+  const canTopup = isAdmin;
   const [routeFor, setRouteFor] = useState<string | null>(null);
   const [route, setRoute] = useState<TripRoute | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+
+  async function suspend() {
+    setStatusBusy(true);
+    setError(null);
+    try {
+      await api.suspendDriver(id);
+      setShowSuspend(false);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
+  async function reactivate() {
+    setStatusBusy(true);
+    setError(null);
+    try {
+      await api.reactivateDriver(id);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setStatusBusy(false);
+    }
+  }
 
   function viewRoute(tripId: string) {
     setRouteFor(tripId);
@@ -108,6 +138,9 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
           {user.full_name ?? user.phone}
         </h1>
         <span className={`badge ${driver.kyc_status}`}>{driver.kyc_status.replace("_", " ")}</span>
+        {user.status !== "active" && (
+          <span className="badge rejected">{user.status}</span>
+        )}
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -115,13 +148,23 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
         <div className="error">Rejected: {driver.rejection_reason}</div>
       )}
 
-      {canTopup && (
-        <div className="row">
+      <div className="row">
+        {canTopup && (
           <button className="btn primary" onClick={() => setShowTopup(true)}>
             Top up credits
           </button>
-        </div>
-      )}
+        )}
+        {isAdmin &&
+          (user.status === "suspended" ? (
+            <button className="btn ghost" disabled={statusBusy} onClick={reactivate}>
+              {statusBusy ? "Working…" : "Reactivate"}
+            </button>
+          ) : (
+            <button className="btn danger" disabled={statusBusy} onClick={() => setShowSuspend(true)}>
+              Suspend
+            </button>
+          ))}
+      </div>
 
       {analytics && (
         <div className="stat-grid">
@@ -279,6 +322,17 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
         userId={user.id}
         kind="driver"
         onDone={() => load()}
+      />
+
+      <ConfirmModal
+        open={showSuspend}
+        onClose={() => setShowSuspend(false)}
+        onConfirm={suspend}
+        title="Suspend this driver?"
+        message={`${user.full_name ?? user.phone} will no longer be able to sign in or go online. This doesn't change their KYC status, and doesn't affect any trip already in progress.`}
+        confirmLabel="Suspend"
+        danger
+        busy={statusBusy}
       />
 
       <Modal open={routeFor !== null} onClose={() => setRouteFor(null)} title="Trip route" wide>

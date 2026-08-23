@@ -27,6 +27,8 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/admin/drivers/{id}", get(driver_detail))
         .route("/v1/admin/drivers/{id}/approve", post(approve_driver))
         .route("/v1/admin/drivers/{id}/reject", post(reject_driver))
+        .route("/v1/admin/drivers/{id}/suspend", post(suspend_driver))
+        .route("/v1/admin/drivers/{id}/reactivate", post(reactivate_driver))
         .route(
             "/v1/admin/drivers/{id}/documents",
             post(upload_driver_document),
@@ -281,6 +283,92 @@ async fn reject_driver(
     .await;
 
     Ok(Json(json!({ "ok": true, "kyc_status": "rejected" })))
+}
+
+/// Suspends the driver's underlying account (blocks login — same
+/// verify_otp/refresh status check every account goes through) and forces
+/// them offline so they stop receiving dispatch offers immediately rather
+/// than waiting out the presence TTL. Doesn't touch kyc_status — an approved
+/// driver stays approved, just locked out, so reactivating doesn't require
+/// re-review.
+async fn suspend_driver(
+    State(st): State<AppState>,
+    AdminUser(claims): AdminUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    let mut tx = st.db.begin().await?;
+    let user_id: Option<Uuid> = sqlx::query_scalar(
+        "UPDATE users SET status = 'suspended' \
+         WHERE id = (SELECT user_id FROM drivers WHERE id = $1) RETURNING id",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let user_id = user_id.ok_or(AppError::NotFound)?;
+    sqlx::query("UPDATE drivers SET is_online = false WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+    audit::record(
+        &st.db,
+        claims.sub,
+        "driver.suspend",
+        "driver",
+        id,
+        json!({}),
+    )
+    .await?;
+    tx.commit().await?;
+
+    crate::notify::send(
+        &st.nats,
+        user_id,
+        saarathi_core::domain::notif::TRANSACTIONAL,
+        "Account suspended",
+        "Your Saarathi account has been suspended. Contact support if you believe this is a mistake.",
+        None,
+    )
+    .await;
+
+    Ok(Json(json!({ "ok": true, "status": "suspended" })))
+}
+
+async fn reactivate_driver(
+    State(st): State<AppState>,
+    AdminUser(claims): AdminUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    let user_id: Option<Uuid> = sqlx::query_scalar(
+        "UPDATE users SET status = 'active' \
+         WHERE id = (SELECT user_id FROM drivers WHERE id = $1) RETURNING id",
+    )
+    .bind(id)
+    .fetch_optional(&st.db)
+    .await?;
+    let user_id = user_id.ok_or(AppError::NotFound)?;
+
+    audit::record(
+        &st.db,
+        claims.sub,
+        "driver.reactivate",
+        "driver",
+        id,
+        json!({}),
+    )
+    .await?;
+
+    crate::notify::send(
+        &st.nats,
+        user_id,
+        saarathi_core::domain::notif::TRANSACTIONAL,
+        "Account reactivated",
+        "Your Saarathi account is active again — you can sign in and go online.",
+        None,
+    )
+    .await;
+
+    Ok(Json(json!({ "ok": true, "status": "active" })))
 }
 
 // ── On-site KYC entry (staff onboards a walk-in driver) ────────────────────
