@@ -25,7 +25,7 @@ then `helm upgrade --install`s this chart.
 | `SAARATHI_JWT_SECRET` | `openssl rand -hex 32` |
 | `SAARATHI_INTERNAL_SERVICE_SECRET` | `openssl rand -hex 32` |
 | `SAARATHI_SPARROW_SMS_TOKEN` / `SAARATHI_SPARROW_SMS_FROM` | optional — blank disables the SMS fallback |
-| `SAARATHI_TURN_SECRET` | optional — blank disables Coturn ICE creds |
+| `SAARATHI_TURN_SECRET` | optional — blank disables Coturn ICE creds. Coturn itself runs on its own standalone instance, not in this cluster — see `scripts/coturn-setup.sh`; that script prints this value and the matching `services.rides.config.turnUrls` to set in `values.yaml` |
 | `SAARATHI_FCM_SERVICE_ACCOUNT_JSON` | the full contents of the Firebase service-account JSON key (paste as-is) |
 
 One-time, before the first deploy: cert-manager itself must already be

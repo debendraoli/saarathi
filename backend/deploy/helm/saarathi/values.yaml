@@ -105,6 +105,11 @@ services:
       port: "8082"
       routingServiceUrl: "http://routing"
       geocoderUrl: "http://pelias-api"
+      # Coturn runs OUTSIDE this cluster on its own bare instance (see
+      # scripts/coturn-setup.sh) — a wide UDP relay port range doesn't suit
+      # hostNetwork tricks on shared cluster nodes. Point at that box's public
+      # IP; blank leaves calls on public STUN only (see turnStunUrl above).
+      turnUrls: "turn:CHANGE_ME_COTURN_HOST:3478"
 
   notify:
     port: 8083
