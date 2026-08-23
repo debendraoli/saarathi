@@ -1,0 +1,96 @@
+{{/*
+Manual/one-off Jobs (kubectl apply -f, or `helm install --set pelias.import.run=true`
+re-triggers by bumping the job name — Jobs are immutable once created). A
+CronJob for periodic re-import is a v2 addition, not this pass — see plan
+section 5. Each importer gets its own PVC (they don't share files, no reason
+to contend over one ReadWriteOnce volume).
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pelias-import-osm-data
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "pelias-import" "Release" .Release) | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pelias-import-wof-data
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "pelias-import" "Release" .Release) | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pelias-import-openstreetmap
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "pelias-import" "Release" .Release) | nindent 4 }}
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pelias-import-openstreetmap
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: import
+          image: pelias/openstreetmap-import:latest
+          volumeMounts:
+            - name: config
+              mountPath: /code/pelias.json
+              subPath: pelias.json
+            - name: data
+              mountPath: /data/openstreetmap
+      volumes:
+        - name: config
+          configMap:
+            name: pelias-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: pelias-import-osm-data
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pelias-import-whosonfirst
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "pelias-import" "Release" .Release) | nindent 4 }}
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pelias-import-whosonfirst
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: import
+          image: pelias/whosonfirst:latest
+          volumeMounts:
+            - name: config
+              mountPath: /code/pelias.json
+              subPath: pelias.json
+            - name: data
+              mountPath: /data/whosonfirst
+      volumes:
+        - name: config
+          configMap:
+            name: pelias-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: pelias-import-wof-data

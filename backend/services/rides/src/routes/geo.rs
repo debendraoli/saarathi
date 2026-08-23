@@ -1,6 +1,6 @@
-//! Geocoding proxy for address autocomplete + reverse lookup. Wraps a Photon
-//! instance (self-hosted in prod, public komoot for dev — GEOCODER_URL). Results
-//! degrade gracefully to an empty list so the search box never errors out.
+//! Geocoding proxy for address autocomplete + reverse lookup. Wraps a Pelias
+//! instance (self-hosted, Nepal-only OSM + WhosOnFirst data — GEOCODER_URL).
+//! Results degrade gracefully to an empty list so the search box never errors out.
 //!
 //! Reverse lookups are cached in Redis by H3 resolution-9 cell (~174m² hex —
 //! reuses the platform's existing spatial index rather than inventing a
@@ -55,7 +55,7 @@ fn geocoder_url() -> String {
     std::env::var("GEOCODER_URL")
         .ok()
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "https://photon.komoot.io".into())
+        .unwrap_or_else(|| "http://pelias-api".into())
         .trim_end_matches('/')
         .to_string()
 }
@@ -85,20 +85,24 @@ async fn search(
         return Ok(Json(vec![]));
     }
     let mut params: Vec<(&str, String)> = vec![
-        ("q", query.to_string()),
-        ("limit", "8".into()),
+        ("text", query.to_string()),
+        ("size", "8".into()),
         ("lang", "en".into()),
-        // Restrict to Nepal's bounding box (minLon,minLat,maxLon,maxLat).
-        ("bbox", "80.0,26.3,88.2,30.5".into()),
+        // Restrict to Nepal's bounding box — Pelias takes each edge as its
+        // own param, not a single comma-joined bbox string like Photon did.
+        ("boundary.rect.min_lon", "80.0".into()),
+        ("boundary.rect.min_lat", "26.3".into()),
+        ("boundary.rect.max_lon", "88.2".into()),
+        ("boundary.rect.max_lat", "30.5".into()),
     ];
     // Bias toward the user's location when known.
     if let (Some(lat), Some(lng)) = (q.lat, q.lng) {
-        params.push(("lat", lat.to_string()));
-        params.push(("lon", lng.to_string()));
+        params.push(("focus.point.lat", lat.to_string()));
+        params.push(("focus.point.lon", lng.to_string()));
     }
     let mut places = contributed_places(&st, query, q.lat, q.lng).await;
     places.extend(
-        fetch(&format!("{}/api", geocoder_url()), &params)
+        fetch(&format!("{}/v1/search", geocoder_url()), &params)
             .await
             .unwrap_or_default(),
     );
@@ -135,8 +139,20 @@ async fn contributed_places(
     if let (Some(lat), Some(lng)) = (bias_lat, bias_lng) {
         let origin = CoreLatLng { lat, lng };
         rows.sort_by(|a, b| {
-            let da = haversine_km(origin, CoreLatLng { lat: a.lat, lng: a.lng });
-            let db = haversine_km(origin, CoreLatLng { lat: b.lat, lng: b.lng });
+            let da = haversine_km(
+                origin,
+                CoreLatLng {
+                    lat: a.lat,
+                    lng: a.lng,
+                },
+            );
+            let db = haversine_km(
+                origin,
+                CoreLatLng {
+                    lat: b.lat,
+                    lng: b.lng,
+                },
+            );
             da.total_cmp(&db)
         });
     }
@@ -182,8 +198,11 @@ async fn reverse(
         }
     }
 
-    let params: Vec<(&str, String)> = vec![("lat", q.lat.to_string()), ("lon", q.lng.to_string())];
-    let place = fetch(&format!("{}/reverse", geocoder_url()), &params)
+    let params: Vec<(&str, String)> = vec![
+        ("point.lat", q.lat.to_string()),
+        ("point.lon", q.lng.to_string()),
+    ];
+    let place = fetch(&format!("{}/v1/reverse", geocoder_url()), &params)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -204,7 +223,7 @@ async fn reverse(
     Ok(Json(place))
 }
 
-/// Query Photon and map its GeoJSON features to our flat place shape.
+/// Query Pelias and map its GeoJSON features to our flat place shape.
 async fn fetch(url: &str, params: &[(&str, String)]) -> Result<Vec<GeoPlace>, ()> {
     let resp = http().get(url).query(params).send().await.map_err(|_| ())?;
     let body: Value = resp.json().await.map_err(|_| ())?;
@@ -223,9 +242,12 @@ fn feature_to_place(f: &Value) -> Option<GeoPlace> {
     let p = f.get("properties")?;
     let get = |k: &str| p.get(k).and_then(|v| v.as_str()).map(str::to_string);
 
-    // Nepal only: drop anything the geocoder tags as another country.
-    if let Some(cc) = get("countrycode") {
-        if !cc.eq_ignore_ascii_case("NP") {
+    // Nepal only: drop anything Pelias tags as another country. Pelias uses
+    // the 3-letter ISO alpha code (country_a: "NPL"), unlike Photon's 2-letter
+    // countrycode ("NP") — the data is already Nepal-scoped at import time so
+    // this is defense-in-depth, not the primary filter.
+    if let Some(cc) = get("country_a") {
+        if !cc.eq_ignore_ascii_case("NPL") {
             return None;
         }
     }
@@ -233,8 +255,10 @@ fn feature_to_place(f: &Value) -> Option<GeoPlace> {
     let name = get("name");
     let street = get("street");
     let housenumber = get("housenumber");
-    let city = get("city").or_else(|| get("district"));
-    let state = get("state");
+    // Pelias splits city-equivalent across locality/localadmin and uses
+    // "region" where Photon used "state" — no single "city"/"district" field.
+    let locality = get("locality").or_else(|| get("localadmin"));
+    let region = get("region");
     let country = get("country");
 
     // Prefer the POI/street name; fall back to the street + number.
@@ -245,9 +269,11 @@ fn feature_to_place(f: &Value) -> Option<GeoPlace> {
     };
     let label = name.clone().or_else(|| street_line.clone())?;
 
-    // Address = everything except the label, de-duplicated in order.
+    // Address = everything except the label, de-duplicated in order. Falls
+    // back to Pelias's own pre-formatted `label` field (minus our label) if
+    // the manual assembly comes up empty.
     let mut parts: Vec<String> = Vec::new();
-    for part in [street_line.clone(), city, state, country]
+    for part in [street_line.clone(), locality, region, country]
         .into_iter()
         .flatten()
     {
@@ -255,9 +281,20 @@ fn feature_to_place(f: &Value) -> Option<GeoPlace> {
             parts.push(part);
         }
     }
+    let address = if parts.is_empty() {
+        get("label")
+            .map(|l| {
+                l.replace(&label, "")
+                    .trim_matches(|c| c == ',' || c == ' ')
+                    .to_string()
+            })
+            .unwrap_or_default()
+    } else {
+        parts.join(", ")
+    };
     Some(GeoPlace {
         label,
-        address: parts.join(", "),
+        address,
         lat,
         lng,
     })

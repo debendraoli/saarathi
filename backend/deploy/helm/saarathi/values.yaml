@@ -1,0 +1,256 @@
+# Non-secret config only — see values-secret.example.yaml for the required
+# secret shape (never filled in here, never committed with real values).
+
+domain: your-domain.example
+namespace: saarathi
+
+# Real values supplied via -f values-secret.yaml (gitignored) or --set/--set-file
+# at install time — see values-secret.example.yaml and section 2 of the plan.
+# Empty map here only so templates can safely dot into .Values.secrets.* without
+# a nil-pointer error when no secret values have been supplied yet.
+secrets: {}
+
+image:
+  registry: ghcr.io/your-org/saarathi
+  tag: latest
+  pullPolicy: IfNotPresent
+
+certManager:
+  enabled: true
+  issuerEmail: ops@your-domain.example
+
+# Shared across every backend service's env.
+config:
+  rustLog: "info"
+  otpDevMode: false # NEVER true outside dev/staging — OTP codes ride the API response when true
+  otpTtlSecs: 300
+  otpRateMax: 5
+  otpRateWindowSecs: 3600
+  jwtAccessTtlSecs: 900
+  jwtRefreshTtlDays: 30
+  routingRoadFactor: 1.3
+  routingAvgSpeedKmh: 22
+  fareTwoWheelerPerKm: 20
+  fareThreeWheelerPerKm: 35
+  fareFourWheelerPerKm: 45
+  fareCommissionRate: 0.10
+  dispatchOfferTtlSecs: 15
+  dispatchRadiusKm: 2
+  dispatchMaxRadiusKm: 8
+  dispatchPresenceTtlSecs: 60
+  routeCacheTtlSecs: 3600
+  deliveryBaseFare: 30
+  deliveryPerKm: 15
+  deliveryTierSmallSurcharge: 10
+  deliveryTierMediumSurcharge: 25
+  deliveryFragileSurcharge: 20
+  turnStunUrl: "stun:stun.l.google.com:19302"
+
+# One entry per backend service. `routeMatch` is the exact Traefik match
+# expression ported from the retired backend/deploy/k8s/ingressroute.yaml —
+# omit it (as `routing` does) to keep a service internal-only, no public
+# IngressRoute at all. `port` is the container's actual listen port, used
+# only as the Service's targetPort — every Service still exposes port 80,
+# so nothing that calls another service needs to know this value.
+services:
+  auth:
+    port: 8081
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 250m, memory: 256Mi }
+    hpa: { minReplicas: 1, maxReplicas: 3, targetCPUUtilization: 75 }
+    routeMatch: >-
+      PathPrefix(`/v1/auth`) || Path(`/v1/me`) || PathPrefix(`/v1/me/`)
+      || PathPrefix(`/v1/driver/register`) || PathPrefix(`/v1/driver/documents`) || PathPrefix(`/v1/driver/status`)
+      || PathPrefix(`/v1/driver/kyc`)
+      || PathPrefix(`/v1/admin/drivers`) || PathPrefix(`/v1/admin/documents`)
+    pvc:
+      enabled: true
+      mountPath: /data/kyc
+      size: 5Gi
+    config:
+      port: "8081"
+      kycStorageDir: /data/kyc
+      seedDevAdminPhone: "+9779800000000"
+      whatsappApiVersion: v21.0
+      whatsappOtpTemplateLang: en_US
+
+  rides:
+    port: 8082
+    resources:
+      requests: { cpu: 100m, memory: 192Mi }
+      limits: { cpu: 500m, memory: 384Mi }
+    hpa: { minReplicas: 2, maxReplicas: 4, targetCPUUtilization: 70 }
+    routeMatch: >-
+      PathPrefix(`/v1/rides`) || PathPrefix(`/v1/delivery`) || PathPrefix(`/v1/wallet`)
+      || PathPrefix(`/v1/rtc`)
+      || PathPrefix(`/v1/geo`)
+      || PathPrefix(`/v1/ws`) || PathPrefix(`/v1/events`) || PathPrefix(`/v1/flags`)
+      || PathPrefix(`/v1/reports`) || PathPrefix(`/v1/credit-plans`) || PathPrefix(`/v1/drivers`)
+      || PathPrefix(`/v1/driver/analytics`) || PathPrefix(`/v1/driver/credits`)
+      || PathPrefix(`/v1/driver/heartbeat`) || PathPrefix(`/v1/driver/offers`)
+      || PathPrefix(`/v1/driver/offline`) || PathPrefix(`/v1/driver/online`)
+      || PathPrefix(`/v1/admin/analytics`) || PathPrefix(`/v1/admin/cancellations`)
+      || PathPrefix(`/v1/admin/credit-plans`) || PathPrefix(`/v1/admin/flags`)
+      || PathPrefix(`/v1/admin/leaderboard`) || PathPrefix(`/v1/admin/ledger`)
+      || PathPrefix(`/v1/admin/riders`) || PathPrefix(`/v1/admin/driver-analytics`)
+      || PathPrefix(`/v1/admin/driver-directory`)
+      || PathPrefix(`/v1/admin/reports`) || PathPrefix(`/v1/admin/rides`)
+      || PathPrefix(`/v1/admin/sos`)
+      || PathPrefix(`/v1/admin/surge`) || PathPrefix(`/v1/admin/trips`)
+    # /v1/internal/* (called only by merchant, shared-secret guarded) is
+    # deliberately excluded from routeMatch above, same as the retired
+    # ingressroute.yaml — not just unlisted, actively not matched.
+    config:
+      port: "8082"
+      routingServiceUrl: "http://routing"
+      geocoderUrl: "http://pelias-api"
+
+  notify:
+    port: 8083
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 250m, memory: 256Mi }
+    hpa: { minReplicas: 1, maxReplicas: 3, targetCPUUtilization: 75 }
+    routeMatch: PathPrefix(`/v1/notifications`)
+    config:
+      port: "8083"
+
+  payments:
+    port: 8085
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 250m, memory: 256Mi }
+    hpa: { minReplicas: 1, maxReplicas: 3, targetCPUUtilization: 75 }
+    routeMatch: >-
+      PathPrefix(`/v1/credits`) || PathPrefix(`/v1/payouts`) || PathPrefix(`/v1/psp`)
+      || PathPrefix(`/v1/payout-accounts`) || PathPrefix(`/v1/disputes`)
+      || PathPrefix(`/v1/payments`)
+      || PathPrefix(`/v1/admin/payouts`) || PathPrefix(`/v1/admin/disputes`)
+      || PathPrefix(`/v1/admin/credits`)
+    config:
+      port: "8085"
+      khaltiBaseUrl: "https://dev.khalti.com/api/v2"
+      khaltiReturnUrl: "https://dashboard.your-domain.example/payments/khalti/return"
+      khaltiWebsiteUrl: "https://dashboard.your-domain.example"
+
+  campaigns:
+    port: 8086
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 250m, memory: 256Mi }
+    hpa: { minReplicas: 1, maxReplicas: 3, targetCPUUtilization: 75 }
+    routeMatch: PathPrefix(`/v1/campaigns`) || PathPrefix(`/v1/admin/campaigns`)
+    config:
+      port: "8086"
+
+  merchant:
+    port: 8088
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 250m, memory: 256Mi }
+    hpa: { minReplicas: 1, maxReplicas: 3, targetCPUUtilization: 75 }
+    routeMatch: >-
+      PathPrefix(`/v1/merchants`) || PathPrefix(`/v1/orders`)
+      || PathPrefix(`/v1/merchant`) || PathPrefix(`/v1/admin/merchants`)
+      || PathPrefix(`/v1/items`)
+    pvc:
+      enabled: true
+      mountPath: /data/merchant
+      size: 5Gi
+    config:
+      port: "8088"
+      merchantStorageDir: /data/merchant
+      ridesServiceUrl: "http://rides"
+
+  partners:
+    port: 8087
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 250m, memory: 256Mi }
+    hpa: { minReplicas: 1, maxReplicas: 3, targetCPUUtilization: 75 }
+    routeMatch: PathPrefix(`/v1/partner`) || PathPrefix(`/v1/admin/partners`)
+    config:
+      port: "8087"
+
+  places:
+    port: 8089
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 250m, memory: 256Mi }
+    hpa: { minReplicas: 1, maxReplicas: 3, targetCPUUtilization: 75 }
+    routeMatch: PathPrefix(`/v1/places`) || PathPrefix(`/v1/admin/places`)
+    pvc:
+      enabled: true
+      mountPath: /data/places
+      size: 5Gi
+    config:
+      port: "8089"
+      placesStorageDir: /data/places
+
+  routing:
+    port: 8084
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 250m, memory: 256Mi }
+    hpa: { minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 75 }
+    # No routeMatch — internal-only, called only by rides, never public.
+    config:
+      port: "8084"
+      routingEngine: valhalla
+      routingUrl: "http://valhalla:8002" # Valhalla's own container port, not port-80'd (upstream image, unmodified)
+
+postgres:
+  image: postgis/postgis:16-3.4
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: 1000m, memory: 2Gi }
+  storage: 20Gi
+
+redis:
+  image: redis:7-alpine
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  storage: 5Gi
+
+nats:
+  image: nats:2-alpine
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 300m, memory: 256Mi }
+  storage: 5Gi
+
+valhalla:
+  image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: 1000m, memory: 2Gi }
+  storage: 5Gi
+  tileUrls: "https://download.geofabrik.de/asia/nepal-latest.osm.pbf"
+  serverThreads: "4"
+
+pelias:
+  opensearch:
+    image: opensearchproject/opensearch:2
+    resources:
+      requests: { cpu: 500m, memory: 1.5Gi }
+      limits: { cpu: 1000m, memory: 2.5Gi }
+    storage: 10Gi
+    javaOpts: "-Xms1g -Xmx1g"
+  api:
+    image: pelias/api:latest
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 300m, memory: 512Mi }
+    hpa: { minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 75 }
+  import:
+    osmPbfUrl: "https://download.geofabrik.de/asia/nepal-latest.osm.pbf"
+    whosOnFirstCountryCode: "NP"
+
+dashboard:
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 300m, memory: 256Mi }
+  hpa: { minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 75 }
+  apiBaseEnvVar: NEXT_PUBLIC_API_BASE # confirm against dashboard/lib/api.ts during implementation

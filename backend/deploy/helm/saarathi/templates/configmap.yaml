@@ -1,0 +1,33 @@
+{{/* Shared, non-secret config every service's env can pull from — see plan section 3. */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: saarathi-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.labels" . | nindent 4 }}
+data:
+  RUST_LOG: {{ .Values.config.rustLog | quote }}
+  OTP_DEV_MODE: {{ .Values.config.otpDevMode | quote }}
+  OTP_TTL_SECS: {{ .Values.config.otpTtlSecs | quote }}
+  OTP_RATE_MAX: {{ .Values.config.otpRateMax | quote }}
+  OTP_RATE_WINDOW_SECS: {{ .Values.config.otpRateWindowSecs | quote }}
+  JWT_ACCESS_TTL_SECS: {{ .Values.config.jwtAccessTtlSecs | quote }}
+  JWT_REFRESH_TTL_DAYS: {{ .Values.config.jwtRefreshTtlDays | quote }}
+  ROUTING_ROAD_FACTOR: {{ .Values.config.routingRoadFactor | quote }}
+  ROUTING_AVG_SPEED_KMH: {{ .Values.config.routingAvgSpeedKmh | quote }}
+  FARE_TWO_WHEELER_PER_KM: {{ .Values.config.fareTwoWheelerPerKm | quote }}
+  FARE_THREE_WHEELER_PER_KM: {{ .Values.config.fareThreeWheelerPerKm | quote }}
+  FARE_FOUR_WHEELER_PER_KM: {{ .Values.config.fareFourWheelerPerKm | quote }}
+  FARE_COMMISSION_RATE: {{ .Values.config.fareCommissionRate | quote }}
+  DISPATCH_OFFER_TTL_SECS: {{ .Values.config.dispatchOfferTtlSecs | quote }}
+  DISPATCH_RADIUS_KM: {{ .Values.config.dispatchRadiusKm | quote }}
+  DISPATCH_MAX_RADIUS_KM: {{ .Values.config.dispatchMaxRadiusKm | quote }}
+  DISPATCH_PRESENCE_TTL_SECS: {{ .Values.config.dispatchPresenceTtlSecs | quote }}
+  ROUTE_CACHE_TTL_SECS: {{ .Values.config.routeCacheTtlSecs | quote }}
+  DELIVERY_BASE_FARE: {{ .Values.config.deliveryBaseFare | quote }}
+  DELIVERY_PER_KM: {{ .Values.config.deliveryPerKm | quote }}
+  DELIVERY_TIER_SMALL_SURCHARGE: {{ .Values.config.deliveryTierSmallSurcharge | quote }}
+  DELIVERY_TIER_MEDIUM_SURCHARGE: {{ .Values.config.deliveryTierMediumSurcharge | quote }}
+  DELIVERY_FRAGILE_SURCHARGE: {{ .Values.config.deliveryFragileSurcharge | quote }}
+  TURN_STUN_URL: {{ .Values.config.turnStunUrl | quote }}

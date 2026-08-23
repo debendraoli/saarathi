@@ -1,0 +1,76 @@
+{{/* Single replica, internal-only — no IngressRoute, called only by saarathi-routing. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valhalla
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "valhalla" "Release" .Release) | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: valhalla
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: valhalla
+    spec:
+      containers:
+        - name: valhalla
+          image: {{ .Values.valhalla.image }}
+          ports:
+            - containerPort: 8002
+          env:
+            - name: tile_urls
+              value: {{ .Values.valhalla.tileUrls | quote }}
+            - name: use_tiles_ignore_pbf
+              value: "True"
+            - name: build_tar
+              value: "True"
+            - name: use_default_speeds_config
+              value: "True"
+            - name: build_admins
+              value: "True"
+            - name: build_time_zones
+              value: "True"
+            - name: build_elevation
+              value: "False"
+            - name: server_threads
+              value: {{ .Values.valhalla.serverThreads | quote }}
+          volumeMounts:
+            - name: data
+              mountPath: /custom_files
+          resources:
+            {{- toYaml .Values.valhalla.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: valhalla-storage
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valhalla-storage
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "valhalla" "Release" .Release) | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.valhalla.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valhalla
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "valhalla" "Release" .Release) | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: valhalla
+  ports:
+    - port: 8002
+      targetPort: 8002

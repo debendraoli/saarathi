@@ -1,0 +1,55 @@
+{{/* Internal-only — no IngressRoute, called only by saarathi-rides. Its Service ("pelias-api") is defined alongside the shared config in pelias-config-configmap.yaml. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pelias-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "pelias-api" "Release" .Release) | nindent 4 }}
+spec:
+  replicas: {{ .Values.pelias.api.hpa.minReplicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pelias-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pelias-api
+    spec:
+      containers:
+        - name: pelias-api
+          image: {{ .Values.pelias.api.image }}
+          ports:
+            - containerPort: 4000
+          volumeMounts:
+            - name: config
+              mountPath: /code/pelias.json
+              subPath: pelias.json
+          resources:
+            {{- toYaml .Values.pelias.api.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: pelias-config
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: pelias-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "pelias-api" "Release" .Release) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pelias-api
+  minReplicas: {{ .Values.pelias.api.hpa.minReplicas }}
+  maxReplicas: {{ .Values.pelias.api.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.pelias.api.hpa.targetCPUUtilization }}

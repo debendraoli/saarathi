@@ -1,0 +1,49 @@
+{{/*
+Shared pelias.json — mounted into both pelias-api and the import Jobs, same
+config file every official Pelias docker-compose example uses. Nepal-only:
+openstreetmap points at the same Geofabrik extract Valhalla uses, and
+whosonfirst is filtered to Nepal's country code.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pelias-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "pelias" "Release" .Release) | nindent 4 }}
+data:
+  pelias.json: |
+    {
+      "esclient": {
+        "hosts": [{ "host": "pelias-opensearch", "port": 9200 }]
+      },
+      "api": {
+        "host": "http://pelias-api/",
+        "port": 4000
+      },
+      "imports": {
+        "openstreetmap": {
+          "download": [{ "sourceURL": {{ .Values.pelias.import.osmPbfUrl | quote }} }],
+          "leveldbDir": "/data/openstreetmap/leveldb",
+          "dataFile": "/data/openstreetmap/nepal-latest.osm.pbf"
+        },
+        "whosonfirst": {
+          "datapath": "/data/whosonfirst",
+          "countryCode": {{ .Values.pelias.import.whosOnFirstCountryCode | quote }}
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pelias-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "pelias-api" "Release" .Release) | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: pelias-api
+  ports:
+    - port: 80
+      targetPort: 4000

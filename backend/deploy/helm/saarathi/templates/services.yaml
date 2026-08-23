@@ -1,0 +1,128 @@
+{{/*
+One Deployment + Service + HPA (+ optional IngressRoute, optional PVC) per
+entry in .Values.services — see plan section 1. Adding service #10 is one
+values.yaml block, nothing else to touch.
+*/}}
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: saarathi-{{ $name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" $name "Release" $.Release) | nindent 4 }}
+spec:
+  replicas: {{ $svc.hpa.minReplicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+    spec:
+      containers:
+        - name: {{ $name }}
+          image: {{ $.Values.image.registry }}/saarathi-{{ $name }}:{{ $.Values.image.tag }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ $svc.port }}
+          envFrom:
+            - secretRef:
+                name: saarathi-secrets
+            - configMapRef:
+                name: saarathi-config
+          env:
+            {{- range $key, $value := $svc.config }}
+            - name: {{ $key | snakecase | upper }}
+              value: {{ $value | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          {{- if and (hasKey $svc "pvc") $svc.pvc.enabled }}
+          volumeMounts:
+            - name: storage
+              mountPath: {{ $svc.pvc.mountPath }}
+          {{- end }}
+      {{- if and (hasKey $svc "pvc") $svc.pvc.enabled }}
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: saarathi-{{ $name }}-storage
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: saarathi-{{ $name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" $name "Release" $.Release) | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - port: 80
+      targetPort: {{ $svc.port }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: saarathi-{{ $name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" $name "Release" $.Release) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: saarathi-{{ $name }}
+  minReplicas: {{ $svc.hpa.minReplicas }}
+  maxReplicas: {{ $svc.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $svc.hpa.targetCPUUtilization }}
+{{- if and (hasKey $svc "pvc") $svc.pvc.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: saarathi-{{ $name }}-storage
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" $name "Release" $.Release) | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ $svc.pvc.size }}
+{{- end }}
+{{- if $svc.routeMatch }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: saarathi-{{ $name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" $name "Release" $.Release) | nindent 4 }}
+spec:
+  entryPoints: ["websecure"]
+  routes:
+    - kind: Rule
+      middlewares:
+        - name: cors
+        - name: ratelimit
+      match: Host(`api.{{ $.Values.domain }}`) && ({{ $svc.routeMatch }})
+      services:
+        - name: saarathi-{{ $name }}
+          port: 80
+  tls:
+    secretName: saarathi-api-tls
+{{- end }}
+{{- end }}

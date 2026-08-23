@@ -1,0 +1,50 @@
+{{/*
+Assumes cert-manager itself is already installed cluster-wide (its own
+upstream manifests/Helm chart — not something this chart re-installs). This
+just registers the Let's Encrypt ClusterIssuer the per-service IngressRoutes'
+`tls.secretName` references implicitly via cert-manager's Traefik
+IngressRoute support (annotate or use a Certificate resource per host —
+simplest is one Certificate per public hostname, HTTP-01 via Traefik).
+*/}}
+{{- if .Values.certManager.enabled }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: {{ .Values.certManager.issuerEmail }}
+    privateKeySecretRef:
+      name: letsencrypt-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: saarathi-api-tls
+  namespace: {{ .Values.namespace }}
+spec:
+  secretName: saarathi-api-tls
+  issuerRef:
+    name: letsencrypt
+    kind: ClusterIssuer
+  dnsNames:
+    - api.{{ .Values.domain }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: saarathi-dashboard-tls
+  namespace: {{ .Values.namespace }}
+spec:
+  secretName: saarathi-dashboard-tls
+  issuerRef:
+    name: letsencrypt
+    kind: ClusterIssuer
+  dnsNames:
+    - dashboard.{{ .Values.domain }}
+{{- end }}

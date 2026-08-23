@@ -1,0 +1,79 @@
+name: Deploy (backend + dashboard → Yeti Cloud k8s)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/${{ github.repository_owner }}/saarathi
+
+jobs:
+  build-backend:
+    name: Build + push backend images
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth, rides, notify, payments, campaigns, merchant, partners, places, routing]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_BASE }}-${{ matrix.service }}:${{ github.sha }}
+
+  build-dashboard:
+    name: Build + push dashboard image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: dashboard
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_BASE=https://api.${{ secrets.SAARATHI_DOMAIN }}
+          tags: ${{ env.IMAGE_BASE }}-dashboard:${{ github.sha }}
+
+  deploy:
+    name: helm upgrade --install
+    needs: [build-backend, build-dashboard]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > "$HOME/.kube/config"
+      - name: helm upgrade --install
+        run: |
+          helm upgrade --install saarathi backend/deploy/helm/saarathi \
+            --set image.registry=${{ env.IMAGE_BASE }} \
+            --set image.tag=${{ github.sha }} \
+            --set domain=${{ secrets.SAARATHI_DOMAIN }} \
+            --set certManager.issuerEmail=${{ secrets.SAARATHI_CERT_EMAIL }} \
+            --set secrets.databaseUrl=${{ secrets.SAARATHI_DATABASE_URL }} \
+            --set secrets.postgresPassword=${{ secrets.SAARATHI_POSTGRES_PASSWORD }} \
+            --set secrets.redisUrl=${{ secrets.SAARATHI_REDIS_URL }} \
+            --set secrets.natsUrl=${{ secrets.SAARATHI_NATS_URL }} \
+            --set secrets.jwtSecret=${{ secrets.SAARATHI_JWT_SECRET }} \
+            --set secrets.internalServiceSecret=${{ secrets.SAARATHI_INTERNAL_SERVICE_SECRET }} \
+            --set secrets.sparrowSmsToken=${{ secrets.SAARATHI_SPARROW_SMS_TOKEN }} \
+            --set secrets.sparrowSmsFrom=${{ secrets.SAARATHI_SPARROW_SMS_FROM }} \
+            --set secrets.turnSecret=${{ secrets.SAARATHI_TURN_SECRET }} \
+            --set-string secrets.fcmServiceAccountJson="${{ secrets.SAARATHI_FCM_SERVICE_ACCOUNT_JSON }}" \
+            --wait --timeout 10m

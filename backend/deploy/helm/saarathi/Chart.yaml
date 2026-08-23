@@ -1,0 +1,6 @@
+apiVersion: v2
+name: saarathi
+description: Saarathi backend (9 Rust/axum services + Postgres/Redis/NATS + Valhalla + Pelias) and dashboard
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

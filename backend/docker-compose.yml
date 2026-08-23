@@ -402,6 +402,61 @@ services:
       timeout: 5s
       retries: 20
 
+  # Self-hosted geocoder (replaces the public photon.komoot.io dependency).
+  # Nepal-only data: same Geofabrik extract Valhalla uses, filtered
+  # WhosOnFirst admin boundaries. Start with:  docker compose --profile routing up -d
+  # pelias-opensearch pelias-api
+  # then run the one-off imports (see scripts/, or docs/pelias-import.md):
+  #   docker compose --profile routing run --rm pelias-import-openstreetmap
+  #   docker compose --profile routing run --rm pelias-import-whosonfirst
+  pelias-opensearch:
+    image: opensearchproject/opensearch:2
+    profiles: ["routing"]
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+    volumes:
+      - ./.data/pelias-opensearch:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  pelias-api:
+    image: pelias/api:latest
+    profiles: ["routing"]
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./pelias.json:/code/pelias.json:ro
+    depends_on:
+      pelias-opensearch:
+        condition: service_healthy
+
+  pelias-import-openstreetmap:
+    image: pelias/openstreetmap-import:latest
+    profiles: ["routing"]
+    volumes:
+      - ./pelias.json:/code/pelias.json:ro
+      - ./.data/pelias-import/openstreetmap:/data/openstreetmap
+    depends_on:
+      pelias-opensearch:
+        condition: service_healthy
+
+  pelias-import-whosonfirst:
+    image: pelias/whosonfirst:latest
+    profiles: ["routing"]
+    volumes:
+      - ./pelias.json:/code/pelias.json:ro
+      - ./.data/pelias-import/whosonfirst:/data/whosonfirst
+    depends_on:
+      pelias-opensearch:
+        condition: service_healthy
+
   # Self-hosted STUN/TURN (Coturn) for WebRTC peer-to-peer voice/video. Keeping
   # it in our infra means relay traffic + signaling stay in-country (golden rule:
   # data stays in Nepal), and we avoid per-minute third-party TURN costs. The

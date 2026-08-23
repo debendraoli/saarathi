@@ -1,0 +1,22 @@
+{
+  "esclient": {
+    "hosts": [{ "host": "pelias-opensearch", "port": 9200 }]
+  },
+  "api": {
+    "host": "http://pelias-api/",
+    "port": 4000
+  },
+  "imports": {
+    "openstreetmap": {
+      "download": [
+        { "sourceURL": "https://download.geofabrik.de/asia/nepal-latest.osm.pbf" }
+      ],
+      "leveldbDir": "/data/openstreetmap/leveldb",
+      "dataFile": "/data/openstreetmap/nepal-latest.osm.pbf"
+    },
+    "whosonfirst": {
+      "datapath": "/data/whosonfirst",
+      "countryCode": "NP"
+    }
+  }
+}
