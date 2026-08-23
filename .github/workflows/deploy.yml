@@ -75,6 +75,5 @@ jobs:
             --set secrets.sparrowSmsToken=${{ secrets.SAARATHI_SPARROW_SMS_TOKEN }} \
             --set secrets.sparrowSmsFrom=${{ secrets.SAARATHI_SPARROW_SMS_FROM }} \
             --set secrets.turnSecret=${{ secrets.SAARATHI_TURN_SECRET }} \
-            --set coturn.externalIp=${{ secrets.SAARATHI_COTURN_EXTERNAL_IP }} \
             --set-string secrets.fcmServiceAccountJson="${{ secrets.SAARATHI_FCM_SERVICE_ACCOUNT_JSON }}" \
             --wait --timeout 10m

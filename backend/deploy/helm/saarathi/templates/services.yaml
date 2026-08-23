@@ -38,12 +38,6 @@ spec:
             - name: {{ $key | snakecase | upper }}
               value: {{ $value | quote }}
             {{- end }}
-            {{/* rides mints TURN credentials at /v1/rtc/ice — can't be a plain
-                 values.yaml config entry since it's built from coturn.* below. */}}
-            {{- if and (eq $name "rides") $.Values.coturn.enabled }}
-            - name: TURN_URLS
-              value: "turn:{{ $.Values.coturn.externalIp }}:{{ $.Values.coturn.listeningPort }}"
-            {{- end }}
           resources:
             {{- toYaml $svc.resources | nindent 12 }}
           {{- if and (hasKey $svc "pvc") $svc.pvc.enabled }}

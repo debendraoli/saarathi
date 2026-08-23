@@ -26,7 +26,6 @@ then `helm upgrade --install`s this chart.
 | `SAARATHI_INTERNAL_SERVICE_SECRET` | `openssl rand -hex 32` |
 | `SAARATHI_SPARROW_SMS_TOKEN` / `SAARATHI_SPARROW_SMS_FROM` | optional — blank disables the SMS fallback |
 | `SAARATHI_TURN_SECRET` | optional — blank disables Coturn ICE creds |
-| `SAARATHI_COTURN_EXTERNAL_IP` | the public IP of the node Coturn will land on (`coturn.nodeSelector` should pin it there) — required if Coturn is enabled, see the `coturn:` comment in values.yaml for why it can't just use a Service |
 | `SAARATHI_FCM_SERVICE_ACCOUNT_JSON` | the full contents of the Firebase service-account JSON key (paste as-is) |
 
 One-time, before the first deploy: cert-manager itself must already be
