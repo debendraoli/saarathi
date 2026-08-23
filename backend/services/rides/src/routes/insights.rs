@@ -1,15 +1,22 @@
 //! Ops insights: ride history (with ratings, status, cancellations), the
 //! complaints/cancellations feed, and filterable leaderboards (top earners,
-//! best rated, most cancellations). All staff-gated, read-only.
+//! best rated, most cancellations). Mostly staff-gated read-only views, plus
+//! (AdminUser-gated) suspend/reactivate on rider accounts — the one write
+//! action here, since account status is the one thing about a rider this
+//! directory has never been able to change.
 
-use crate::auth::StaffUser;
+use crate::auth::{AdminUser, StaffUser};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
-use axum::{routing::get, Json, Router};
+use axum::{
+    routing::{get, post},
+    Json, Router,
+};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
@@ -19,6 +26,8 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/admin/leaderboard", get(leaderboard))
         .route("/v1/admin/riders", get(riders))
         .route("/v1/admin/riders/{id}", get(rider_detail))
+        .route("/v1/admin/riders/{id}/suspend", post(suspend_rider))
+        .route("/v1/admin/riders/{id}/reactivate", post(reactivate_rider))
         .route("/v1/admin/driver-analytics/{id}", get(driver_analytics))
         .route("/v1/admin/driver-directory", get(driver_directory))
 }
@@ -279,6 +288,40 @@ async fn rider_detail(
         rating_count,
         recent_trips,
     }))
+}
+
+async fn set_rider_status(
+    st: &AppState,
+    id: Uuid,
+    status: &str,
+) -> AppResult<Json<serde_json::Value>> {
+    let updated: Option<(Uuid,)> = sqlx::query_as(
+        "UPDATE users SET status = $2::user_status WHERE id = $1 AND role = 'rider' RETURNING id",
+    )
+    .bind(id)
+    .bind(status)
+    .fetch_optional(&st.db)
+    .await?;
+    updated.ok_or(AppError::NotFound)?;
+    Ok(Json(json!({ "ok": true, "status": status })))
+}
+
+/// Suspends a rider account — they can no longer sign in. Doesn't touch any
+/// in-progress trip; that's a separate concern (cancellation/SOS flows).
+async fn suspend_rider(
+    State(st): State<AppState>,
+    _admin: AdminUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    set_rider_status(&st, id, "suspended").await
+}
+
+async fn reactivate_rider(
+    State(st): State<AppState>,
+    _admin: AdminUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    set_rider_status(&st, id, "active").await
 }
 
 // ── Per-driver analytics ─────────────────────────────────────────────────────

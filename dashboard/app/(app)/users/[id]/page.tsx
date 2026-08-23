@@ -1,6 +1,6 @@
 "use client";
 
-import { Modal } from "@/components/Modal";
+import { ConfirmModal, Modal } from "@/components/Modal";
 import { TopupModal } from "@/components/TopupModal";
 import { TripMap } from "@/components/TripMap";
 import { auth, rides, type RiderDetail, type TripRoute } from "@/lib/api";
@@ -12,10 +12,40 @@ export default function RiderDetailPage({ params }: { params: Promise<{ id: stri
   const [data, setData] = useState<RiderDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showTopup, setShowTopup] = useState(false);
-  const canTopup = ["super_admin", "admin"].includes(auth.user?.role ?? "");
+  const [showSuspend, setShowSuspend] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const isAdmin = ["super_admin", "admin"].includes(auth.user?.role ?? "");
+  const canTopup = isAdmin;
   const [routeFor, setRouteFor] = useState<string | null>(null);
   const [route, setRoute] = useState<TripRoute | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+
+  async function suspend() {
+    setStatusBusy(true);
+    setError(null);
+    try {
+      await rides.suspendRider(id);
+      setShowSuspend(false);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
+  async function reactivate() {
+    setStatusBusy(true);
+    setError(null);
+    try {
+      await rides.reactivateRider(id);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setStatusBusy(false);
+    }
+  }
 
   function viewRoute(tripId: string) {
     setRouteFor(tripId);
@@ -77,6 +107,16 @@ export default function RiderDetailPage({ params }: { params: Promise<{ id: stri
             Top up credits
           </button>
         )}
+        {isAdmin &&
+          (data.status === "suspended" ? (
+            <button className="btn ghost" disabled={statusBusy} onClick={reactivate}>
+              {statusBusy ? "Working…" : "Reactivate"}
+            </button>
+          ) : (
+            <button className="btn danger" disabled={statusBusy} onClick={() => setShowSuspend(true)}>
+              Suspend
+            </button>
+          ))}
       </div>
 
       <div className="stat-grid">
@@ -151,6 +191,17 @@ export default function RiderDetailPage({ params }: { params: Promise<{ id: stri
         userId={data.id}
         kind="rider"
         onDone={() => load()}
+      />
+
+      <ConfirmModal
+        open={showSuspend}
+        onClose={() => setShowSuspend(false)}
+        onConfirm={suspend}
+        title="Suspend this user?"
+        message={`${data.full_name ?? data.phone} will no longer be able to sign in or request rides. This doesn't affect any trip already in progress.`}
+        confirmLabel="Suspend"
+        danger
+        busy={statusBusy}
       />
 
       <Modal open={routeFor !== null} onClose={() => setRouteFor(null)} title="Trip route" wide>

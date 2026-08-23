@@ -4,7 +4,7 @@
 
 use crate::state::AppState;
 
-pub use saarathi_core::authn::{verify_access, AuthUser, Claims, StaffUser};
+pub use saarathi_core::authn::{verify_access, AdminUser, AuthUser, Claims, StaffUser};
 
 impl saarathi_core::authn::HasJwtSecret for AppState {
     fn jwt_secret(&self) -> &str {

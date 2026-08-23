@@ -601,6 +601,10 @@ export const rides = {
   riders: (q?: string) =>
     ridesRequest<RiderRow[]>(`/v1/admin/riders${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   riderDetail: (id: string) => ridesRequest<RiderDetail>(`/v1/admin/riders/${id}`),
+  suspendRider: (id: string) =>
+    ridesRequest<{ ok: boolean; status: string }>(`/v1/admin/riders/${id}/suspend`, { method: "POST" }),
+  reactivateRider: (id: string) =>
+    ridesRequest<{ ok: boolean; status: string }>(`/v1/admin/riders/${id}/reactivate`, { method: "POST" }),
   driverAnalytics: (userId: string) =>
     ridesRequest<DriverAnalytics>(`/v1/admin/driver-analytics/${userId}`),
   driverDirectory: (q?: string) =>

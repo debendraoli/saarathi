@@ -25,6 +25,9 @@ pub enum ErrorCode {
     OtpInvalid,
     OtpRateLimited,
     DocumentInvalid,
+    /// The account is suspended or banned — OTP verify/refresh both check
+    /// this before issuing a token, not just KYC/onboarding-gated actions.
+    AccountSuspended,
     // Rides / dispatch
     InvalidVehicleClass,
     InvalidStatus,

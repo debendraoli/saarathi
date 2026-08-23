@@ -1,7 +1,7 @@
 //! Public auth endpoints: OTP request/verify, token refresh, logout.
 
 use crate::error::{AppError, AppResult};
-use crate::models::{User, UserRole};
+use crate::models::{User, UserRole, UserStatus};
 use crate::otp;
 use crate::rate_limit;
 use crate::state::AppState;
@@ -78,7 +78,14 @@ async fn request_otp(
     // either bucket running dry blocks the request (see `crate::rate_limit`).
     if let Some(mut redis) = st.redis.clone() {
         let ip = client_ip(&headers);
-        if !rate_limit::check(&mut redis, &ip, &phone, &st.config.otp_rate_limit_ip_allowlist).await {
+        if !rate_limit::check(
+            &mut redis,
+            &ip,
+            &phone,
+            &st.config.otp_rate_limit_ip_allowlist,
+        )
+        .await
+        {
             return Err(AppError::rate_limited(
                 ErrorCode::OtpRateLimited,
                 "too many OTP requests — please wait a few minutes",
@@ -185,6 +192,13 @@ async fn verify_otp(
     .fetch_one(&st.db)
     .await?;
 
+    if matches!(user.status, UserStatus::Suspended | UserStatus::Banned) {
+        return Err(AppError::forbidden(
+            ErrorCode::AccountSuspended,
+            "this account has been suspended",
+        ));
+    }
+
     let pair = issue_tokens(&st, &user).await?;
     Ok(Json(pair))
 }
@@ -221,6 +235,13 @@ async fn refresh(
     .bind(user_id)
     .fetch_one(&st.db)
     .await?;
+
+    if matches!(user.status, UserStatus::Suspended | UserStatus::Banned) {
+        return Err(AppError::forbidden(
+            ErrorCode::AccountSuspended,
+            "this account has been suspended",
+        ));
+    }
 
     let pair = issue_tokens(&st, &user).await?;
     Ok(Json(pair))
