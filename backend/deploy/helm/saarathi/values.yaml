@@ -254,3 +254,26 @@ dashboard:
     limits: { cpu: 300m, memory: 256Mi }
   hpa: { minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 75 }
   apiBaseEnvVar: NEXT_PUBLIC_API_BASE # confirm against dashboard/lib/api.ts during implementation
+
+# STUN/TURN relay for WebRTC calls. hostNetwork: true — its 41-port UDP relay
+# range (min/maxPort) doesn't fit a ClusterIP Service or a typical cloud
+# LoadBalancer cheaply, so it binds directly to the node's network interface
+# instead, same as any other self-hosted TURN deployment. That means:
+#   - Only one replica ever (a second pod on the same node would port-clash).
+#   - externalIp MUST be the public IP of whichever node it lands on — set
+#     nodeSelector to pin it to one specific, stable node, or run coturn on a
+#     dedicated box outside k8s entirely if the node pool's IPs aren't stable.
+#   - The node's firewall/security group must allow inbound UDP/TCP 3478 and
+#     UDP minPort-maxPort from the internet.
+coturn:
+  enabled: true
+  image: coturn/coturn:4.6
+  externalIp: "" # REQUIRED before install — the node's public IP, e.g. 203.0.113.10
+  listeningPort: 3478
+  minPort: 49160
+  maxPort: 49200
+  realm: saarathi.np
+  resources:
+    requests: { cpu: 100m, memory: 64Mi }
+    limits: { cpu: 300m, memory: 128Mi }
+  nodeSelector: {} # e.g. { kubernetes.io/hostname: node-with-the-above-ip }

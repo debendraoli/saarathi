@@ -1,0 +1,61 @@
+{{/*
+hostNetwork, not a ClusterIP Service — see the comment on `coturn:` in
+values.yaml for why. No Service object: nothing in-cluster calls coturn
+directly, rides only mints short-lived credentials (GET /v1/rtc/ice)
+pointing browsers/the app straight at coturn.externalIp — the TURN traffic
+itself never touches the k8s network.
+*/}}
+{{- if .Values.coturn.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coturn
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "coturn" "Release" .Release) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # hostNetwork port binding — never run two at once, even mid-rollout
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: coturn
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: coturn
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- with .Values.coturn.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: coturn
+          image: {{ .Values.coturn.image }}
+          env:
+            - name: TURN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: saarathi-secrets
+                  key: TURN_SECRET
+            - name: EXTERNAL_IP
+              value: {{ .Values.coturn.externalIp | quote }}
+          args:
+            - -n
+            - --log-file=stdout
+            - --listening-port={{ .Values.coturn.listeningPort }}
+            - --realm={{ .Values.coturn.realm }}
+            - --server-name=saarathi
+            - --fingerprint
+            - --use-auth-secret
+            - --static-auth-secret=$(TURN_SECRET)
+            - --min-port={{ .Values.coturn.minPort }}
+            - --max-port={{ .Values.coturn.maxPort }}
+            - --no-tls
+            - --no-dtls
+            - --external-ip=$(EXTERNAL_IP)
+          resources:
+            {{- toYaml .Values.coturn.resources | nindent 12 }}
+{{- end }}
