@@ -8,6 +8,7 @@ import {
     Building2,
     Car,
     CreditCard,
+    DollarSign,
     Flag,
     HeartPulse,
     LogOut,
@@ -91,6 +92,7 @@ const NAV: NavGroup[] = [
     items: [
       { href: "/campaigns", label: "Campaigns", icon: Tag },
       { href: "/surge", label: "Surge Hours", icon: Zap },
+      { href: "/rates", label: "Base Rates", icon: DollarSign },
     ],
   },
   {
@@ -206,7 +208,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="logo">सा</span> Saarathi Ops
+          <img className="logo" src="/logo.png" alt="Saarathi" /> Saarathi Ops
         </div>
         {NAV.map((group) => (
           <div key={group.title}>

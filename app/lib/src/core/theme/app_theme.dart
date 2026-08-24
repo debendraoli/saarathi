@@ -21,6 +21,13 @@ class AppTheme {
       brightness: brightness,
       primary: brand,
       secondary: crimson,
+      // Default `tonalSpot` bakes the seed's hue into every neutral tone —
+      // with a saffron/amber seed that meant cards, list tiles, and sheets
+      // across the whole app rendered with a visible yellow tint. `neutral`
+      // keeps just a hint of warmth in surfaces instead of full chroma,
+      // while `primary`/`secondary` above are pinned to the brand colors
+      // regardless, so the brand identity itself is unchanged.
+      dynamicSchemeVariant: DynamicSchemeVariant.neutral,
     );
     final textTheme = GoogleFonts.interTextTheme(
       ThemeData(brightness: brightness).textTheme,

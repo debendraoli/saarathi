@@ -164,6 +164,24 @@ class TripScreen extends ConsumerWidget {
                           ),
                         ),
                       ),
+                      // Hands the driver off to their own Google Maps app for
+                      // turn-by-turn — driving to the current leg's target
+                      // (pickup, then destination once picked up), the same
+                      // point `routeTarget` already draws the polyline to.
+                      if (iAmDriver && trip.isActive)
+                        SafeArea(
+                          child: Align(
+                            alignment: Alignment.topRight,
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: _MapCircleButton(
+                                icon: Icons.navigation_rounded,
+                                onTap: () => _launchExternalNavigation(
+                                    routeTarget),
+                              ),
+                            ),
+                          ),
+                        ),
                       trip.isBidding && trip.status == TripStatus.requested
                           ? BiddingSheet(trip: trip)
                           : _StatusSheet(trip: trip, driverLoc: driverLoc),
@@ -179,6 +197,18 @@ class TripScreen extends ConsumerWidget {
   }
 }
 
+/// Opens the platform's Google Maps app for turn-by-turn to [target] — this
+/// URL scheme launches the native app directly when installed, falling back
+/// to Maps in a browser otherwise, so no platform-specific intent handling
+/// is needed.
+Future<void> _launchExternalNavigation(LatLng target) async {
+  final uri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=${target.latitude},${target.longitude}&travelmode=driving');
+  try {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {/* no maps app resolvable — nothing more we can do */}
+}
+
 /// Leaves the trip screen (back arrow, system back gesture, or the explicit
 /// "Cancel ride" button) — while the trip is still searching/unaccepted this
 /// also cancels it server-side first, so navigating away doesn't strand a
@@ -187,9 +217,10 @@ class TripScreen extends ConsumerWidget {
 Future<void> _leaveTrip(
     BuildContext context, WidgetRef ref, String tripId) async {
   final trip = ref.read(tripStreamProvider(tripId)).valueOrNull;
-  if (trip != null &&
+  final cancelling = trip != null &&
       (trip.status == TripStatus.searching ||
-          trip.status == TripStatus.requested)) {
+          trip.status == TripStatus.requested);
+  if (cancelling) {
     Haptics.warning();
     try {
       await ref.read(rideRepositoryProvider).cancel(tripId);
@@ -202,7 +233,11 @@ Future<void> _leaveTrip(
     // lock never lifts.
     ref.invalidate(myTripsProvider);
   }
-  if (context.mounted) context.go(Routes.home);
+  if (!context.mounted) return;
+  // A rider whose still-searching request just got cancelled goes back to
+  // the booking sheet to re-request, not to Home — this status only ever
+  // occurs before a driver is assigned, i.e. only for riders.
+  context.go(cancelling ? Routes.whereTo : Routes.home);
 }
 
 /// The explicit "Cancel ride" button's flow — unlike [_leaveTrip] (back
@@ -279,7 +314,10 @@ Future<void> showCancelReasonSheet(
     // just shows as active on Home, same as any other network blip.
   }
   ref.invalidate(myTripsProvider);
-  if (context.mounted) context.go(Routes.home);
+  if (!context.mounted) return;
+  // A driver who cancels goes back to Home to pick up the next offer; a
+  // rider goes back to the booking sheet to re-request.
+  context.go(isDriver ? Routes.home : Routes.whereTo);
 }
 
 class _StatusSheet extends ConsumerWidget {
@@ -419,6 +457,16 @@ class _StatusSheet extends ConsumerWidget {
                     ),
                 ],
               ),
+              // The requested vehicle class — shown until the driver's own
+              // vehicle detail (make/plate) takes over that job; without
+              // this, a rider waiting for a match had no way to confirm
+              // what they'd actually booked.
+              if (!iAmDriver &&
+                  driverDetail == null &&
+                  trip.vehicleClass != null) ...[
+                const SizedBox(height: 10),
+                _VehicleClassChip(vehicleClass: trip.vehicleClass!),
+              ],
               if (trip.status != TripStatus.cancelled) ...[
                 const SizedBox(height: 16),
                 RouteSummary(pickup: originLabelAsync, dest: destLabelAsync),
@@ -1117,6 +1165,24 @@ class _DriverExpandedDetail extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+class _VehicleClassChip extends StatelessWidget {
+  const _VehicleClassChip({required this.vehicleClass});
+  final String vehicleClass;
+
+  (IconData, String) _display(AppL10n l) => switch (vehicleClass) {
+        'three_wheeler' => (Icons.electric_rickshaw_rounded, l.vehicleThreeWheeler),
+        'four_wheeler' => (Icons.directions_car_rounded, l.vehicleFourWheeler),
+        _ => (Icons.two_wheeler_rounded, l.vehicleTwoWheeler),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppL10n.of(context);
+    final (icon, label) = _display(l);
+    return _DetailRow(icon: icon, label: label);
   }
 }
 

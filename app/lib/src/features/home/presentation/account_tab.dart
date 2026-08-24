@@ -65,7 +65,8 @@ class AccountTab extends ConsumerWidget {
             leading: const Icon(Icons.insights_rounded),
             title: Text(l.myStatsAction),
             trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => context.push(Routes.myStats),
+            onTap: () => context.push(
+                mode == AppMode.driver ? Routes.driverEarnings : Routes.myStats),
           ),
         ),
         const SizedBox(height: 16),

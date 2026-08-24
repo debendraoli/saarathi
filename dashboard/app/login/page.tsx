@@ -51,7 +51,7 @@ export default function LoginPage() {
     <div className="min-h-screen grid place-items-center p-6">
       <div className="card w-full max-w-[380px]">
         <div className="brand">
-          <span className="logo">सा</span> Saarathi Ops
+          <img className="logo" src="/logo.png" alt="Saarathi" /> Saarathi Ops
         </div>
         <p className="subtle" style={{ marginTop: -6, marginBottom: 16 }}>
           Staff sign-in

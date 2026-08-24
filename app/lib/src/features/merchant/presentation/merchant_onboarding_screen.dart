@@ -11,6 +11,7 @@ import '../../../core/location.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../places/data/places_repository.dart';
+import '../../places/presentation/address_search_screen.dart';
 import '../data/merchant_repository.dart';
 
 /// Self-service merchant registration: name, type, contact, PAN/VAT + pin.
@@ -72,7 +73,16 @@ class _MerchantOnboardingScreenState
           .read(placesRepositoryProvider)
           .reverse(p)
           .catchError((_) => null);
-      if (mounted && hit != null) setState(() => _pointLabel = hit.label);
+      if (!mounted || hit == null) return;
+      setState(() {
+        _pointLabel = hit.label;
+        // Only pre-fill — never clobber an address the merchant already
+        // typed themselves (this fires again if they later re-pick on the
+        // map, by which point they may well have started typing).
+        if (_address.text.trim().isEmpty && hit.address.isNotEmpty) {
+          _address.text = hit.address;
+        }
+      });
     });
   }
 
@@ -83,6 +93,19 @@ class _MerchantOnboardingScreenState
     _address.dispose();
     _panVat.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickLocation() async {
+    final pick = await Navigator.of(context).push<AddressPick>(
+      MaterialPageRoute(builder: (_) => const AddressSearchScreen()),
+    );
+    final hit = pick?.hit;
+    if (hit == null || !mounted) return;
+    setState(() {
+      _point = hit.point;
+      _pointLabel = hit.label;
+      if (hit.address.isNotEmpty) _address.text = hit.address;
+    });
   }
 
   Future<void> _submit() async {
@@ -175,6 +198,10 @@ class _MerchantOnboardingScreenState
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              // GPS at signup can easily land the pin next door — this was
+              // previously fixed once at mount with no way to correct it.
+              onTap: _pickLocation,
             ),
             const SizedBox(height: 16),
             if (_photo != null)

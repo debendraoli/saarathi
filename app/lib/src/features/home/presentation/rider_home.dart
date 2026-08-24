@@ -431,10 +431,18 @@ class _PendingReviewsPromptState extends ConsumerState<_PendingReviewsPrompt> {
   Widget build(BuildContext context) {
     final trips = ref.watch(myTripsProvider).valueOrNull ?? const [];
     final orders = ref.watch(myOrdersProvider).valueOrNull ?? const [];
-    final pendingTrips =
-        trips.where((t) => t.status == TripStatus.completed && !t.rated);
-    final pendingOrders = orders
-        .where((o) => o.status == 'delivered' && o.tripId != null && !o.rated);
+    // Past this age, treat it as a rating the rider has chosen to skip, not
+    // one they forgot about — re-nagging on every app open for something
+    // from days ago just trains people to dismiss the dialog unread.
+    final cutoff = DateTime.now().subtract(const Duration(hours: 12));
+    bool recent(DateTime? t) => t != null && t.isAfter(cutoff);
+    final pendingTrips = trips.where((t) =>
+        t.status == TripStatus.completed && !t.rated && recent(t.createdAt));
+    final pendingOrders = orders.where((o) =>
+        o.status == 'delivered' &&
+        o.tripId != null &&
+        !o.rated &&
+        recent(o.createdAt));
     final count = pendingTrips.length + pendingOrders.length;
 
     if (count > 0 && !_pendingReviewsPromptShown) {

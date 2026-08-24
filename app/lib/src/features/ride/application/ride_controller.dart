@@ -153,6 +153,15 @@ final driverTodayGoalsProvider = FutureProvider.autoDispose<DriverGoals>((ref) {
   return ref.watch(rideRepositoryProvider).todayGoals();
 });
 
+/// The signed-in driver's own earnings, bucketed by day/week/month (My
+/// Stats, driver mode). Keyed by period string so switching the segmented
+/// control between Day/Week/Month is just watching a different family
+/// member — no manual refetch/loading-state juggling needed.
+final driverEarningsProvider = FutureProvider.autoDispose
+    .family<DriverEarnings, String>((ref, period) {
+  return ref.watch(rideRepositoryProvider).driverEarnings(period);
+});
+
 /// Polls live bids for a bid-mode trip. Stops on its own once the trip
 /// leaves 'requested' (accepted/cancelled) — no point polling a resolved
 /// auction — mirroring `tripStreamProvider`'s own stop condition.

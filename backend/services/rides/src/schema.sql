@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS ledger_entries (
     created_at     timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ledger_entries_trip_idx ON ledger_entries (trip_id);
+CREATE INDEX IF NOT EXISTS ledger_entries_driver_idx ON ledger_entries (driver_id, created_at);
 
 -- Driver balance wallet: +ve = platform owes driver; -ve = driver owes platform.
 CREATE TABLE IF NOT EXISTS driver_wallets (
@@ -539,4 +540,32 @@ CREATE TABLE IF NOT EXISTS partner_topup_intents (
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS partner_id uuid;
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS funded_by text NOT NULL DEFAULT 'platform';  -- platform | partner
 CREATE INDEX IF NOT EXISTS campaigns_partner_idx ON campaigns (partner_id);
+
+-- Currently-effective per-km base rate per vehicle class — what `pricing.rs`
+-- actually reads (falling back to the `FARE_*_PER_KM` env defaults if a
+-- class has no row yet, e.g. right after this table is first created).
+CREATE TABLE IF NOT EXISTS fare_rates (
+    vehicle_class text        PRIMARY KEY,
+    per_km_rate   numeric     NOT NULL,
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+    updated_by    uuid
+);
+
+-- Maker-checker for rate changes: any staff can propose, only a super_admin
+-- may approve (`AdminUser` covers admin+super_admin platform-wide, same as
+-- KYC/place-contribution approval elsewhere — this one is checked stricter
+-- in-handler since a rate change moves every fare on the platform).
+CREATE TABLE IF NOT EXISTS fare_rate_proposals (
+    id                uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    vehicle_class     text        NOT NULL,
+    per_km_rate       numeric     NOT NULL,
+    proposed_by       uuid        NOT NULL,
+    status            text        NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+    rejection_reason  text,
+    reviewed_by       uuid,
+    reviewed_at       timestamptz,
+    created_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS fare_rate_proposals_status_idx
+    ON fare_rate_proposals (status, created_at DESC);
 

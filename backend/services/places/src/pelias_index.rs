@@ -7,7 +7,7 @@
 //! after commit" convention as `notify::send`/badge awards — a Pelias
 //! write hiccup must never fail the staff approval action.
 
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::OnceLock;
 use std::time::Duration;
 use uuid::Uuid;
@@ -22,6 +22,54 @@ fn http() -> &'static reqwest::Client {
     })
 }
 
+/// Pelias's own `/v1/autocomplete` silently drops a document that has no
+/// admin hierarchy beyond `parent.country_a` — confirmed empirically: a doc
+/// with only `country_a` set never appears in results (at any `size`, even
+/// though it's a perfect text match and is directly fetchable by `_id`),
+/// while the identical doc with `region`/`county` populated too shows up
+/// immediately. So a bare `country_a`-only `parent` (what every OSM-imported
+/// doc in this index never has) isn't enough — we borrow the real admin
+/// hierarchy from whichever indexed place is nearest to this contribution's
+/// coordinates, via a plain geo-distance ES query against the same index
+/// we're about to write into (no dependency on the separate `pelias-api`
+/// service, which this deployment's `places` service has no URL for).
+async fn nearest_parent(es_url: &str, lat: f64, lng: f64) -> Option<Value> {
+    let url = format!("{}/pelias/_search", es_url.trim_end_matches('/'));
+    let body = json!({
+        "size": 1,
+        "_source": ["parent"],
+        "query": {
+            "bool": {
+                "filter": [
+                    { "exists": { "field": "parent.region" } },
+                    {
+                        "geo_distance": {
+                            "distance": "100km",
+                            "center_point": { "lat": lat, "lon": lng }
+                        }
+                    }
+                ]
+            }
+        },
+        "sort": [
+            {
+                "_geo_distance": {
+                    "center_point": { "lat": lat, "lon": lng },
+                    "order": "asc",
+                    "unit": "km"
+                }
+            }
+        ]
+    });
+    let resp = http().post(&url).json(&body).send().await.ok()?;
+    let json: Value = resp.json().await.ok()?;
+    json["hits"]["hits"]
+        .get(0)?
+        .get("_source")?
+        .get("parent")
+        .cloned()
+}
+
 /// Indexes one contribution as a Pelias "venue" place. `_id` is
 /// deterministic (`saarathi:venue:{id}`) so a retry or re-approval is a
 /// harmless upsert, never a duplicate document.
@@ -34,13 +82,20 @@ fn http() -> &'static reqwest::Client {
 /// string is found immediately. Real OSM-imported docs in this index all
 /// store it as a bare string too.
 pub async fn index_place(es_url: &str, id: Uuid, category: &str, name: &str, lat: f64, lng: f64) {
+    // Falls back to the bare `country_a` shape (searchable via a raw ES
+    // query, e.g. by `_id`, but not via Pelias autocomplete — see
+    // `nearest_parent`'s doc comment) if no nearby doc has admin fields to
+    // borrow, rather than failing the whole index write over it.
+    let parent = nearest_parent(es_url, lat, lng)
+        .await
+        .unwrap_or_else(|| json!({ "country_a": ["NPL"] }));
     let doc = json!({
         "name": { "default": name },
         "center_point": { "lat": lat, "lon": lng },
         // rides' /v1/geo/search filters results to Nepal by checking
         // exactly this field — omitting it would mean Pelias indexes the
         // doc fine but it never actually surfaces in search.
-        "parent": { "country_a": ["NPL"] },
+        "parent": parent,
         "source": "saarathi",
         "source_id": id.to_string(),
         "category": [category],

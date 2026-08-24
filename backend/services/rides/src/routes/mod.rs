@@ -13,6 +13,7 @@ pub mod internal;
 pub mod ledger;
 pub mod metrics;
 pub mod plans;
+pub mod rates;
 pub mod rides;
 pub mod rtc;
 pub mod safety;
@@ -51,6 +52,7 @@ pub fn router(state: AppState) -> Router {
         .merge(rtc::routes())
         .merge(geo::routes())
         .merge(plans::routes())
+        .merge(rates::routes())
         .merge(insights::routes())
         .merge(internal::routes())
         .layer(CatchPanicLayer::new())

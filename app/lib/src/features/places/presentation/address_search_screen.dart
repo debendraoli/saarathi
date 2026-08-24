@@ -6,16 +6,28 @@ import 'package:latlong2/latlong.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/location.dart';
+import '../data/maps_url_parser.dart';
 import '../data/places_repository.dart';
 
 /// Result of the address picker: a chosen place, or a request to pick on the map.
 class AddressPick {
-  const AddressPick.place(this.hit) : chooseOnMap = false;
+  const AddressPick.place(this.hit)
+      : chooseOnMap = false,
+        forceDestination = false;
   const AddressPick.map()
       : hit = null,
-        chooseOnMap = true;
+        chooseOnMap = true,
+        forceDestination = false;
+  /// A resolved Google Maps link carries exactly one point — a caller
+  /// should treat it as the destination regardless of which field (pickup,
+  /// destination, or a stop) was open when it was pasted/shared, since
+  /// there's no second point to be the "other end" of anything.
+  const AddressPick.mapsLink(this.hit)
+      : chooseOnMap = false,
+        forceDestination = true;
   final PlaceHit? hit;
   final bool chooseOnMap;
+  final bool forceDestination;
 }
 
 /// Yango-style destination search: type to autocomplete addresses (biased to the
@@ -69,8 +81,37 @@ class _AddressSearchScreenState extends ConsumerState<AddressSearchScreen> {
       });
       return;
     }
+    if (looksLikeGoogleMapsUrl(value)) {
+      setState(() => _loading = true);
+      _resolveMapsUrl(value);
+      return;
+    }
     setState(() => _loading = true);
     _debounce = Timer(const Duration(milliseconds: 350), _runSearch);
+  }
+
+  /// A pasted Google Maps share link resolves straight to a pin — skips the
+  /// `/v1/geo/search` autocomplete entirely, since it has no idea what to do
+  /// with a raw coordinate pair.
+  Future<void> _resolveMapsUrl(String value) async {
+    final point = await resolveGoogleMapsUrl(value);
+    if (!mounted || value != _query) return;
+    if (point == null) {
+      setState(() => _loading = false);
+      return;
+    }
+    final reversed =
+        await ref.read(placesRepositoryProvider).reverse(point).catchError((_) {
+      return null;
+    });
+    if (!mounted || value != _query) return;
+    setState(() => _loading = false);
+    final hit = reversed ?? PlaceHit(label: value.trim(), point: point);
+    // Not `_select` — a Maps link is one point with no "which end is this"
+    // context, so it always lands on the destination, regardless of
+    // whether this screen was opened for pickup, destination, or a stop.
+    ref.read(placesRepositoryProvider).addRecent(hit).ignore();
+    Navigator.of(context).pop(AddressPick.mapsLink(hit));
   }
 
   Future<void> _runSearch() async {

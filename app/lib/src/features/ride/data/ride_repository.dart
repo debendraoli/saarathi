@@ -142,6 +142,14 @@ class RideRepository {
     return DriverGoals.fromJson(res);
   }
 
+  Future<DriverEarnings> driverEarnings(String period) async {
+    final res = await _api.get(
+      '/v1/rides/driver/earnings',
+      query: {'period': period},
+    ) as Map<String, dynamic>;
+    return DriverEarnings.fromJson(res);
+  }
+
   Future<List<Trip>> myTrips() => cacheThroughList(
         prefs: _prefs,
         key: 'cache.rides.mytrips',

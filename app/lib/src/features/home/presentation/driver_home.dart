@@ -131,9 +131,18 @@ class _OnlineCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
-    final scheme = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final statusColor = online
+        ? (dark ? Colors.green.shade400 : Colors.green.shade600)
+        : (dark ? Colors.red.shade300 : Colors.red.shade600);
+    final statusContainer = online
+        ? (dark ? Colors.green.shade900 : Colors.green.shade50)
+        : (dark ? Colors.red.shade900 : Colors.red.shade50);
+    final onStatusContainer = online
+        ? (dark ? Colors.green.shade100 : Colors.green.shade900)
+        : (dark ? Colors.red.shade100 : Colors.red.shade900);
     return Card(
-      color: online ? scheme.primaryContainer : scheme.surfaceContainerHigh,
+      color: statusContainer,
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -143,14 +152,14 @@ class _OnlineCard extends StatelessWidget {
               children: [
                 Icon(
                   online ? Icons.bolt_rounded : Icons.bolt_outlined,
-                  color: online ? scheme.onPrimaryContainer : scheme.outline,
+                  color: onStatusContainer,
                 ),
                 const SizedBox(width: 8),
                 Text(
                   online ? l.youAreOnline : l.youAreOffline,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w800,
-                        color: online ? scheme.onPrimaryContainer : null,
+                        color: onStatusContainer,
                       ),
                 ),
               ],
@@ -158,21 +167,15 @@ class _OnlineCard extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               online ? l.onlineBody : l.offlineBody,
-              style: TextStyle(
-                color: online
-                    ? scheme.onPrimaryContainer
-                    : scheme.onSurfaceVariant,
-              ),
+              style: TextStyle(color: onStatusContainer),
             ),
             const SizedBox(height: 16),
             FilledButton(
               onPressed: busy ? null : onToggle,
-              style: online
-                  ? FilledButton.styleFrom(
-                      backgroundColor: scheme.error,
-                      foregroundColor: scheme.onError,
-                    )
-                  : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: online ? Colors.red.shade600 : statusColor,
+                foregroundColor: Colors.white,
+              ),
               child: busy
                   ? const SizedBox(
                       height: 22,

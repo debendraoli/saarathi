@@ -37,6 +37,7 @@ import '../../features/onboarding/presentation/splash_screen.dart';
 import '../../features/places/data/places_repository.dart';
 import '../../features/places/presentation/saved_places_screen.dart';
 import '../../features/wallet/presentation/wallet_screen.dart';
+import '../../features/ride/presentation/driver_earnings_screen.dart';
 import '../../features/ride/presentation/rider_stats_screen.dart';
 import '../../features/ride/presentation/trip_screen.dart';
 import '../../features/ride/presentation/where_to_screen.dart';
@@ -61,6 +62,7 @@ class Routes {
   static const settings = '/settings';
   static const wallet = '/wallet';
   static const myStats = '/me/stats';
+  static const driverEarnings = '/driver/earnings';
   static const food = '/food';
   static const grocery = '/grocery';
   static const merchant = '/marketplace/merchant';
@@ -170,7 +172,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: Routes.activity,
         pageBuilder: (context, state) => _page(
           Scaffold(
-            appBar: AppBar(title: Text(AppL10n.of(context).tabActivity)),
+            appBar: AppBar(
+              title: Text(AppL10n.of(context).tabActivity),
+              leading: BackButton(onPressed: () => context.go(Routes.home)),
+            ),
             body: const ActivityTab(),
           ),
           key: state.pageKey,
@@ -253,6 +258,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: Routes.myStats,
         pageBuilder: (_, state) =>
             _page(const RiderStatsScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.driverEarnings,
+        pageBuilder: (_, state) =>
+            _page(const DriverEarningsScreen(), key: state.pageKey),
       ),
       GoRoute(
         path: Routes.food,

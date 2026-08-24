@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +11,9 @@ import '../../../core/location.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
+import '../../../shared/widgets/currency_chip.dart';
 import '../../../shared/widgets/fare_stepper.dart';
+import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/wallet_balance_hint.dart';
 import '../../delivery/application/delivery_controller.dart';
 import '../../delivery/data/delivery_repository.dart';
@@ -60,6 +64,18 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   double? _ask;
   bool _booking = false;
 
+  /// True while [_destLabel] is still the raw "lat, lng" placeholder a
+  /// Maps-link deep link/share hands over (see [_rawCoordPattern]) and the
+  /// background reverse-geocode to a human label hasn't landed yet.
+  bool _resolvingDest = false;
+  static final _rawCoordPattern = RegExp(r'^-?\d+\.\d+, -?\d+\.\d+$');
+
+  // Re-fetches the selected class's fare periodically while the sheet is
+  // open so a supply crunch mid-request (surge kicking in while the rider
+  // is still deciding) is reflected here, not just discovered on booking.
+  Timer? _surgeCheckTimer;
+  double? _lastSurge;
+
   // Delivery-mode-only fields.
   final _recipientName = TextEditingController();
   final _recipientPhone = TextEditingController();
@@ -76,12 +92,23 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     if (d != null) {
       _dest = d.point;
       _destLabel.text = d.label;
+      if (_rawCoordPattern.hasMatch(d.label)) {
+        _resolvingDest = true;
+        _resolveDestLabel(d.point);
+      }
     }
     _loadLocation();
+    _surgeCheckTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (!mounted || _mode != RideMode.ride) return;
+      final draft = _draft();
+      if (draft == null) return;
+      ref.invalidate(fareEstimateProvider(draft));
+    });
   }
 
   @override
   void dispose() {
+    _surgeCheckTimer?.cancel();
     _destLabel.dispose();
     _recipientName.dispose();
     _recipientPhone.dispose();
@@ -99,6 +126,22 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     _mapController.move(_dest ?? here, 15);
   }
 
+  /// Fills in the real address for a destination that arrived as bare
+  /// coordinates (a Maps link deep link/share navigates straight here
+  /// without waiting on this — see `deep_links.dart` — so the request
+  /// sheet is never blocked behind it, just shows a shimmer until it lands).
+  Future<void> _resolveDestLabel(LatLng point) async {
+    final hit = await ref
+        .read(placesRepositoryProvider)
+        .reverse(point)
+        .catchError((_) => null);
+    if (!mounted) return;
+    setState(() {
+      _resolvingDest = false;
+      if (hit != null) _destLabel.text = hit.label;
+    });
+  }
+
   Future<void> _openSearch({required bool forPickup}) async {
     final l = AppL10n.of(context);
     final pick = await Navigator.of(context).push<AddressPick>(
@@ -111,8 +154,12 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     );
     if (pick?.hit == null || !mounted) return;
     final hit = pick!.hit!;
+    // A pasted Maps link always means "this is the destination" — it's one
+    // point with no pickup/drop context of its own — regardless of which
+    // field was open when it was pasted.
+    final setPickup = forPickup && !pick.forceDestination;
     setState(() {
-      if (forPickup) {
+      if (setPickup) {
         _pickup = hit.point;
         _pickupLabel = hit.label;
       } else {
@@ -131,7 +178,17 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     );
     if (pick?.hit == null || !mounted) return;
     final hit = pick!.hit!;
-    setState(() => _stops.add(Place(point: hit.point, label: hit.label)));
+    // Same "it's the destination" rule as pickup/destination search — a
+    // Maps link pasted while adding a stop still isn't a stop, it's where
+    // the rider is actually going.
+    if (pick.forceDestination) {
+      setState(() {
+        _dest = hit.point;
+        _destLabel.text = hit.label;
+      });
+    } else {
+      setState(() => _stops.add(Place(point: hit.point, label: hit.label)));
+    }
     _mapController.move(hit.point, 15);
   }
 
@@ -337,6 +394,21 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                   fareEstimateProvider(baseDraft.copyWith(vehicleClass: v))),
           };
     final selectedEstimate = estimates[_vehicle];
+    if (baseDraft != null) {
+      ref.listen<AsyncValue<FareEstimate>>(
+        fareEstimateProvider(baseDraft),
+        (_, next) {
+          final surge = next.valueOrNull?.surgeMultiplier;
+          if (surge == null) return;
+          if (_lastSurge != null && surge > _lastSurge!) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(l.surgeNotice)),
+            );
+          }
+          _lastSurge = surge;
+        },
+      );
+    }
     final deliveryEstimate =
         (_mode == RideMode.delivery && _pickup != null && _dest != null)
             ? ref.watch(deliveryEstimateProvider(DeliveryEstimateQuery(
@@ -394,6 +466,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                 }),
                 pickupText: _pickupLabel ?? l.useCurrentLocation,
                 destText: _dest == null ? null : _destLabel.text,
+                resolvingDest: _resolvingDest,
                 stops: [for (final s in _stops) s.label],
                 vehicle: _vehicle,
                 estimates: estimates,
@@ -448,6 +521,7 @@ class _Sheet extends StatelessWidget {
     required this.onMode,
     required this.pickupText,
     required this.destText,
+    required this.resolvingDest,
     required this.stops,
     required this.vehicle,
     required this.estimates,
@@ -482,6 +556,10 @@ class _Sheet extends StatelessWidget {
   final ValueChanged<RideMode> onMode;
   final String pickupText;
   final String? destText;
+
+  /// True while a Maps-link-dropped destination's human label is still
+  /// being resolved in the background.
+  final bool resolvingDest;
   final List<String> stops;
   final VehicleClass vehicle;
 
@@ -605,6 +683,7 @@ class _Sheet extends StatelessWidget {
                       icon: Icons.location_on_rounded,
                       text: destText ?? l.searchAddressHint,
                       isPlaceholder: destText == null,
+                      loading: resolvingDest,
                       onTap: onDestTap,
                       trailing: onSave == null && onClearDest == null
                           ? null
@@ -652,7 +731,12 @@ class _Sheet extends StatelessWidget {
                             selected: vehicle == v,
                             icon: _vehicleIcon(v),
                             label: _vehicleLabel(l, v),
-                            price: estimates[v],
+                            // Only the selected card shows a price — tapping
+                            // another card selects it and reveals its price
+                            // (already fetched, all classes are watched
+                            // concurrently above; this only changes what's
+                            // displayed, not what's fetched).
+                            price: v == vehicle ? estimates[v] : null,
                             onTap: () => onVehicle(v),
                           ),
                         ),
@@ -662,15 +746,13 @@ class _Sheet extends StatelessWidget {
                 if (selected != null) ...[
                   const SizedBox(height: 16),
                   selected.when(
+                    // Shaped like the FareStepper it's about to become —
+                    // two round step-button placeholders either side of a
+                    // pill the size of the price — so the fare landing
+                    // doesn't shove the rest of the sheet around.
                     loading: () => const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Center(
-                        child: SizedBox(
-                          height: 22,
-                          width: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.4),
-                        ),
-                      ),
+                      padding: EdgeInsets.symmetric(vertical: 4),
+                      child: _FareStepperSkeleton(),
                     ),
                     error: (_, __) => Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -750,14 +832,15 @@ class _Sheet extends StatelessWidget {
                 ),
                 if (deliveryEstimate != null)
                   deliveryEstimate!.when(
-                    loading: () => const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Center(
-                        child: SizedBox(
-                          height: 22,
-                          width: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.4),
-                        ),
+                    loading: () => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(l.deliveryFee),
+                          const SkeletonBox(
+                              width: 70, height: 20, borderRadius: 999),
+                        ],
                       ),
                     ),
                     error: (_, __) => Padding(
@@ -771,9 +854,8 @@ class _Sheet extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(l.deliveryFee),
-                          Text(
-                            'NPR ${fee.deliveryFee.toStringAsFixed(0)}',
-                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          CurrencyChip(
+                            amount: fee.deliveryFee.toStringAsFixed(0),
                           ),
                         ],
                       ),
@@ -839,6 +921,42 @@ String _vehicleLabel(AppL10n l, VehicleClass v) => switch (v) {
       VehicleClass.fourWheeler => l.vehicleFourWheeler,
     };
 
+class _FareStepperSkeleton extends StatelessWidget {
+  const _FareStepperSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _StepButtonSkeleton(scheme: scheme),
+        const SizedBox(width: 8),
+        const SkeletonBox(width: 100, height: 32, borderRadius: 999),
+        const SizedBox(width: 8),
+        _StepButtonSkeleton(scheme: scheme),
+      ],
+    );
+  }
+}
+
+class _StepButtonSkeleton extends StatelessWidget {
+  const _StepButtonSkeleton({required this.scheme});
+  final ColorScheme scheme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+}
+
 /// A selectable vehicle-class card (icon + label), inDrive/Yango style.
 class _VehicleCard extends StatelessWidget {
   const _VehicleCard({
@@ -897,18 +1015,12 @@ class _VehicleCard extends StatelessWidget {
                 ),
               ),
               if (price != null) ...[
-                const SizedBox(height: 2),
+                const SizedBox(height: 4),
                 price!.when(
-                  loading: () => SizedBox(
-                    height: 12,
-                    width: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.6,
-                      color: selected
-                          ? scheme.onPrimaryContainer
-                          : scheme.onSurfaceVariant,
-                    ),
-                  ),
+                  // A shimmer the size of the eventual price text, not a
+                  // spinner — the number then lands in the space already
+                  // held for it instead of popping the layout.
+                  loading: () => const SkeletonBox(width: 46, height: 12),
                   error: (_, __) => Text(
                     '—',
                     style: TextStyle(
@@ -919,7 +1031,7 @@ class _VehicleCard extends StatelessWidget {
                     ),
                   ),
                   data: (fare) => Text(
-                    'NPR ${fare.finalFare.toStringAsFixed(0)}',
+                    '$currencySymbol ${fare.finalFare.toStringAsFixed(0)}',
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
@@ -948,6 +1060,7 @@ class _LocationRow extends StatelessWidget {
     required this.isPlaceholder,
     required this.onTap,
     this.trailing,
+    this.loading = false,
   });
 
   final String label;
@@ -957,6 +1070,11 @@ class _LocationRow extends StatelessWidget {
   final bool isPlaceholder;
   final VoidCallback onTap;
   final Widget? trailing;
+
+  /// True while a coordinate dropped in from a Maps link is still being
+  /// reverse-geocoded to a human label — shows a shimmer in its place
+  /// instead of the raw "27.700, 85.300" the row would otherwise flash.
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -983,14 +1101,17 @@ class _LocationRow extends StatelessWidget {
                         ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    text,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: isPlaceholder
-                        ? TextStyle(color: Theme.of(context).hintColor)
-                        : const TextStyle(fontWeight: FontWeight.w600),
-                  ),
+                  if (loading)
+                    const SkeletonBox(width: 160, height: 14)
+                  else
+                    Text(
+                      text,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: isPlaceholder
+                          ? TextStyle(color: Theme.of(context).hintColor)
+                          : const TextStyle(fontWeight: FontWeight.w600),
+                    ),
                 ],
               ),
             ),

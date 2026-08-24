@@ -60,9 +60,9 @@ a {
     @apply mb-3 flex items-center gap-2.5 px-2.5 py-2 text-[17px] font-bold tracking-tight;
   }
   .brand .logo {
-    @apply grid h-8 w-8 place-items-center rounded-lg text-[15px] font-black;
+    @apply h-8 w-8 rounded-lg p-1;
     background: var(--color-brand);
-    color: var(--color-brand-ink);
+    object-fit: contain;
   }
 
   .nav-section {

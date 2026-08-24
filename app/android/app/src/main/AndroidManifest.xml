@@ -49,6 +49,19 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="saarathi"/>
             </intent-filter>
+            <!-- Lets "Saarathi" show up in the OS Share Sheet when the user
+                 taps Share on a Google Maps pin and picks an app — unlike a
+                 direct link tap, this doesn't need Digital Asset Links
+                 domain verification (we don't own google.com), so it's the
+                 one deep-link path into Saarathi from Maps that actually
+                 works. Handled by receive_sharing_intent + deep_links.dart,
+                 which resolves the shared text to a pin and opens the
+                 booking sheet with it pre-filled. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
         </activity>
         <!-- flutter_foreground_task: keeps the driver online in the background -->
         <service

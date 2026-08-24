@@ -22,7 +22,7 @@ class BrandLogo extends StatelessWidget {
         if (showName) ...[
           const SizedBox(height: 12),
           Text(
-            'Saarathi',
+            AppL10n.of(context).appName,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w800,
                 ),

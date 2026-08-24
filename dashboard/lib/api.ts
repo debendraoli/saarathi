@@ -576,6 +576,22 @@ export const rides = {
   deactivateSurge: (id: string) =>
     ridesRequest<{ ok: boolean }>(`/v1/admin/surge/${id}/deactivate`, { method: "POST" }),
 
+  // Base per-km rates (maker-checker: any staff proposes, only super_admin approves)
+  currentRates: () => ridesRequest<CurrentRate[]>("/v1/admin/rates"),
+  listRateProposals: () => ridesRequest<RateProposal[]>("/v1/admin/rates/proposals"),
+  proposeRate: (p: NewRateProposal) =>
+    ridesRequest<RateProposal>("/v1/admin/rates/proposals", {
+      method: "POST",
+      body: JSON.stringify(p),
+    }),
+  approveRate: (id: string) =>
+    ridesRequest<RateProposal>(`/v1/admin/rates/proposals/${id}/approve`, { method: "POST" }),
+  rejectRate: (id: string, reason?: string) =>
+    ridesRequest<RateProposal>(`/v1/admin/rates/proposals/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
   // Platform analytics
   analyticsOverview: () => ridesRequest<AnalyticsOverview>("/v1/admin/analytics/overview"),
   analyticsTimeseries: (days = 14) =>
@@ -814,6 +830,29 @@ export interface NewCreditPlan {
   min_amount: number;
   max_amount: number;
   bonus_percent?: number;
+}
+
+export interface CurrentRate {
+  vehicle_class: string;
+  per_km_rate: string;
+  is_override: boolean;
+}
+
+export interface RateProposal {
+  id: string;
+  vehicle_class: string;
+  per_km_rate: string;
+  proposed_by: string;
+  status: string;
+  rejection_reason: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export interface NewRateProposal {
+  vehicle_class: string;
+  per_km_rate: number;
 }
 
 export interface RideRow {

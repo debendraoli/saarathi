@@ -89,6 +89,27 @@ fn class_str(v: VehicleClass) -> &'static str {
     }
 }
 
+/// The dashboard-approved rate for this class if one has ever been set
+/// (`routes::rates`'s maker-checker flow writes it), else the env-configured
+/// default — same "live read, no cache" convention `surge.rs` already uses
+/// for its own dashboard-configured pricing inputs.
+async fn effective_per_km_rate(st: &AppState, vclass: VehicleClass) -> Decimal {
+    let env_default = match vclass {
+        VehicleClass::TwoWheeler => st.config.two_wheeler_per_km,
+        VehicleClass::ThreeWheeler => st.config.three_wheeler_per_km,
+        VehicleClass::FourWheeler => st.config.four_wheeler_per_km,
+    };
+    sqlx::query_scalar::<_, Decimal>(
+        "SELECT per_km_rate FROM fare_rates WHERE vehicle_class = $1",
+    )
+    .bind(class_str(vclass))
+    .fetch_optional(&st.db)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(env_default)
+}
+
 pub async fn estimate(
     st: &AppState,
     user_id: Uuid,
@@ -111,11 +132,7 @@ pub async fn estimate(
     };
     let route = st.router.route_path(&path, profile).await;
 
-    let per_km = match vclass {
-        VehicleClass::TwoWheeler => st.config.two_wheeler_per_km,
-        VehicleClass::ThreeWheeler => st.config.three_wheeler_per_km,
-        VehicleClass::FourWheeler => st.config.four_wheeler_per_km,
-    };
+    let per_km = effective_per_km_rate(st, vclass).await;
     // Dynamic surge (time windows + supply scarcity); the core clamps it to +20%.
     let surge = crate::surge::effective_multiplier(st, vehicle_class, origin).await;
     let quote = quote_fare(

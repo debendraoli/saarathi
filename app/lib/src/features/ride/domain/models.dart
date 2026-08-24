@@ -388,6 +388,56 @@ class DriverGoals {
       );
 }
 
+/// One bucket of a driver's earnings history — `GET /v1/rides/driver/earnings`.
+class EarningsBucket {
+  const EarningsBucket({
+    required this.start,
+    required this.total,
+    required this.trips,
+  });
+  final DateTime start;
+  final double total;
+  final int trips;
+
+  factory EarningsBucket.fromJson(Map<String, dynamic> j) => EarningsBucket(
+        start: DateTime.tryParse((j['start'] as String?) ?? '') ?? DateTime.now(),
+        total: asDouble(j['total']),
+        trips: (j['trips'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// A driver's own earnings, gap-filled and bucketed by day/week/month —
+/// `GET /v1/rides/driver/earnings?period=day|week|month`. [current]/
+/// [previous] and [changePct] are derived client-side from the last two
+/// buckets rather than computed server-side — one response shape covers
+/// both the trend indicator and the recent-history list.
+class DriverEarnings {
+  const DriverEarnings({required this.period, required this.buckets});
+  final String period;
+  final List<EarningsBucket> buckets;
+
+  EarningsBucket? get current => buckets.isEmpty ? null : buckets.last;
+  EarningsBucket? get previous =>
+      buckets.length < 2 ? null : buckets[buckets.length - 2];
+
+  /// `null` when there's no previous bucket to compare against, or it was
+  /// zero (a percentage change from zero is meaningless, not "infinite%").
+  double? get changePct {
+    final c = current;
+    final p = previous;
+    if (c == null || p == null || p.total == 0) return null;
+    return (c.total - p.total) / p.total * 100;
+  }
+
+  factory DriverEarnings.fromJson(Map<String, dynamic> j) => DriverEarnings(
+        period: (j['period'] as String?) ?? 'day',
+        buckets: ((j['buckets'] as List?) ?? const [])
+            .cast<Map<String, dynamic>>()
+            .map(EarningsBucket.fromJson)
+            .toList(),
+      );
+}
+
 /// One side of a trip's counterpart identity — see `GET /v1/rides/{id}/participants`.
 class TripPerson {
   const TripPerson({

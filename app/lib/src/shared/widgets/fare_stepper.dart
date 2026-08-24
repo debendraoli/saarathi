@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../haptics.dart';
+import 'currency_chip.dart';
 
 /// The big −/price/+ control for naming a fare (bid-mode booking, driver
 /// counters, mid-auction "raise the ask"). Steps in NPR 10 increments and
@@ -47,12 +48,10 @@ class FareStepper extends StatelessWidget {
             ),
             SizedBox(
               width: 140,
-              child: Text(
-                'NPR ${amount.toStringAsFixed(0)}',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  fontFeatures: const [FontFeature.tabularFigures()],
+              child: Center(
+                child: CurrencyChip(
+                  amount: amount.toStringAsFixed(0),
+                  large: true,
                 ),
               ),
             ),
