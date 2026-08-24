@@ -6,7 +6,7 @@
 use crate::auth::{AuthUser, StaffUser};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::{
     routing::{get, post},
     Json, Router,
@@ -48,6 +48,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/admin/campaigns", get(list).post(create))
         .route("/v1/admin/campaigns/{id}/deactivate", post(deactivate))
         .route("/v1/campaigns/{code}", get(preview))
+        .route("/v1/campaigns/active", get(active))
 }
 
 #[derive(Deserialize)]
@@ -152,6 +153,34 @@ async fn deactivate(
         return Err(AppError::NotFound);
     }
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct ActiveQuery {
+    #[serde(default)]
+    audience: Option<String>,
+}
+
+/// Active, in-window campaigns for the home-screen offers banner — no code
+/// needed, just a browse list. Defaults to `audience='rider'` since that's
+/// the only home surface consuming this today.
+async fn active(
+    State(st): State<AppState>,
+    _auth: AuthUser,
+    Query(q): Query<ActiveQuery>,
+) -> AppResult<Json<Vec<Campaign>>> {
+    let audience = q.audience.as_deref().unwrap_or(roles::RIDER);
+    let rows: Vec<Campaign> = sqlx::query_as(&format!(
+        "SELECT {CAMPAIGN_COLS} FROM campaigns \
+         WHERE audience = $1::campaign_audience AND active = true \
+           AND (starts_at IS NULL OR starts_at <= now()) \
+           AND (ends_at IS NULL OR ends_at >= now()) \
+         ORDER BY created_at DESC"
+    ))
+    .bind(audience)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(rows))
 }
 
 async fn preview(

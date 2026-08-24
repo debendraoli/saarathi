@@ -90,6 +90,13 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 CREATE INDEX IF NOT EXISTS refresh_tokens_user_idx ON refresh_tokens (user_id);
 
+-- Client-generated, persistent per-install id (not tied to the push token,
+-- which can churn independently) — lets a new login single out *sibling*
+-- sessions to revoke (single-device-per-account enforcement) without
+-- touching the session that's just re-authenticating on the same device.
+-- Nullable: rows from before this existed have no way to know their device.
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS device_id text;
+
 -- ── Drivers (KYC) ──────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS drivers (
     id               uuid       PRIMARY KEY DEFAULT gen_random_uuid(),

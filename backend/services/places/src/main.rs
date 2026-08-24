@@ -11,6 +11,7 @@ mod auth;
 mod config;
 mod error;
 mod notify;
+mod pelias_index;
 mod points;
 mod routes;
 mod state;

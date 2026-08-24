@@ -1,6 +1,6 @@
 import 'package:latlong2/latlong.dart';
 
-import '../../../core/config/app_config.dart';
+import '../../../shared/image_url.dart';
 import '../../ride/domain/models.dart' show asDouble;
 
 // Marketplace domain models (shared by customer + merchant surfaces).
@@ -17,6 +17,8 @@ class Merchant {
     this.phone,
     this.distanceKm,
     this.imageKey,
+    this.status = 'approved',
+    this.rejectionReason,
   });
 
   final String id;
@@ -31,7 +33,18 @@ class Merchant {
   final double? distanceKm;
   final String? imageKey;
 
-  String? get imageUrl => _asImageUrl(imageKey);
+  /// Staff approval state: 'pending' | 'approved' | 'rejected'. Defaults to
+  /// 'approved' since customer-facing discovery endpoints only ever return
+  /// approved stores anyway — only the owner's own `my_merchants` view can
+  /// see a pending/rejected one.
+  final String status;
+  final String? rejectionReason;
+
+  bool get isApproved => status == 'approved';
+  bool get isPending => status == 'pending';
+  bool get isRejected => status == 'rejected';
+
+  String? get imageUrl => asImageUrl(imageKey);
 
   factory Merchant.fromJson(Map<String, dynamic> j) => Merchant(
         id: j['id'] as String,
@@ -46,6 +59,8 @@ class Merchant {
         distanceKm:
             j['distance_m'] == null ? null : asDouble(j['distance_m']) / 1000.0,
         imageKey: j['image_key'] as String?,
+        status: (j['status'] as String?) ?? 'approved',
+        rejectionReason: j['rejection_reason'] as String?,
       );
 }
 
@@ -78,20 +93,8 @@ class MenuItem {
         category: j['category'] as String?,
         merchantId: j['merchant_id'] as String?,
         isAvailable: (j['is_available'] as bool?) ?? true,
-        imageUrl: _asImageUrl(j['image_key']),
+        imageUrl: asImageUrl(j['image_key']),
       );
-}
-
-/// `image_key` is either an absolute URL (seeded demo photos), a relative
-/// API path (an uploaded shop/item photo, e.g. `/v1/items/<id>/photo` —
-/// resolved against the configured API base rather than baked in at upload
-/// time, since that base differs per build/device), or null.
-String? _asImageUrl(Object? key) {
-  final s = key as String?;
-  if (s == null || s.isEmpty) return null;
-  if (s.startsWith('http')) return s;
-  if (s.startsWith('/')) return '${AppConfig.apiBase}$s';
-  return null;
 }
 
 /// A cross-merchant item search hit (item + its merchant + distance).
@@ -129,7 +132,7 @@ class ItemResult {
         price: asDouble(j['price']),
         rating: asDouble(j['rating']),
         description: j['description'] as String?,
-        imageUrl: _asImageUrl(j['image_key']),
+        imageUrl: asImageUrl(j['image_key']),
         distanceKm:
             j['distance_m'] == null ? null : asDouble(j['distance_m']) / 1000.0,
       );
@@ -149,6 +152,25 @@ class OrderItem {
       );
 }
 
+/// Self-service lifetime order-spend rollup — `GET /v1/orders/mine/stats`.
+class OrderStats {
+  const OrderStats({
+    required this.totalOrders,
+    required this.deliveredOrders,
+    required this.totalSpent,
+  });
+
+  final int totalOrders;
+  final int deliveredOrders;
+  final double totalSpent;
+
+  factory OrderStats.fromJson(Map<String, dynamic> j) => OrderStats(
+        totalOrders: (j['total_orders'] as num?)?.toInt() ?? 0,
+        deliveredOrders: (j['delivered_orders'] as num?)?.toInt() ?? 0,
+        totalSpent: asDouble(j['total_spent']),
+      );
+}
+
 class CustomerOrder {
   const CustomerOrder({
     required this.id,
@@ -161,6 +183,9 @@ class CustomerOrder {
     this.tripId,
     this.items = const [],
     this.createdAt,
+    this.rated = false,
+    this.merchantRated = false,
+    this.discountAmount = 0,
   });
 
   final String id;
@@ -169,10 +194,21 @@ class CustomerOrder {
   final double subtotal;
   final double deliveryFee;
   final double total;
+
+  /// Savings from an auto-applied store offer, if any (0 when none applied).
+  final double discountAmount;
   final String? merchantId;
   final String? tripId;
   final List<OrderItem> items;
   final DateTime? createdAt;
+
+  /// Whether the signed-in customer has already rated this order's courier
+  /// (only meaningful once `tripId` is set — a courier's been dispatched).
+  final bool rated;
+
+  /// Whether the signed-in customer has already rated the merchant itself —
+  /// meaningful for every delivered order, regardless of courier dispatch.
+  final bool merchantRated;
 
   bool get isActive => !const {
         'delivered',
@@ -193,5 +229,8 @@ class CustomerOrder {
         tripId: j['trip_id'] as String?,
         items: items,
         createdAt: DateTime.tryParse((j['created_at'] as String?) ?? ''),
+        rated: (j['rated'] as bool?) ?? false,
+        merchantRated: (j['merchant_rated'] as bool?) ?? false,
+        discountAmount: asDouble(j['discount_amount']),
       );
 }

@@ -4,7 +4,9 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../shared/request_ring.dart';
+import '../../../shared/resilient_poll.dart';
 import '../../marketplace/domain/models.dart';
+import '../domain/models.dart';
 
 /// Merchant-owner surface: the store(s) a user owns, their menu, and the live
 /// order queue. Backed by the /v1/merchant/* endpoints (owner- or staff-scoped).
@@ -117,6 +119,46 @@ class MerchantRepository {
   Future<void> advance(String orderId, String status) async {
     await _api.post('/v1/orders/$orderId/status', body: {'status': status});
   }
+
+  Future<MerchantAnalytics> analytics(String merchantId) async {
+    final res = await _api.get('/v1/merchant/merchants/$merchantId/analytics')
+        as Map<String, dynamic>;
+    return MerchantAnalytics.fromJson(res);
+  }
+
+  Future<List<MerchantOffer>> offers(String merchantId) async {
+    final res =
+        await _api.get('/v1/merchant/merchants/$merchantId/offers') as List;
+    return res.cast<Map<String, dynamic>>().map(MerchantOffer.fromJson).toList();
+  }
+
+  Future<void> createOffer({
+    required String merchantId,
+    required String kind,
+    double? value,
+    double? maxDiscount,
+    double minOrderAmount = 0,
+    DateTime? startsAt,
+    DateTime? endsAt,
+    int? dailyStartMinute,
+    int? dailyEndMinute,
+  }) async {
+    await _api.post('/v1/merchant/merchants/$merchantId/offers', body: {
+      'kind': kind,
+      if (value != null) 'value': value,
+      if (maxDiscount != null) 'max_discount': maxDiscount,
+      'min_order_amount': minOrderAmount,
+      if (startsAt != null) 'starts_at': startsAt.toUtc().toIso8601String(),
+      if (endsAt != null) 'ends_at': endsAt.toUtc().toIso8601String(),
+      if (dailyStartMinute != null) 'daily_start_minute': dailyStartMinute,
+      if (dailyEndMinute != null) 'daily_end_minute': dailyEndMinute,
+    });
+  }
+
+  Future<void> deactivateOffer(String merchantId, String offerId) async {
+    await _api.post(
+        '/v1/merchant/merchants/$merchantId/offers/$offerId/deactivate');
+  }
 }
 
 final merchantRepositoryProvider = Provider<MerchantRepository>((ref) {
@@ -133,26 +175,75 @@ final merchantMenuProvider = FutureProvider.autoDispose
   return ref.watch(merchantRepositoryProvider).menu(merchantId);
 });
 
-/// Live order queue for a merchant, polled every 6s. `arg` is the merchant id.
-/// Rings once per genuinely new order id (not every poll tick), same pattern
-/// as [driverOffersProvider] — the "is this new" comparison lives here with
-/// the polling loop, not duplicated in whatever screen is watching.
-final merchantOrdersProvider = StreamProvider.autoDispose
-    .family<List<CustomerOrder>, String>((ref, merchantId) async* {
-  final repo = ref.watch(merchantRepositoryProvider);
-  var seen = <String>{};
-  ref.onDispose(RequestRing.stop);
-  while (true) {
-    final all = await repo.orders();
-    final mine = all.where((o) => o.merchantId == merchantId).toList();
-    final ids = mine.map((o) => o.id).toSet();
-    if (ids.difference(seen).isNotEmpty) {
-      RequestRing.play();
-    } else if (ids.isEmpty) {
-      RequestRing.stop();
-    }
-    seen = ids;
-    yield mine;
-    await Future<void>.delayed(const Duration(seconds: 6));
-  }
+final merchantAnalyticsProvider = FutureProvider.autoDispose
+    .family<MerchantAnalytics, String>((ref, merchantId) async {
+  return ref.watch(merchantRepositoryProvider).analytics(merchantId);
 });
+
+/// All offers (active + inactive) for the owner's management screen.
+final merchantOffersProvider = FutureProvider.autoDispose
+    .family<List<MerchantOffer>, String>((ref, merchantId) async {
+  return ref.watch(merchantRepositoryProvider).offers(merchantId);
+});
+
+/// Single underlying poll loop for a merchant's order queue, polled every
+/// 6s. Rings once per genuinely new order id (not every poll tick), same
+/// pattern as [driverOffersProvider] — the "is this new" comparison lives
+/// here with the polling loop, not duplicated in whatever screen is
+/// watching. [merchantOrdersProvider] and [merchantOrdersStaleProvider]
+/// both derive from this one fetch cycle.
+final _merchantOrdersPollProvider = StreamProvider.autoDispose
+    .family<Poll<List<CustomerOrder>>, String>((ref, merchantId) {
+  final repo = ref.watch(merchantRepositoryProvider);
+  // Null (not empty) until the first fetch lands — an empty starting set
+  // would make every order already open when this screen loads look "new"
+  // against it, ringing on open instead of only on a genuine new arrival.
+  Set<String>? seen;
+  ref.onDispose(RequestRing.stop);
+  return resilientPoll(
+    fetch: () async {
+      final all = await repo.orders();
+      final mine = all.where((o) => o.merchantId == merchantId).toList();
+      final ids = mine.map((o) => o.id).toSet();
+      final lastSeen = seen;
+      if (lastSeen != null) {
+        if (ids.difference(lastSeen).isNotEmpty) {
+          RequestRing.play();
+        } else if (ids.isEmpty) {
+          RequestRing.stop();
+        }
+      }
+      seen = ids;
+      return mine;
+    },
+    interval: const Duration(seconds: 6),
+  );
+});
+
+/// The merchant's order queue, self-recovering from transient network
+/// failures instead of erroring the whole screen on one flaky poll.
+final merchantOrdersProvider = Provider.autoDispose
+    .family<AsyncValue<List<CustomerOrder>>, String>((ref, merchantId) {
+  return ref
+      .watch(_merchantOrdersPollProvider(merchantId))
+      .whenData((poll) => poll.value);
+});
+
+/// True while showing a stale (last-known) order list because the most
+/// recent poll failed.
+final merchantOrdersStaleProvider =
+    Provider.autoDispose.family<bool, String>((ref, merchantId) {
+  return ref
+          .watch(_merchantOrdersPollProvider(merchantId))
+          .valueOrNull
+          ?.stale ??
+      false;
+});
+
+/// Forces an immediate re-fetch of the order queue — after an order action
+/// (accept/reject/advance) or a pull-to-refresh, or to restart the poll
+/// loop after it's given up entirely. Invalidating [merchantOrdersProvider]
+/// alone wouldn't do either, since it's a thin derived view over this
+/// provider, not the poll loop itself.
+void refreshMerchantOrders(WidgetRef ref, String merchantId) =>
+    ref.invalidate(_merchantOrdersPollProvider(merchantId));

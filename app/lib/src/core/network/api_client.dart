@@ -101,7 +101,10 @@ class ApiClient {
       } else {
         final res = await _bare.post<dynamic>(
           '/v1/auth/refresh',
-          data: {'refresh_token': refresh},
+          data: {
+            'refresh_token': refresh,
+            'device_id': await _tokens.deviceId,
+          },
         );
         final data = res.data as Map<String, dynamic>;
         await _tokens.save(

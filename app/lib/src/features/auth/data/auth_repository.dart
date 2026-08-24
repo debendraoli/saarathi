@@ -1,14 +1,16 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/storage/token_store.dart';
 import '../domain/models.dart';
 
 /// Auth endpoints on the gateway. OTP dev-mode echoes the code back so we can
 /// log in without an SMS gateway (backend OTP_DEV_MODE=true).
 class AuthRepository {
-  AuthRepository(this._api);
+  AuthRepository(this._api, this._tokens);
 
   final ApiClient _api;
+  final TokenStore _tokens;
 
   /// Returns the dev code when the backend is in OTP dev mode, else null.
   Future<String?> requestOtp(String phone) async {
@@ -19,12 +21,14 @@ class AuthRepository {
 
   Future<Session> verifyOtp(String phone, String code,
       {bool asDriver = false}) async {
+    final deviceId = await _tokens.deviceId;
     final res = await _api.post(
       '/v1/auth/otp/verify',
       body: {
         'phone': phone,
         'code': code,
         'as_driver': asDriver,
+        'device_id': deviceId,
       },
     );
     return Session.fromJson(res as Map<String, dynamic>);
@@ -42,5 +46,8 @@ class AuthRepository {
 }
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
-  return AuthRepository(ref.watch(apiClientProvider));
+  return AuthRepository(
+    ref.watch(apiClientProvider),
+    ref.watch(tokenStoreProvider),
+  );
 });

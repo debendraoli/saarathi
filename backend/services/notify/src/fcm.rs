@@ -171,4 +171,51 @@ impl FcmSender {
         }
         Ok(())
     }
+
+    /// Data-only message — no `notification` key, so it never surfaces a
+    /// tray notification; the app's foreground/background message handler
+    /// gets to decide what (if anything) to do with it. Used for
+    /// device-to-device signals like a forced sign-out, not user-facing
+    /// content. FCM's `data` field is `Map<String, String>` only, so
+    /// non-string values are stringified.
+    pub async fn send_data(&self, token: &str, data: &serde_json::Value) -> Result<(), SendError> {
+        let access = self.access_token().await?;
+        let url = format!(
+            "https://fcm.googleapis.com/v1/projects/{}/messages:send",
+            self.project_id
+        );
+        let data_map: serde_json::Map<String, serde_json::Value> = data
+            .as_object()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, v)| {
+                let s = match v {
+                    serde_json::Value::String(s) => s,
+                    other => other.to_string(),
+                };
+                (k, serde_json::Value::String(s))
+            })
+            .collect();
+        let payload = serde_json::json!({
+            "message": { "token": token, "data": data_map }
+        });
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(access)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(anyhow::Error::from)?;
+        if resp.status().as_u16() == 404 {
+            return Err(SendError::StaleToken);
+        }
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(SendError::Other(anyhow::anyhow!("fcm send {status}: {text}")));
+        }
+        Ok(())
+    }
 }

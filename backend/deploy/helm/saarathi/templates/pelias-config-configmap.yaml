@@ -23,9 +23,10 @@ data:
       },
       "imports": {
         "openstreetmap": {
-          "download": [{ "sourceURL": {{ .Values.pelias.import.osmPbfUrl | quote }} }],
-          "leveldbDir": "/data/openstreetmap/leveldb",
-          "dataFile": "/data/openstreetmap/nepal-latest.osm.pbf"
+          "datapath": "/data/openstreetmap",
+          "leveldbpath": "/data/openstreetmap/leveldb",
+          "import": [{ "filename": "nepal-latest.osm.pbf" }],
+          "download": [{ "sourceURL": {{ .Values.pelias.import.osmPbfUrl | quote }} }]
         },
         "whosonfirst": {
           "datapath": "/data/whosonfirst",
@@ -45,5 +46,8 @@ spec:
   selector:
     app.kubernetes.io/name: pelias-api
   ports:
+    # 3100, not 4000: pelias-api's own default listen port regardless of
+    # what pelias.json's `api.port` says — confirmed directly against its
+    # boot log ("pelias is now running on http://:::3100").
     - port: 80
-      targetPort: 4000
+      targetPort: 3100

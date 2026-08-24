@@ -80,6 +80,12 @@ class AppTheme {
         showDragHandle: true,
         clipBehavior: Clip.antiAlias,
       ),
+      // Floating (not the default `fixed`) so the framework insets it above
+      // the bottom safe area itself — `fixed` sits flush at the Scaffold's
+      // bottom edge, which on a full-bleed screen (e.g. the live trip map)
+      // means the phone's gesture nav bar can sit right over the message.
+      snackBarTheme:
+          const SnackBarThemeData(behavior: SnackBarBehavior.floating),
     );
   }
 }

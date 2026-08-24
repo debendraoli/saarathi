@@ -19,8 +19,23 @@ spec:
       containers:
         - name: pelias-api
           image: {{ .Values.pelias.api.image }}
+          env:
+            # Without this, pelias-config doesn't reliably find the mounted
+            # pelias.json and falls back to hardcoded defaults instead.
+            - name: PELIAS_CONFIG
+              value: /code/pelias.json
           ports:
-            - containerPort: 4000
+            # 3100, not pelias.json's `api.port: 4000` — see the Service
+            # definition in pelias-config-configmap.yaml for why.
+            - containerPort: 3100
+          readinessProbe:
+            httpGet: { path: /v1/status, port: 3100 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /v1/status, port: 3100 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
           volumeMounts:
             - name: config
               mountPath: /code/pelias.json

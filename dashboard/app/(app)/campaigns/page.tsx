@@ -28,6 +28,8 @@ function defaultRule(type: RuleType): CampaignRule {
       return { type, count: 10 };
     case "max_rides":
       return { type, count: 5 };
+    case "rides_today":
+      return { type, count: 5 };
     case "time_of_day":
       return { type, start_minute: 17 * 60, end_minute: 20 * 60, days_mask: 127 };
     case "min_fare":
@@ -41,6 +43,7 @@ const RULE_LABELS: Record<RuleType, string> = {
   new_user: "New user",
   min_rides: "Min rides (≥ n)",
   max_rides: "Max rides (≤ n)",
+  rides_today: "Rides today (≥ n) — daily goal",
   time_of_day: "Time of day",
   min_fare: "Min fare",
   max_per_user: "Max per user",
@@ -399,7 +402,8 @@ export default function CampaignsPage() {
               )}
               {(rule.type === "min_rides" ||
                 rule.type === "max_rides" ||
-                rule.type === "max_per_user") && (
+                rule.type === "max_per_user" ||
+                rule.type === "rides_today") && (
                 <input
                   className="input"
                   style={{ maxWidth: 140 }}

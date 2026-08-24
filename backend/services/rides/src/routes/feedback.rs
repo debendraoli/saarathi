@@ -186,19 +186,34 @@ async fn resolve_report(
     ) {
         return Err(AppError::BadRequest("invalid status".into()));
     }
-    let res = sqlx::query(
+    let reporter_id: Option<Uuid> = sqlx::query_scalar(
         "UPDATE reports SET status = $2, resolution = COALESCE($3, resolution), handled_by = $4, \
          resolved_at = CASE WHEN $2 IN ('resolved','dismissed') THEN now() ELSE resolved_at END \
-         WHERE id = $1",
+         WHERE id = $1 RETURNING reporter_id",
     )
     .bind(id)
     .bind(&b.status)
-    .bind(b.resolution)
+    .bind(&b.resolution)
     .bind(claims.sub)
-    .execute(&st.db)
+    .fetch_optional(&st.db)
     .await?;
-    if res.rows_affected() == 0 {
+    let Some(reporter_id) = reporter_id else {
         return Err(AppError::NotFound);
+    };
+    if matches!(b.status.as_str(), "resolved" | "dismissed") {
+        let body = b
+            .resolution
+            .as_deref()
+            .unwrap_or("Your report has been reviewed.");
+        notify::send(
+            &st.nats,
+            reporter_id,
+            saarathi_core::domain::notif::TRANSACTIONAL,
+            "Report update",
+            body,
+            None,
+        )
+        .await;
     }
     Ok(Json(json!({ "ok": true })))
 }

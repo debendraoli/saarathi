@@ -125,6 +125,11 @@ struct OfferView {
     gross_fare: rust_decimal::Decimal,
     final_fare: rust_decimal::Decimal,
     vehicle_class: String,
+    distance_km: rust_decimal::Decimal,
+    /// 'instant' (algorithmic fare, shown above) or 'bid' (the driver should
+    /// bid against `ask_fare` instead — see `routes::bidding`).
+    pricing_mode: String,
+    ask_fare: Option<rust_decimal::Decimal>,
 }
 
 async fn my_offers(
@@ -133,7 +138,8 @@ async fn my_offers(
 ) -> AppResult<Json<Vec<OfferView>>> {
     let offers: Vec<OfferView> = sqlx::query_as(
         "SELECT o.trip_id, o.expires_at, t.origin_lat, t.origin_lng, t.dest_lat, t.dest_lng, \
-                t.gross_fare, t.final_fare, t.vehicle_class \
+                t.gross_fare, t.final_fare, t.vehicle_class, t.distance_km, \
+                t.pricing_mode, t.ask_fare \
          FROM trip_offers o JOIN trips t ON t.id = o.trip_id \
          WHERE o.driver_id = $1 AND o.status = 'offered' AND o.expires_at > now() \
          ORDER BY o.created_at",

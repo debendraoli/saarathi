@@ -6,6 +6,7 @@
 //! classes to push/SMS. Keeping the contract here means both sides can't drift.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 /// NATS subject for notification delivery requests.
@@ -23,4 +24,14 @@ pub struct NotifyRequest {
     /// marketing copy).
     #[serde(default)]
     pub link: Option<String>,
+    /// Arbitrary payload for a device-to-device signal (e.g. a forced
+    /// sign-out) rather than user-facing content. Only meaningful when
+    /// [`silent`] is set.
+    #[serde(default)]
+    pub data: Option<Value>,
+    /// A device-only signal: skip the durable inbox row and the
+    /// critical-class SMS fallback, and send FCM as a data-only message
+    /// (no visible tray notification) instead of the usual title/body one.
+    #[serde(default)]
+    pub silent: bool,
 }

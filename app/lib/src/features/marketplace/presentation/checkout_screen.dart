@@ -11,8 +11,45 @@ import '../../../shared/haptics.dart';
 import '../../../shared/widgets/wallet_balance_hint.dart';
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
+import '../../merchant/domain/models.dart' show MerchantOffer;
 import '../application/cart_controller.dart';
 import '../data/marketplace_repository.dart';
+
+/// Store offer banner, shown before placing — informational only, the best
+/// match auto-applies server-side, nothing to enter or tap to redeem.
+class _OfferBanner extends StatelessWidget {
+  const _OfferBanner({required this.offer});
+  final MerchantOffer offer;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: scheme.tertiaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.local_offer_rounded,
+              size: 18, color: scheme.onTertiaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              offer.summaryLine,
+              style: TextStyle(
+                color: scheme.onTertiaryContainer,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class CheckoutScreen extends ConsumerStatefulWidget {
   const CheckoutScreen({super.key});
@@ -113,6 +150,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final cart = ref.watch(cartControllerProvider);
+    final offers = cart.merchantId == null
+        ? const <MerchantOffer>[]
+        : ref.watch(storeOffersProvider(cart.merchantId!)).valueOrNull ??
+            const [];
 
     return Scaffold(
       appBar: AppBar(title: Text(l.checkout)),
@@ -131,6 +172,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                       ?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 8),
+                if (offers.isNotEmpty) ...[
+                  _OfferBanner(offer: offers.first),
+                  const SizedBox(height: 8),
+                ],
                 for (final line in cart.lines.values)
                   ListTile(
                     contentPadding: EdgeInsets.zero,

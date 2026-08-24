@@ -46,6 +46,53 @@ async fn assert_participant(
     Ok(())
 }
 
+/// How close (in km) a driver's live position needs to be to the
+/// destination before a plain ride is auto-completed — generous enough to
+/// tolerate ordinary GPS drift (~15-30m in the open, worse downtown).
+const ARRIVAL_RADIUS_KM: f64 = 0.06;
+
+/// Auto-completes a plain `ride` the moment the driver's own position ping
+/// lands within [ARRIVAL_RADIUS_KM] of the destination — so a driver never
+/// has to remember to tap "Complete trip." Deliberately scoped to
+/// `trip_type = 'ride'` only: a parcel-send needs proof-of-delivery, and a
+/// marketplace courier leg completes via the order's own status sync
+/// (`update_status`) — neither should be geofence-completed here. Silently
+/// a no-op once the trip leaves `in_progress` (including once this itself
+/// completes it), so it can't double-fire on later pings.
+async fn maybe_auto_complete(st: &AppState, trip_id: Uuid, driver_id: Uuid, lat: f64, lng: f64) {
+    let row: Option<(String, String, f64, f64)> = sqlx::query_as(
+        "SELECT trip_type::text, status::text, dest_lat, dest_lng \
+         FROM trips WHERE id = $1 AND driver_id = $2",
+    )
+    .bind(trip_id)
+    .bind(driver_id)
+    .fetch_optional(&st.db)
+    .await
+    .ok()
+    .flatten();
+    let Some((trip_type, status, dest_lat, dest_lng)) = row else {
+        return;
+    };
+    if trip_type != "ride" || status != "in_progress" {
+        return;
+    }
+    let dist = saarathi_core::routing::haversine_km(
+        saarathi_core::routing::LatLng { lat, lng },
+        saarathi_core::routing::LatLng {
+            lat: dest_lat,
+            lng: dest_lng,
+        },
+    );
+    if dist > ARRIVAL_RADIUS_KM {
+        return;
+    }
+    if let Err(e) = crate::routes::rides::complete_trip(st, trip_id, driver_id).await {
+        tracing::warn!(trip = %trip_id, error = %e, "auto-complete on arrival failed");
+    } else {
+        tracing::info!(trip = %trip_id, "auto-completed: driver reached destination");
+    }
+}
+
 #[derive(Deserialize)]
 struct Location {
     lat: f64,
@@ -100,6 +147,7 @@ async fn post_location(
     .await;
 
     st.hub.publish(id, payload.to_string());
+    maybe_auto_complete(&st, id, claims.sub, b.lat, b.lng).await;
     Ok(Json(json!({ "ok": true })))
 }
 

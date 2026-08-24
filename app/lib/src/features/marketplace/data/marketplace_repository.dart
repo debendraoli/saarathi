@@ -1,10 +1,16 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/notifications/notification_service.dart';
 import '../../../core/offline/json_cache.dart';
 import '../../../core/prefs.dart';
+import '../../../shared/resilient_poll.dart';
+import '../../merchant/domain/models.dart' show MerchantOffer;
 import '../domain/models.dart';
 
 class MarketplaceRepository {
@@ -35,6 +41,14 @@ class MarketplaceRepository {
         .map(MenuItem.fromJson)
         .toList();
     return (merchant, items);
+  }
+
+  /// Active, in-window store offers for the customer-facing banner (browse
+  /// screen + checkout) — auto-applied at order time, nothing to enter.
+  Future<List<MerchantOffer>> activeOffers(String merchantId) async {
+    final res =
+        await _api.get('/v1/merchants/$merchantId/offers/active') as List;
+    return res.cast<Map<String, dynamic>>().map(MerchantOffer.fromJson).toList();
   }
 
   /// Search items across all open merchants. [sort]: nearest | cheapest | rating.
@@ -80,6 +94,11 @@ class MarketplaceRepository {
     return _parseOrder(res);
   }
 
+  Future<OrderStats> myOrderStats() async {
+    final res = await _api.get('/v1/orders/mine/stats') as Map<String, dynamic>;
+    return OrderStats.fromJson(res);
+  }
+
   Future<List<CustomerOrder>> myOrders() => cacheThroughList(
         prefs: _prefs,
         key: 'cache.orders',
@@ -91,6 +110,45 @@ class MarketplaceRepository {
     final res = await _api.get('/v1/orders/$id') as Map<String, dynamic>;
     return _parseOrder(res);
   }
+
+  Future<void> rateMerchant(String orderId, int stars,
+          {List<String> tags = const []}) =>
+      _api.post(
+        '/v1/orders/$orderId/rate',
+        body: {'stars': stars, 'tags': tags},
+      );
+
+  static int _reminderId(String orderId) => orderId.hashCode & 0x7fffffff;
+
+  /// Schedules the "how was your order?" restaurant-rating nudge ~30 minutes
+  /// after an order is first observed as delivered — deliberately delayed so
+  /// the customer has actually eaten/opened it before being asked (not fired
+  /// immediately, unlike the courier rating). Deduped per order via a
+  /// persisted flag so re-polling the same delivered order doesn't
+  /// re-schedule it, and so it survives an app restart within the window.
+  Future<void> _maybeScheduleReviewReminder(CustomerOrder order) async {
+    if (order.status != 'delivered') return;
+    final key = 'reminder.merchant.${order.id}';
+    if (_prefs.getBool(key) ?? false) return;
+    await _prefs.setBool(key, true);
+    final localeCode = _prefs.getString('saarathi.locale');
+    final locale = localeCode != null
+        ? ui.Locale(localeCode)
+        : ui.PlatformDispatcher.instance.locale;
+    final l = lookupAppL10n(locale);
+    await NotificationService.instance.scheduleDelayed(
+      id: _reminderId(order.id),
+      title: l.reviewReminderTitle,
+      body: l.reviewReminderBody(order.merchantName),
+      delay: const Duration(minutes: 30),
+      link: 'saarathi://order/${order.id}',
+    );
+  }
+
+  /// Cancels a pending review reminder — called once the customer rates the
+  /// merchant before the 30 minutes are up, since the nudge is now moot.
+  Future<void> cancelReviewReminder(String orderId) =>
+      NotificationService.instance.cancel(_reminderId(orderId));
 
   CustomerOrder _parseOrder(Map<String, dynamic> res) {
     final order = res['order'] as Map<String, dynamic>;
@@ -118,20 +176,59 @@ final myOrdersProvider = FutureProvider.autoDispose<List<CustomerOrder>>((ref) {
   return ref.watch(marketplaceRepositoryProvider).myOrders();
 });
 
+final orderStatsProvider = FutureProvider.autoDispose<OrderStats>((ref) {
+  return ref.watch(marketplaceRepositoryProvider).myOrderStats();
+});
+
 final merchantDetailProvider = FutureProvider.autoDispose
     .family<(Merchant, List<MenuItem>), String>((ref, id) {
   return ref.watch(marketplaceRepositoryProvider).detail(id);
 });
 
-final orderProvider = StreamProvider.autoDispose.family<CustomerOrder, String>((
-  ref,
-  id,
-) async* {
-  final repo = ref.watch(marketplaceRepositoryProvider);
-  while (true) {
-    final order = await repo.order(id);
-    yield order;
-    if (!order.isActive) break;
-    await Future<void>.delayed(const Duration(seconds: 4));
-  }
+/// Active store offers for one merchant — the customer-facing banner on
+/// the store's menu screen and at checkout.
+final storeOffersProvider = FutureProvider.autoDispose
+    .family<List<MerchantOffer>, String>((ref, merchantId) {
+  return ref.watch(marketplaceRepositoryProvider).activeOffers(merchantId);
 });
+
+/// Single underlying poll loop — [orderProvider] and [orderStaleProvider]
+/// both derive from this one fetch cycle.
+final _orderPollProvider =
+    StreamProvider.autoDispose.family<Poll<CustomerOrder>, String>((ref, id) {
+  final repo = ref.watch(marketplaceRepositoryProvider);
+  String? lastStatus;
+  return resilientPoll(
+    fetch: () async {
+      final order = await repo.order(id);
+      if (lastStatus != null &&
+          lastStatus != 'delivered' &&
+          order.status == 'delivered') {
+        repo._maybeScheduleReviewReminder(order);
+      }
+      lastStatus = order.status;
+      return order;
+    },
+    interval: const Duration(seconds: 4),
+    stopWhen: (order) => !order.isActive,
+  );
+});
+
+/// The live order, self-recovering from transient network failures instead
+/// of erroring the whole tracking screen on one flaky poll.
+final orderProvider =
+    Provider.autoDispose.family<AsyncValue<CustomerOrder>, String>((ref, id) {
+  return ref.watch(_orderPollProvider(id)).whenData((poll) => poll.value);
+});
+
+/// True while showing a stale (last-known) order because the most recent
+/// poll failed — drives a small "reconnecting" banner instead of an error.
+final orderStaleProvider = Provider.autoDispose.family<bool, String>((ref, id) {
+  return ref.watch(_orderPollProvider(id)).valueOrNull?.stale ?? false;
+});
+
+/// Restarts the poll loop after it's given up entirely (never got a first
+/// value) — invalidating [orderProvider] alone wouldn't do this, since it's
+/// a thin derived view over this provider, not the poll loop itself.
+void retryOrderPoll(WidgetRef ref, String id) =>
+    ref.invalidate(_orderPollProvider(id));

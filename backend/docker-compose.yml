@@ -25,6 +25,13 @@ x-svc-env: &svc-env
 services:
   postgres:
     image: postgis/postgis:16-3.4
+    # Default max_connections (100, or as low as 20 depending on how the
+    # data volume was first initialized) is too small once every one of the
+    # ~15 backend services holds its own connection pool — it's easy to
+    # exhaust silently: queries just start failing with PoolTimedOut, and
+    # any code that swallows DB errors (e.g. the dispatch background loop's
+    # `.unwrap_or_default()`) goes quiet instead of erroring loudly.
+    command: ["postgres", "-c", "max_connections=200"]
     environment:
       POSTGRES_USER: saarathi
       POSTGRES_PASSWORD: saarathi_dev
@@ -314,6 +321,9 @@ services:
       <<: *svc-env
       PLACES_PORT: 8089
       PLACES_STORAGE_DIR: /data/places
+      # Only reachable when the `routing` profile is also up — a best-effort
+      # write, see pelias_index.rs; harmless if this host doesn't resolve.
+      PELIAS_ES_URL: http://pelias-opensearch:9200
     ports:
       - "8089:8089"
     volumes:
@@ -397,7 +407,8 @@ services:
     volumes:
       - ./.data/valhalla:/custom_files
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8002/status || exit 1"]
+      # wget isn't in this image; curl is.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8002/status"]
       interval: 15s
       timeout: 5s
       retries: 20
@@ -409,28 +420,66 @@ services:
   # then run the one-off imports (see scripts/, or docs/pelias-import.md):
   #   docker compose --profile routing run --rm pelias-import-openstreetmap
   #   docker compose --profile routing run --rm pelias-import-whosonfirst
+  # Despite the service name (kept as-is so pelias.json's esclient host and
+  # the other services' depends_on don't need to change), this actually runs
+  # real Elasticsearch, not OpenSearch. OpenSearch — 1.x and 2.x both,
+  # verified directly against both — reports its own independent version
+  # number ("1.3.20", "2.19.6", ...) from its info endpoint, but Pelias's
+  # schema tool hard-checks for an Elasticsearch version
+  # (SUPPORTED_ES_VERSIONS = '>=7.4.2' in pelias/schema), which OpenSearch
+  # can never satisfy regardless of which major version is pinned.
   pelias-opensearch:
-    image: opensearchproject/opensearch:2
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
     profiles: ["routing"]
     environment:
       discovery.type: single-node
-      plugins.security.disabled: "true"
-      OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+    # Pelias's schema requires the analysis-icu plugin, which the stock
+    # image doesn't bundle — install it (idempotent: skipped once already
+    # present in the persisted data/plugins volume) before handing off to
+    # the image's normal entrypoint.
+    entrypoint: >
+      bash -c "
+        bin/elasticsearch-plugin list | grep -q analysis-icu ||
+        bin/elasticsearch-plugin install --batch analysis-icu;
+        /bin/tini -- /usr/local/bin/docker-entrypoint.sh eswrapper
+      "
     ports:
       - "9200:9200"
     volumes:
-      - ./.data/pelias-opensearch:/usr/share/opensearch/data
+      - ./.data/pelias-opensearch:/usr/share/elasticsearch/data
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 20
 
+  # One-off: creates the `pelias` index/mapping in OpenSearch. Must run
+  # before any importer or the API — run with:
+  #   docker compose --profile routing run --rm pelias-schema
+  pelias-schema:
+    image: pelias/schema:latest
+    profiles: ["routing"]
+    command: ["npm", "run", "create_index"]
+    environment:
+      PELIAS_CONFIG: /code/pelias.json
+    volumes:
+      - ./pelias.json:/code/pelias.json:ro
+    depends_on:
+      pelias-opensearch:
+        condition: service_healthy
+
   pelias-api:
     image: pelias/api:latest
     profiles: ["routing"]
+    environment:
+      PELIAS_CONFIG: /code/pelias.json
+    # The image's own default listen port is 3100, regardless of pelias.json
+    # `api.port` (confirmed via its own boot log: "pelias is now running on
+    # http://:::3100") — map the host-debug port to that, not to 4000.
     ports:
-      - "4000:4000"
+      - "4000:3100"
     volumes:
       - ./pelias.json:/code/pelias.json:ro
     depends_on:
@@ -438,11 +487,26 @@ services:
         condition: service_healthy
 
   pelias-import-openstreetmap:
-    image: pelias/openstreetmap-import:latest
+    image: pelias/openstreetmap:latest
     profiles: ["routing"]
+    # The image's default CMD is a bare `/bin/bash` (meant for interactive
+    # debugging) — without an explicit command, `docker compose run` under a
+    # non-interactive shell just starts and exits immediately, importing
+    # nothing. `npm start` is the image's own documented entrypoint.
+    command: ["npm", "start"]
+    environment:
+      # Without this, pelias-config doesn't reliably find our mounted
+      # pelias.json and silently falls back to its own hardcoded defaults
+      # (a `/mnt/pelias/openstreetmap/planet-latest.osm.pbf` path that
+      # doesn't exist in this container at all) instead of erroring loudly.
+      PELIAS_CONFIG: /code/pelias.json
     volumes:
       - ./pelias.json:/code/pelias.json:ro
       - ./.data/pelias-import/openstreetmap:/data/openstreetmap
+      # Needed for admin (country/region/locality) lookup during import —
+      # same directory pelias-import-whosonfirst populates via
+      # `imports.whosonfirst.datapath` in pelias.json.
+      - ./.data/pelias-import/whosonfirst:/data/whosonfirst:ro
     depends_on:
       pelias-opensearch:
         condition: service_healthy
@@ -450,6 +514,9 @@ services:
   pelias-import-whosonfirst:
     image: pelias/whosonfirst:latest
     profiles: ["routing"]
+    command: ["npm", "start"]
+    environment:
+      PELIAS_CONFIG: /code/pelias.json
     volumes:
       - ./pelias.json:/code/pelias.json:ro
       - ./.data/pelias-import/whosonfirst:/data/whosonfirst

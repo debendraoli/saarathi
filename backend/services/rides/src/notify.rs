@@ -27,6 +27,8 @@ pub async fn send(
         title: title.to_string(),
         body: body.to_string(),
         link,
+        data: None,
+        silent: false,
     };
     match serde_json::to_vec(&req) {
         Ok(bytes) => {

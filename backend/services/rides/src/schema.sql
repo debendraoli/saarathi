@@ -121,6 +121,11 @@ ALTER TABLE trips ADD COLUMN IF NOT EXISTS cancelled_by uuid;
 ALTER TABLE trips ADD COLUMN IF NOT EXISTS cancelled_by_role text;  -- rider | driver
 -- Multi-stop waypoints: [{ "lat":.., "lng":.. }, …] between origin and destination.
 ALTER TABLE trips ADD COLUMN IF NOT EXISTS stops jsonb NOT NULL DEFAULT '[]';
+-- Per-trip override for dispatch's starting search radius (km). Null = use
+-- the service default (`Config::dispatch_radius_km`). Set when a rider
+-- re-requests after a "no driver found" cancellation, so the retry searches
+-- wider from the start instead of repeating the same radius that just failed.
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS search_radius_km double precision;
 
 -- Immutable, hash-chained ledger. One entry per completed trip (unique index).
 CREATE TABLE IF NOT EXISTS ledger_entries (
@@ -158,6 +163,38 @@ CREATE TABLE IF NOT EXISTS trip_offers (
 CREATE INDEX IF NOT EXISTS trip_offers_trip_idx   ON trip_offers (trip_id);
 CREATE INDEX IF NOT EXISTS trip_offers_driver_idx ON trip_offers (driver_id, status);
 CREATE INDEX IF NOT EXISTS trip_offers_active_idx ON trip_offers (status, expires_at);
+
+-- Fare-bidding auction. 'instant' (default) keeps today's algorithmic-fare,
+-- single-committed-driver dispatch entirely unchanged; 'bid' opens the trip
+-- to the auction below instead. ask_fare is the rider's current asking price
+-- (bid mode only — null for instant trips) and is mutable: raising it just
+-- rewrites this column and re-broadcasts via dispatch_trip.
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS pricing_mode text NOT NULL DEFAULT 'instant';
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS ask_fare numeric;
+
+-- One row per driver's live offer against a bid-mode trip's ask. Blind
+-- bidding: a driver only ever sees the trip and the rider's ask, never
+-- competing bids (enforced at the API, not just here) — so there is no
+-- undercutting spiral. 'accept_ask' bids match the ask exactly; 'counter'
+-- bids are strictly above it, capped by both the legal ceiling and a ratio
+-- of the ask (see bid_counter_max_ratio in config).
+CREATE TABLE IF NOT EXISTS trip_bids (
+    id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id    uuid        NOT NULL,
+    driver_id  uuid        NOT NULL,          -- a users.id, matching trips.driver_id's id space
+    amount     numeric     NOT NULL,
+    kind       text        NOT NULL,          -- accept_ask | counter
+    status     text        NOT NULL DEFAULT 'live',  -- live | won | lost | expired | withdrawn
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+-- A driver may have at most one live bid per trip: re-bidding replaces it
+-- rather than stacking (mirrors partner_drivers_one_active_idx's pattern in
+-- auth/src/schema.sql).
+CREATE UNIQUE INDEX IF NOT EXISTS trip_bids_one_live_idx
+    ON trip_bids (trip_id, driver_id) WHERE status = 'live';
+CREATE INDEX IF NOT EXISTS trip_bids_trip_idx ON trip_bids (trip_id, status);
+CREATE INDEX IF NOT EXISTS trip_bids_active_idx ON trip_bids (status, expires_at);
 
 -- Rider/customer prepaid credit balance (customer pays the platform directly).
 -- Rider balances (kind='rider') may never go negative — enforced here as

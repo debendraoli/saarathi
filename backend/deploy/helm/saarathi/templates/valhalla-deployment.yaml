@@ -41,6 +41,18 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /custom_files
+          # First readiness can take a while — the image builds routing
+          # tiles from the Nepal PBF on first boot (cached in the PVC after
+          # that). No wget in this image, only curl.
+          readinessProbe:
+            exec: { command: ["curl", "-fsS", "http://localhost:8002/status"] }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 40
+          livenessProbe:
+            exec: { command: ["curl", "-fsS", "http://localhost:8002/status"] }
+            initialDelaySeconds: 120
+            periodSeconds: 30
           resources:
             {{- toYaml .Values.valhalla.resources | nindent 12 }}
       volumes:

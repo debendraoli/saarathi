@@ -25,6 +25,8 @@ pub async fn send(
         title: title.to_string(),
         body: body.to_string(),
         link,
+        data: None,
+        silent: false,
     };
     match serde_json::to_vec(&req) {
         Ok(bytes) => {
@@ -33,5 +35,34 @@ pub async fn send(
             }
         }
         Err(e) => tracing::warn!(error = %e, "failed to encode notification"),
+    }
+}
+
+/// A silent, data-only push — no inbox row, no SMS fallback, no visible
+/// tray notification. For device-to-device signals the *other* device
+/// needs to react to (e.g. "you were signed out because this account
+/// logged in elsewhere"), not content the user should see in their
+/// notification list.
+pub async fn send_silent(nats: &Option<async_nats::Client>, user_id: Uuid, data: serde_json::Value) {
+    let Some(client) = nats else {
+        tracing::debug!(%user_id, "silent notification skipped (no NATS)");
+        return;
+    };
+    let req = NotifyRequest {
+        user_id,
+        class: saarathi_core::domain::notif::TRANSACTIONAL.to_string(),
+        title: String::new(),
+        body: String::new(),
+        link: None,
+        data: Some(data),
+        silent: true,
+    };
+    match serde_json::to_vec(&req) {
+        Ok(bytes) => {
+            if let Err(e) = client.publish(NOTIFY_SUBJECT, bytes.into()).await {
+                tracing::warn!(error = %e, "failed to publish silent notification");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "failed to encode silent notification"),
     }
 }

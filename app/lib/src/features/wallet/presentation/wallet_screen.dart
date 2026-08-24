@@ -33,7 +33,8 @@ class WalletScreen extends ConsumerWidget {
         data: (wallet) => RefreshIndicator(
           onRefresh: () async => ref.invalidate(walletBalanceProvider),
           child: ListView(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.fromLTRB(
+                16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
             children: [
               Card(
                 child: Padding(

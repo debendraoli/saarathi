@@ -127,6 +127,11 @@ struct VerifyRequest {
     /// Optional: register as a driver instead of a rider on first login.
     #[serde(default)]
     as_driver: bool,
+    /// This install's persistent client-generated id — lets this login tell
+    /// sibling sessions (other devices) apart from itself when enforcing
+    /// single-device-per-account. Omitted by older app builds.
+    #[serde(default)]
+    device_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -199,13 +204,81 @@ async fn verify_otp(
         ));
     }
 
-    let pair = issue_tokens(&st, &user).await?;
+    let (pair, new_token_id) = issue_tokens(&st, &user, body.device_id.as_deref()).await?;
+    enforce_single_device(&st, user.id, new_token_id, body.device_id.as_deref()).await;
     Ok(Json(pair))
+}
+
+/// Single-device-per-account enforcement: revoke every other still-valid
+/// session for this user, *except* — if they currently have an active
+/// trip — the one other session most recently active (best available proxy
+/// for "the device actually driving that trip"; nothing in the schema
+/// links a trip to a specific device). Fires a silent push so an already-
+/// foregrounded/backgrounded-but-alive sibling device signs out right away
+/// instead of waiting for its access token to naturally expire.
+async fn enforce_single_device(
+    st: &AppState,
+    user_id: Uuid,
+    new_token_id: Uuid,
+    new_device_id: Option<&str>,
+) {
+    // Cross-service read against rides' `trips` table — same shared-Postgres
+    // convention already used elsewhere in this codebase.
+    let has_active_trip: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM trips WHERE (rider_id = $1 OR driver_id = $1) \
+         AND status NOT IN ('completed', 'cancelled'))",
+    )
+    .bind(user_id)
+    .fetch_one(&st.db)
+    .await
+    .unwrap_or(false);
+
+    let revoked: Vec<(Uuid,)> = if has_active_trip {
+        sqlx::query_as(
+            "WITH keep AS ( \
+                SELECT id FROM refresh_tokens \
+                WHERE user_id = $1 AND revoked_at IS NULL AND id <> $2 \
+                ORDER BY created_at DESC LIMIT 1 \
+             ) \
+             UPDATE refresh_tokens SET revoked_at = now() \
+             WHERE user_id = $1 AND revoked_at IS NULL AND id <> $2 \
+               AND id NOT IN (SELECT id FROM keep) \
+             RETURNING id",
+        )
+        .bind(user_id)
+        .bind(new_token_id)
+        .fetch_all(&st.db)
+        .await
+        .unwrap_or_default()
+    } else {
+        sqlx::query_as(
+            "UPDATE refresh_tokens SET revoked_at = now() \
+             WHERE user_id = $1 AND revoked_at IS NULL AND id <> $2 \
+             RETURNING id",
+        )
+        .bind(user_id)
+        .bind(new_token_id)
+        .fetch_all(&st.db)
+        .await
+        .unwrap_or_default()
+    };
+
+    if revoked.is_empty() {
+        return;
+    }
+    crate::notify::send_silent(
+        &st.nats,
+        user_id,
+        json!({ "type": "force_logout", "new_device_id": new_device_id.unwrap_or("") }),
+    )
+    .await;
 }
 
 #[derive(Deserialize)]
 struct RefreshRequest {
     refresh_token: String,
+    #[serde(default)]
+    device_id: Option<String>,
 }
 
 async fn refresh(
@@ -214,14 +287,14 @@ async fn refresh(
 ) -> AppResult<Json<TokenPair>> {
     let hash = token::hash_token(&body.refresh_token);
 
-    let row: Option<(Uuid, Uuid)> = sqlx::query_as(
-        "SELECT id, user_id FROM refresh_tokens \
+    let row: Option<(Uuid, Uuid, Option<String>)> = sqlx::query_as(
+        "SELECT id, user_id, device_id FROM refresh_tokens \
          WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()",
     )
     .bind(&hash)
     .fetch_optional(&st.db)
     .await?;
-    let (token_id, user_id) = row.ok_or(AppError::Unauthorized)?;
+    let (token_id, user_id, prev_device_id) = row.ok_or(AppError::Unauthorized)?;
 
     // Rotate: revoke the presented token, then issue a fresh pair.
     sqlx::query("UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1")
@@ -243,7 +316,11 @@ async fn refresh(
         ));
     }
 
-    let pair = issue_tokens(&st, &user).await?;
+    // Carry the device id forward across rotation — an older app build that
+    // doesn't send one on refresh shouldn't lose the identity the original
+    // login recorded.
+    let device_id = body.device_id.or(prev_device_id);
+    let (pair, _new_token_id) = issue_tokens(&st, &user, device_id.as_deref()).await?;
     Ok(Json(pair))
 }
 
@@ -261,7 +338,11 @@ async fn logout(
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn issue_tokens(st: &AppState, user: &User) -> AppResult<TokenPair> {
+async fn issue_tokens(
+    st: &AppState,
+    user: &User,
+    device_id: Option<&str>,
+) -> AppResult<(TokenPair, Uuid)> {
     let access = token::issue_access(
         &st.config.jwt_secret,
         user.id,
@@ -273,18 +354,25 @@ async fn issue_tokens(st: &AppState, user: &User) -> AppResult<TokenPair> {
     let refresh_hash = token::hash_token(&refresh);
     let expires_at = Utc::now() + Duration::seconds(st.config.refresh_ttl_secs);
 
-    sqlx::query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)")
-        .bind(user.id)
-        .bind(&refresh_hash)
-        .bind(expires_at)
-        .execute(&st.db)
-        .await?;
+    let new_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, device_id) \
+         VALUES ($1, $2, $3, $4) RETURNING id",
+    )
+    .bind(user.id)
+    .bind(&refresh_hash)
+    .bind(expires_at)
+    .bind(device_id)
+    .fetch_one(&st.db)
+    .await?;
 
-    Ok(TokenPair {
-        access_token: access,
-        refresh_token: refresh,
-        user: user.clone(),
-    })
+    Ok((
+        TokenPair {
+            access_token: access,
+            refresh_token: refresh,
+            user: user.clone(),
+        },
+        new_id,
+    ))
 }
 
 #[cfg(test)]

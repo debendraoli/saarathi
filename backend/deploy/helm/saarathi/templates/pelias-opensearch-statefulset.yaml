@@ -1,4 +1,12 @@
-{{/* Single-node, security plugin disabled — internal-only ClusterIP, never exposed. */}}
+{{/*
+Single-node, security disabled — internal-only ClusterIP, never exposed.
+Despite the resource name, this is real Elasticsearch 7.17 (see values.yaml
+`pelias.opensearch.image` for why — OpenSearch's own version numbering fails
+Pelias's hard-coded Elasticsearch version check no matter which major
+version is pinned). The entrypoint override installs the analysis-icu
+plugin, which Pelias's schema requires and the stock image doesn't bundle,
+before handing off to the image's normal startup.
+*/}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -20,18 +28,33 @@ spec:
       containers:
         - name: opensearch
           image: {{ .Values.pelias.opensearch.image }}
+          command: ["bash", "-c"]
+          args:
+            - |
+              bin/elasticsearch-plugin list | grep -q analysis-icu ||
+              bin/elasticsearch-plugin install --batch analysis-icu
+              /bin/tini -- /usr/local/bin/docker-entrypoint.sh eswrapper
           ports:
             - containerPort: 9200
           env:
             - name: discovery.type
               value: single-node
-            - name: plugins.security.disabled
-              value: "true"
-            - name: OPENSEARCH_JAVA_OPTS
+            - name: xpack.security.enabled
+              value: "false"
+            - name: ES_JAVA_OPTS
               value: {{ .Values.pelias.opensearch.javaOpts | quote }}
           volumeMounts:
             - name: data
-              mountPath: /usr/share/opensearch/data
+              mountPath: /usr/share/elasticsearch/data
+          readinessProbe:
+            httpGet: { path: /_cluster/health, port: 9200 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet: { path: /_cluster/health, port: 9200 }
+            initialDelaySeconds: 60
+            periodSeconds: 20
           resources:
             {{- toYaml .Values.pelias.opensearch.resources | nindent 12 }}
   volumeClaimTemplates:

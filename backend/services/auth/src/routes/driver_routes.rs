@@ -3,7 +3,9 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{DocumentKind, Driver, DriverDocument, Vehicle, VehicleWheelerClass};
 use crate::state::{AppState, AuthUser};
-use axum::extract::{Multipart, State};
+use axum::extract::{Multipart, Path, State};
+use axum::http::header;
+use axum::response::{IntoResponse, Response};
 use axum::{
     routing::{get, post},
     Json, Router,
@@ -19,6 +21,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/driver/documents", post(upload_document))
         .route("/v1/driver/status", get(status))
         .route("/v1/driver/kyc/submit", post(submit_kyc))
+        .route("/v1/driver/{user_id}/photo", get(driver_photo))
 }
 
 /// Every document kind a driver must upload before their KYC can be reviewed —
@@ -264,6 +267,49 @@ async fn status(
         vehicle,
         documents,
     }))
+}
+
+/// A driver's profile photo, for the counterpart card on the rider's side.
+/// Gated like a phone number would be: the caller must either *be* the
+/// driver or currently share a trip with them (any status — a finished
+/// trip's driver photo isn't sensitive the way a phone number is, so unlike
+/// `/v1/rides/{id}/participants` this doesn't narrow to active trips only).
+async fn driver_photo(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(user_id): Path<Uuid>,
+) -> AppResult<Response> {
+    if claims.sub != user_id && !claims.is_staff() {
+        let shares_trip: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM trips WHERE driver_id = $1 AND rider_id = $2)",
+        )
+        .bind(user_id)
+        .bind(claims.sub)
+        .fetch_one(&st.db)
+        .await?;
+        if !shares_trip {
+            return Err(AppError::Forbidden);
+        }
+    }
+
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT dd.storage_key, dd.content_type FROM driver_documents dd \
+         JOIN drivers d ON d.id = dd.driver_id \
+         WHERE d.user_id = $1 AND dd.kind = 'profile_photo' \
+         ORDER BY dd.created_at DESC LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(&st.db)
+    .await?;
+    let (storage_key, content_type) = row.ok_or(AppError::NotFound)?;
+
+    let bytes = st
+        .docs
+        .get(&storage_key)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    let ct = content_type.unwrap_or_else(|| "application/octet-stream".into());
+    Ok(([(header::CONTENT_TYPE, ct)], bytes).into_response())
 }
 
 fn parse_kind(s: &str) -> Result<DocumentKind, AppError> {

@@ -6,20 +6,39 @@ import 'package:latlong2/latlong.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/location.dart';
+import '../../../core/network/api_client.dart';
 import '../../../core/router/app_router.dart';
+import '../../../shared/haptics.dart';
+import '../../../shared/widgets/fare_stepper.dart';
+import '../../../shared/widgets/wallet_balance_hint.dart';
+import '../../delivery/application/delivery_controller.dart';
+import '../../delivery/data/delivery_repository.dart';
+import '../../delivery/domain/models.dart' as delivery;
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
 import '../application/ride_controller.dart';
+import '../data/ride_repository.dart';
 import '../domain/models.dart';
 import 'widgets/map_view.dart';
 
+/// Ride (a personal trip) or Delivery (send a parcel) — one shared
+/// pickup/destination picker, matching the tabbed layout Pathao/Yango/
+/// inDrive all use instead of hiding parcel-sending behind a separate flow.
+enum RideMode { ride, delivery }
+
 /// Pick pickup (defaults to current location) + destination (search, tap the map,
-/// or a saved place), choose bike/car, then estimate. Landmark-friendly for Dang.
+/// or a saved place), choose bike/car — or switch to Delivery to send a parcel
+/// along the same route — then book. Landmark-friendly for Dang.
 class WhereToScreen extends ConsumerStatefulWidget {
-  const WhereToScreen({super.key, this.initialDest});
+  const WhereToScreen(
+      {super.key, this.initialDest, this.initialMode = RideMode.ride});
 
   /// Destination chosen upstream (from the home address search), if any.
   final PlaceHit? initialDest;
+
+  /// Lets the parcel showcase card on the home screen land directly in
+  /// Delivery mode instead of Ride.
+  final RideMode initialMode;
 
   @override
   ConsumerState<WhereToScreen> createState() => _WhereToScreenState();
@@ -33,10 +52,26 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   LatLng? _dest;
   final List<Place> _stops = [];
   VehicleClass _vehicle = VehicleClass.twoWheeler;
+  String _payment = 'cash';
+  late RideMode _mode;
+
+  /// Null until the rider touches the stepper for the currently-selected
+  /// vehicle class — stays at the platform's default price for that class.
+  double? _ask;
+  bool _booking = false;
+
+  // Delivery-mode-only fields.
+  final _recipientName = TextEditingController();
+  final _recipientPhone = TextEditingController();
+  final _codAmount = TextEditingController();
+  final _pickupNote = TextEditingController();
+  delivery.ParcelSize _parcelSize = delivery.ParcelSize.small;
+  bool _fragile = false;
 
   @override
   void initState() {
     super.initState();
+    _mode = widget.initialMode;
     final d = widget.initialDest;
     if (d != null) {
       _dest = d.point;
@@ -48,6 +83,10 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   @override
   void dispose() {
     _destLabel.dispose();
+    _recipientName.dispose();
+    _recipientPhone.dispose();
+    _codAmount.dispose();
+    _pickupNote.dispose();
     super.dispose();
   }
 
@@ -100,16 +139,14 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     setState(() => _stops.removeAt(index));
   }
 
-  void _continue() {
-    if (_pickup == null || _dest == null) return;
-    // Pickup and drop must be distinct — reject near-identical points.
+  /// The current draft — null until pickup + destination are both set and
+  /// distinct, so this doubles as the "can we price/book yet" gate.
+  RideDraft? _draft() {
+    if (_pickup == null || _dest == null) return null;
     if (const Distance().as(LengthUnit.Meter, _pickup!, _dest!) < 30) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppL10n.of(context).samePickupDrop)),
-      );
-      return;
+      return null;
     }
-    final draft = RideDraft(
+    return RideDraft(
       pickup: Place(
         point: _pickup!,
         label: _pickupLabel ?? AppL10n.of(context).useCurrentLocation,
@@ -117,8 +154,120 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
       destination: Place(point: _dest!, label: _destLabel.text.trim()),
       stops: List.unmodifiable(_stops),
       vehicleClass: _vehicle,
+      paymentMethod: _payment,
     );
-    context.push(Routes.confirm, extra: draft);
+  }
+
+  Future<void> _book(double defaultFare) async {
+    if (_pickup != null &&
+        _dest != null &&
+        const Distance().as(LengthUnit.Meter, _pickup!, _dest!) < 30) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppL10n.of(context).samePickupDrop)),
+      );
+      return;
+    }
+    final draft = _draft()?.copyWith(
+      pricingMode: 'bid',
+      askFare: _ask ?? defaultFare,
+    );
+    if (draft == null) return;
+    setState(() => _booking = true);
+    try {
+      final trip = await ref.read(rideRepositoryProvider).book(draft);
+      Haptics.success();
+      if (mounted) context.go('${Routes.trip}/${trip.id}');
+    } on ApiException catch (e) {
+      Haptics.error();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              e.isNetwork ? AppL10n.of(context).errorNetwork : e.message,
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      Haptics.error();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppL10n.of(context).errorGeneric)),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _booking = false);
+    }
+  }
+
+  bool get _canBookDelivery =>
+      _pickup != null &&
+      _dest != null &&
+      _recipientName.text.trim().isNotEmpty &&
+      _recipientPhone.text.trim().isNotEmpty;
+
+  Future<void> _bookDelivery() async {
+    if (!_canBookDelivery) return;
+    setState(() => _booking = true);
+    try {
+      final booking = await ref.read(deliveryRepositoryProvider).book(
+            delivery.ParcelDraft(
+              origin: Place(
+                point: _pickup!,
+                label: _pickupLabel ?? AppL10n.of(context).useCurrentLocation,
+              ),
+              dest: Place(point: _dest!, label: _destLabel.text.trim()),
+              size: _parcelSize,
+              recipientName: _recipientName.text.trim(),
+              recipientPhone: _recipientPhone.text.trim(),
+              fragile: _fragile,
+              codAmount: double.tryParse(_codAmount.text.trim()) ?? 0,
+              pickupNote: _pickupNote.text.trim(),
+              paymentMethod: _payment,
+            ),
+          );
+      Haptics.success();
+      if (mounted && booking.deliveryOtp != null) {
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: Text(AppL10n.of(context).deliveryOtpTitle),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(AppL10n.of(context).deliveryOtpBody),
+                const SizedBox(height: 12),
+                Text(
+                  booking.deliveryOtp!,
+                  style: const TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 4,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(AppL10n.of(context).actionContinue),
+              ),
+            ],
+          ),
+        );
+      }
+      if (mounted) context.go('${Routes.trip}/${booking.trip.id}');
+    } catch (_) {
+      Haptics.error();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppL10n.of(context).errorGeneric)),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _booking = false);
+    }
   }
 
   void _pickSaved(SavedPlace place) {
@@ -175,6 +324,28 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     final route = (_pickup != null && _dest != null)
         ? ref.watch(routeGeometryProvider(RouteQuery(path, _vehicle.wire)))
         : null;
+    final baseDraft = _mode == RideMode.ride ? _draft() : null;
+    // Live per-class prices as soon as pickup + destination are both set —
+    // shown directly on the vehicle cards, no separate "continue" step
+    // needed to see them. Each class is its own cached provider call, so
+    // switching the selected class never re-fetches what's already shown.
+    final estimates = baseDraft == null
+        ? const <VehicleClass, AsyncValue<FareEstimate>>{}
+        : {
+            for (final v in VehicleClass.values)
+              v: ref.watch(
+                  fareEstimateProvider(baseDraft.copyWith(vehicleClass: v))),
+          };
+    final selectedEstimate = estimates[_vehicle];
+    final deliveryEstimate =
+        (_mode == RideMode.delivery && _pickup != null && _dest != null)
+            ? ref.watch(deliveryEstimateProvider(DeliveryEstimateQuery(
+                origin: _pickup!,
+                dest: _dest!,
+                size: _parcelSize,
+                fragile: _fragile,
+              )))
+            : null;
     return Scaffold(
       appBar: AppBar(title: Text(l.whereTo)),
       body: Stack(
@@ -216,23 +387,52 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
             child: SafeArea(
               top: false,
               child: _Sheet(
+                mode: _mode,
+                onMode: (m) => setState(() {
+                  _mode = m;
+                  _ask = null;
+                }),
                 pickupText: _pickupLabel ?? l.useCurrentLocation,
                 destText: _dest == null ? null : _destLabel.text,
                 stops: [for (final s in _stops) s.label],
                 vehicle: _vehicle,
+                estimates: estimates,
+                payment: _payment,
+                ask: _ask,
+                booking: _booking,
                 onPickupTap: () => _openSearch(forPickup: true),
                 onDestTap: () => _openSearch(forPickup: false),
                 onAddStop: _stops.length >= 3 ? null : _addStop,
                 onRemoveStop: _removeStop,
-                onVehicle: (v) => setState(() => _vehicle = v),
-                onContinue: _dest == null ? null : _continue,
+                onVehicle: (v) => setState(() {
+                  _vehicle = v;
+                  _ask = null;
+                }),
+                onPayment: (p) => setState(() => _payment = p),
+                onAsk: (v) => setState(() => _ask = v),
+                onBook: selectedEstimate?.valueOrNull == null
+                    ? null
+                    : () => _book(selectedEstimate!.valueOrNull!.finalFare),
                 onSave: _dest == null ? null : _saveDest,
                 onClearDest: _dest == null
                     ? null
                     : () => setState(() {
                           _dest = null;
                           _destLabel.clear();
+                          _ask = null;
                         }),
+                deliveryEstimate: deliveryEstimate,
+                parcelSize: _parcelSize,
+                onParcelSize: (s) => setState(() => _parcelSize = s),
+                fragile: _fragile,
+                onFragile: (v) => setState(() => _fragile = v),
+                recipientName: _recipientName,
+                recipientPhone: _recipientPhone,
+                codAmount: _codAmount,
+                pickupNote: _pickupNote,
+                canBookDelivery: _canBookDelivery,
+                onBookDelivery: _bookDelivery,
+                onFieldChanged: () => setState(() {}),
               ),
             ),
           ),
@@ -244,155 +444,383 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
 
 class _Sheet extends StatelessWidget {
   const _Sheet({
+    required this.mode,
+    required this.onMode,
     required this.pickupText,
     required this.destText,
     required this.stops,
     required this.vehicle,
+    required this.estimates,
+    required this.payment,
+    required this.ask,
+    required this.booking,
     required this.onPickupTap,
     required this.onDestTap,
     required this.onAddStop,
     required this.onRemoveStop,
     required this.onVehicle,
-    required this.onContinue,
+    required this.onPayment,
+    required this.onAsk,
+    required this.onBook,
     required this.onSave,
     required this.onClearDest,
+    required this.deliveryEstimate,
+    required this.parcelSize,
+    required this.onParcelSize,
+    required this.fragile,
+    required this.onFragile,
+    required this.recipientName,
+    required this.recipientPhone,
+    required this.codAmount,
+    required this.pickupNote,
+    required this.canBookDelivery,
+    required this.onBookDelivery,
+    required this.onFieldChanged,
   });
 
+  final RideMode mode;
+  final ValueChanged<RideMode> onMode;
   final String pickupText;
   final String? destText;
   final List<String> stops;
   final VehicleClass vehicle;
+
+  /// Live price per class, keyed once pickup + destination are both set —
+  /// empty beforehand, so the price row only appears once there's something
+  /// to price.
+  final Map<VehicleClass, AsyncValue<FareEstimate>> estimates;
+  final String payment;
+
+  /// The rider's current price for the selected class — null means "use the
+  /// platform default for that class", same convention as the booking flow.
+  final double? ask;
+  final bool booking;
   final VoidCallback onPickupTap;
   final VoidCallback onDestTap;
   final VoidCallback? onAddStop;
   final ValueChanged<int> onRemoveStop;
   final ValueChanged<VehicleClass> onVehicle;
-  final VoidCallback? onContinue;
+  final ValueChanged<String> onPayment;
+  final ValueChanged<double> onAsk;
+  final VoidCallback? onBook;
   final VoidCallback? onSave;
   final VoidCallback? onClearDest;
+
+  // Delivery mode.
+  final AsyncValue<delivery.DeliveryEstimate>? deliveryEstimate;
+  final delivery.ParcelSize parcelSize;
+  final ValueChanged<delivery.ParcelSize> onParcelSize;
+  final bool fragile;
+  final ValueChanged<bool> onFragile;
+  final TextEditingController recipientName;
+  final TextEditingController recipientPhone;
+  final TextEditingController codAmount;
+  final TextEditingController pickupNote;
+  final bool canBookDelivery;
+  final VoidCallback onBookDelivery;
+  final VoidCallback onFieldChanged;
 
   @override
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
+    final selected = estimates[vehicle];
     return Card(
       margin: const EdgeInsets.all(12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 14),
-                decoration: BoxDecoration(
-                  color: scheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.78,
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: scheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            Container(
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                children: [
-                  _LocationRow(
-                    label: l.pickup,
-                    dotColor: scheme.primary,
-                    icon: Icons.trip_origin,
-                    text: pickupText,
-                    isPlaceholder: false,
-                    onTap: onPickupTap,
+              SegmentedButton<RideMode>(
+                segments: [
+                  ButtonSegment(
+                    value: RideMode.ride,
+                    icon: const Icon(Icons.two_wheeler_rounded),
+                    label: Text(l.modeRider),
                   ),
-                  for (var i = 0; i < stops.length; i++) ...[
+                  ButtonSegment(
+                    value: RideMode.delivery,
+                    icon: const Icon(Icons.inventory_2_rounded),
+                    label: Text(l.parcelTitle),
+                  ),
+                ],
+                selected: {mode},
+                onSelectionChanged: (s) => onMode(s.first),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  children: [
+                    _LocationRow(
+                      label: l.pickup,
+                      dotColor: scheme.primary,
+                      icon: Icons.trip_origin,
+                      text: pickupText,
+                      isPlaceholder: false,
+                      onTap: onPickupTap,
+                    ),
+                    for (var i = 0; i < stops.length; i++) ...[
+                      Divider(
+                          height: 1, indent: 48, color: scheme.outlineVariant),
+                      _LocationRow(
+                        label: l.stopLabel,
+                        dotColor: scheme.tertiary,
+                        icon: Icons.adjust_rounded,
+                        text: stops[i],
+                        isPlaceholder: false,
+                        onTap: onAddStop ?? () {},
+                        trailing: IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          onPressed: () => onRemoveStop(i),
+                        ),
+                      ),
+                    ],
                     Divider(
                         height: 1, indent: 48, color: scheme.outlineVariant),
                     _LocationRow(
-                      label: l.stopLabel,
-                      dotColor: scheme.tertiary,
-                      icon: Icons.adjust_rounded,
-                      text: stops[i],
-                      isPlaceholder: false,
-                      onTap: onAddStop ?? () {},
-                      trailing: IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: () => onRemoveStop(i),
-                      ),
+                      label: l.destination,
+                      dotColor: scheme.secondary,
+                      icon: Icons.location_on_rounded,
+                      text: destText ?? l.searchAddressHint,
+                      isPlaceholder: destText == null,
+                      onTap: onDestTap,
+                      trailing: onSave == null && onClearDest == null
+                          ? null
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (onClearDest != null)
+                                  IconButton(
+                                    icon: const Icon(Icons.close_rounded),
+                                    tooltip: l.clearDestination,
+                                    onPressed: onClearDest,
+                                  ),
+                                if (onSave != null)
+                                  IconButton(
+                                    icon:
+                                        const Icon(Icons.bookmark_add_outlined),
+                                    onPressed: onSave,
+                                  ),
+                              ],
+                            ),
                     ),
                   ],
-                  Divider(height: 1, indent: 48, color: scheme.outlineVariant),
-                  _LocationRow(
-                    label: l.destination,
-                    dotColor: scheme.secondary,
-                    icon: Icons.location_on_rounded,
-                    text: destText ?? l.searchAddressHint,
-                    isPlaceholder: destText == null,
-                    onTap: onDestTap,
-                    trailing: onSave == null && onClearDest == null
-                        ? null
-                        : Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (onClearDest != null)
-                                IconButton(
-                                  icon: const Icon(Icons.close_rounded),
-                                  tooltip: l.clearDestination,
-                                  onPressed: onClearDest,
-                                ),
-                              if (onSave != null)
-                                IconButton(
-                                  icon: const Icon(Icons.bookmark_add_outlined),
-                                  onPressed: onSave,
-                                ),
-                            ],
-                          ),
-                  ),
-                ],
-              ),
-            ),
-            if (onAddStop != null)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: onAddStop,
-                  icon: const Icon(Icons.add_location_alt_outlined, size: 20),
-                  label: Text(l.addStop),
                 ),
               ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                for (final v in VehicleClass.values)
-                  Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                        right: v == VehicleClass.values.last ? 0 : 8,
+              if (mode == RideMode.ride && onAddStop != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: onAddStop,
+                    icon: const Icon(Icons.add_location_alt_outlined, size: 20),
+                    label: Text(l.addStop),
+                  ),
+                ),
+              const SizedBox(height: 14),
+              if (mode == RideMode.ride) ...[
+                Row(
+                  children: [
+                    for (final v in VehicleClass.values)
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(
+                            right: v == VehicleClass.values.last ? 0 : 8,
+                          ),
+                          child: _VehicleCard(
+                            selected: vehicle == v,
+                            icon: _vehicleIcon(v),
+                            label: _vehicleLabel(l, v),
+                            price: estimates[v],
+                            onTap: () => onVehicle(v),
+                          ),
+                        ),
                       ),
-                      child: _VehicleCard(
-                        selected: vehicle == v,
-                        icon: _vehicleIcon(v),
-                        label: _vehicleLabel(l, v),
-                        onTap: () => onVehicle(v),
+                  ],
+                ),
+                if (selected != null) ...[
+                  const SizedBox(height: 16),
+                  selected.when(
+                    loading: () => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2.4),
+                        ),
+                      ),
+                    ),
+                    error: (_, __) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        l.errorNetwork,
+                        style: TextStyle(color: scheme.error),
+                      ),
+                    ),
+                    data: (fare) => Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        FareStepper(
+                          amount: ask ?? fare.finalFare,
+                          min: fare.finalFare,
+                          max: fare.fareCeiling > 0
+                              ? fare.fareCeiling
+                              : fare.finalFare * 2,
+                          onChanged: onAsk,
+                          caption: l.distanceDuration(
+                            fare.distanceKm.toStringAsFixed(1),
+                            fare.durationMins,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        SegmentedButton<String>(
+                          segments: [
+                            ButtonSegment(
+                              value: 'cash',
+                              icon: const Icon(Icons.payments_rounded),
+                              label: Text(l.paymentCash),
+                            ),
+                            ButtonSegment(
+                              value: 'wallet',
+                              icon: const Icon(
+                                  Icons.account_balance_wallet_rounded),
+                              label: Text(l.paymentWallet),
+                            ),
+                          ],
+                          selected: {payment},
+                          onSelectionChanged: (s) => onPayment(s.first),
+                        ),
+                        if (payment == 'wallet')
+                          WalletBalanceHint(amount: fare.finalFare),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                  ),
+                  onPressed: onBook,
+                  child: booking
+                      ? const SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2.4),
+                        )
+                      : Text(
+                          estimates.isEmpty ? l.actionContinue : l.confirmRide),
+                ),
+              ] else ...[
+                SegmentedButton<delivery.ParcelSize>(
+                  segments: [
+                    for (final s in delivery.ParcelSize.values)
+                      ButtonSegment(value: s, label: Text(s.label)),
+                  ],
+                  selected: {parcelSize},
+                  onSelectionChanged: (s) => onParcelSize(s.first),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(l.fragile),
+                  value: fragile,
+                  onChanged: onFragile,
+                ),
+                if (deliveryEstimate != null)
+                  deliveryEstimate!.when(
+                    loading: () => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2.4),
+                        ),
+                      ),
+                    ),
+                    error: (_, __) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(l.errorNetwork,
+                          style: TextStyle(color: scheme.error)),
+                    ),
+                    data: (fee) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(l.deliveryFee),
+                          Text(
+                            'NPR ${fee.deliveryFee.toStringAsFixed(0)}',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ],
                       ),
                     ),
                   ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: recipientName,
+                  onChanged: (_) => onFieldChanged(),
+                  decoration: InputDecoration(labelText: l.recipientName),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: recipientPhone,
+                  keyboardType: TextInputType.phone,
+                  onChanged: (_) => onFieldChanged(),
+                  decoration: InputDecoration(labelText: l.recipientPhone),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: codAmount,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(labelText: l.codLabel),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: pickupNote,
+                  decoration: InputDecoration(labelText: l.pickupNoteLabel),
+                ),
+                const SizedBox(height: 14),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                  ),
+                  onPressed:
+                      canBookDelivery && !booking ? onBookDelivery : null,
+                  child: booking
+                      ? const SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2.4),
+                        )
+                      : Text(l.bookDelivery),
+                ),
               ],
-            ),
-            const SizedBox(height: 14),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
-              ),
-              onPressed: onContinue,
-              child: Text(l.fareEstimate),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -417,12 +845,16 @@ class _VehicleCard extends StatelessWidget {
     required this.selected,
     required this.icon,
     required this.label,
+    required this.price,
     required this.onTap,
   });
 
   final bool selected;
   final IconData icon;
   final String label;
+
+  /// Live price for this class — null before pickup/destination are set.
+  final AsyncValue<FareEstimate>? price;
   final VoidCallback onTap;
 
   @override
@@ -464,6 +896,40 @@ class _VehicleCard extends StatelessWidget {
                       selected ? scheme.onPrimaryContainer : scheme.onSurface,
                 ),
               ),
+              if (price != null) ...[
+                const SizedBox(height: 2),
+                price!.when(
+                  loading: () => SizedBox(
+                    height: 12,
+                    width: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.6,
+                      color: selected
+                          ? scheme.onPrimaryContainer
+                          : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  error: (_, __) => Text(
+                    '—',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: selected
+                          ? scheme.onPrimaryContainer
+                          : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  data: (fare) => Text(
+                    'NPR ${fare.finalFare.toStringAsFixed(0)}',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: selected
+                          ? scheme.onPrimaryContainer
+                          : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

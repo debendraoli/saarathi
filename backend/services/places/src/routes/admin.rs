@@ -113,16 +113,16 @@ async fn approve(
 
     // Guarded on current status so two staff acting on the same submission
     // at once can't both approve it — same pattern as driver KYC approve.
-    let row: Option<(Uuid, String)> = sqlx::query_as(
+    let row: Option<(Uuid, String, String, f64, f64)> = sqlx::query_as(
         "UPDATE place_contributions SET status = 'approved', reviewed_by = $2, reviewed_at = now() \
          WHERE id = $1 AND status = 'pending' \
-         RETURNING contributor_id, category::text",
+         RETURNING contributor_id, category::text, name, lat, lng",
     )
     .bind(id)
     .bind(claims.sub)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some((contributor_id, category)) = row else {
+    let Some((contributor_id, category, name, lat, lng)) = row else {
         let exists: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM place_contributions WHERE id = $1)")
                 .bind(id)
@@ -160,6 +160,14 @@ async fn approve(
     let new_badges = points::award_due_badges(&st.db, contributor_id)
         .await
         .unwrap_or_default();
+
+    // Persistent, navigable places (not transient construction/closed-road
+    // alerts) become findable via search/reverse-geocode immediately —
+    // same best-effort convention as the badge check above.
+    if points::is_navigable(&category) {
+        crate::pelias_index::index_place(&st.config.pelias_es_url, id, &category, &name, lat, lng)
+            .await;
+    }
 
     crate::notify::send(
         &st.nats,

@@ -3,7 +3,20 @@ Manual/one-off Jobs (kubectl apply -f, or `helm install --set pelias.import.run=
 re-triggers by bumping the job name — Jobs are immutable once created). A
 CronJob for periodic re-import is a v2 addition, not this pass — see plan
 section 5. Each importer gets its own PVC (they don't share files, no reason
-to contend over one ReadWriteOnce volume).
+to contend over one ReadWriteOnce volume) — except pelias-import-openstreetmap
+also mounts the whosonfirst PVC read-only, since it needs the *downloaded*
+WhosOnFirst sqlite bundles (not the ES import, just the raw files) for its
+country/region/locality admin lookup step.
+
+Run pelias-schema first, then these two — see README's "Pelias bootstrap"
+section for the full one-time sequence and why the order matters.
+
+Each image's default CMD is a bare `/bin/bash` (meant for interactive
+debugging) — without an explicit command a Job's pod just starts and exits
+immediately, "succeeding" without importing anything. `npm run download`
+(fetch the source data) then `npm start` (the image's own documented
+entrypoint) is the real sequence; skipping `download` fails with a missing
+data file error instead.
 */}}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -34,38 +47,6 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pelias-import-openstreetmap
-  namespace: {{ .Values.namespace }}
-  labels:
-    {{- include "saarathi.componentLabels" (dict "component" "pelias-import" "Release" .Release) | nindent 4 }}
-spec:
-  backoffLimit: 2
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: pelias-import-openstreetmap
-    spec:
-      restartPolicy: Never
-      containers:
-        - name: import
-          image: pelias/openstreetmap-import:latest
-          volumeMounts:
-            - name: config
-              mountPath: /code/pelias.json
-              subPath: pelias.json
-            - name: data
-              mountPath: /data/openstreetmap
-      volumes:
-        - name: config
-          configMap:
-            name: pelias-config
-        - name: data
-          persistentVolumeClaim:
-            claimName: pelias-import-osm-data
----
-apiVersion: batch/v1
-kind: Job
-metadata:
   name: pelias-import-whosonfirst
   namespace: {{ .Values.namespace }}
   labels:
@@ -81,6 +62,10 @@ spec:
       containers:
         - name: import
           image: pelias/whosonfirst:latest
+          command: ["sh", "-c", "npm run download && npm start"]
+          env:
+            - name: PELIAS_CONFIG
+              value: /code/pelias.json
           volumeMounts:
             - name: config
               mountPath: /code/pelias.json
@@ -92,5 +77,53 @@ spec:
           configMap:
             name: pelias-config
         - name: data
+          persistentVolumeClaim:
+            claimName: pelias-import-wof-data
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pelias-import-openstreetmap
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "pelias-import" "Release" .Release) | nindent 4 }}
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pelias-import-openstreetmap
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: import
+          # NOT pelias/openstreetmap-import — that repository doesn't exist.
+          image: pelias/openstreetmap:latest
+          command: ["sh", "-c", "npm run download && npm start"]
+          env:
+            - name: PELIAS_CONFIG
+              value: /code/pelias.json
+          volumeMounts:
+            - name: config
+              mountPath: /code/pelias.json
+              subPath: pelias.json
+            - name: data
+              mountPath: /data/openstreetmap
+            # Admin (country/region/locality) lookup during import needs
+            # WhosOnFirst's raw sqlite bundles on disk — run
+            # pelias-import-whosonfirst (or at least its `npm run download`
+            # step) first, or this fails with "unable to locate sqlite
+            # folder".
+            - name: wof-data
+              mountPath: /data/whosonfirst
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: pelias-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: pelias-import-osm-data
+        - name: wof-data
           persistentVolumeClaim:
             claimName: pelias-import-wof-data

@@ -37,7 +37,7 @@ pub async fn ws_handler(
         Err(_) => return (StatusCode::UNAUTHORIZED, "unauthorized").into_response(),
     };
 
-    match is_participant(&st, q.trip, claims.sub).await {
+    match is_participant(&st, q.trip, &claims).await {
         Ok(true) => {}
         _ => return (StatusCode::FORBIDDEN, "not a trip participant").into_response(),
     }
@@ -47,16 +47,38 @@ pub async fn ws_handler(
     ws.on_upgrade(move |socket| socket_loop(socket, st, uid, trip))
 }
 
-async fn is_participant(st: &AppState, trip: Uuid, uid: Uuid) -> anyhow::Result<bool> {
-    let row: Option<(Uuid, Option<Uuid>)> =
-        sqlx::query_as("SELECT rider_id, driver_id FROM trips WHERE id = $1")
+/// Same access rule as `get_trip`/`get_participants` in routes/rides.rs
+/// (rider, driver, staff, or — for a delivery trip — the fulfilling
+/// merchant): this WS is just a different transport for the same trip view,
+/// not a separate capability with its own rules.
+async fn is_participant(
+    st: &AppState,
+    trip: Uuid,
+    claims: &saarathi_core::authn::Claims,
+) -> anyhow::Result<bool> {
+    let row: Option<(Uuid, Option<Uuid>, String)> =
+        sqlx::query_as("SELECT rider_id, driver_id, trip_type::text FROM trips WHERE id = $1")
             .bind(trip)
             .fetch_optional(&st.db)
             .await?;
-    Ok(match row {
-        Some((rider, driver)) => rider == uid || driver == Some(uid),
-        None => false,
-    })
+    let Some((rider, driver, trip_type)) = row else {
+        return Ok(false);
+    };
+    if rider == claims.sub || driver == Some(claims.sub) || claims.is_staff() {
+        return Ok(true);
+    }
+    if trip_type == "delivery" {
+        let owns: Option<Uuid> = sqlx::query_scalar(
+            "SELECT m.id FROM orders o JOIN merchants m ON m.id = o.merchant_id \
+             WHERE o.trip_id = $1 AND m.owner_user_id = $2",
+        )
+        .bind(trip)
+        .bind(claims.sub)
+        .fetch_optional(&st.db)
+        .await?;
+        return Ok(owns.is_some());
+    }
+    Ok(false)
 }
 
 async fn socket_loop(socket: WebSocket, st: AppState, uid: Uuid, trip: Uuid) {

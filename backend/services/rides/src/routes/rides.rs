@@ -16,7 +16,7 @@ use saarathi_core::api::ErrorCode;
 use saarathi_core::domain::roles;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow)]
@@ -38,7 +38,10 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/rides/estimate", post(estimate))
         .route("/v1/rides/route", post(route_geometry))
         .route("/v1/rides", post(create).get(list_mine))
+        .route("/v1/rides/mine/stats", get(my_stats))
+        .route("/v1/rides/driver/today", get(driver_today))
         .route("/v1/rides/{id}", get(get_trip))
+        .route("/v1/rides/{id}/participants", get(get_participants))
         .route("/v1/rides/{id}/accept", post(accept))
         .route("/v1/rides/{id}/status", post(update_status))
 }
@@ -56,9 +59,19 @@ struct RideRequest {
     /// 'cash' (default) or 'wallet' (pay from prepaid credits).
     #[serde(default)]
     payment_method: Option<String>,
-    /// Bounded fare bargaining: a rider's proposed fare (clamped to the legal band).
+    /// Bounded fare bargaining: a rider's proposed fare (clamped to the legal
+    /// band). In `pricing_mode: "bid"` this instead seeds the auction's
+    /// initial ask (also clamped) rather than an immediately-agreed price.
     #[serde(default)]
     offered_fare: Option<Decimal>,
+    /// 'instant' (default: today's single algorithmic-fare dispatch) or
+    /// 'bid' (open the trip to the fare auction — see `routes::bidding`).
+    #[serde(default)]
+    pricing_mode: Option<String>,
+    /// Starting dispatch search radius (km), overriding the service default.
+    /// Set on a "search wider" re-request after a no-driver cancellation.
+    #[serde(default)]
+    radius_km: Option<f64>,
 }
 
 async fn estimate(
@@ -168,24 +181,45 @@ async fn create(
         ));
     }
 
-    // Bargaining is a dashboard-toggleable feature; when off, ignore any
-    // proposed fare and charge the algorithmic price.
-    let offered_fare = if crate::flags::is_enabled(&st, crate::flags::BARGAINING, true).await {
-        body.offered_fare
-    } else {
-        None
+    let bargaining_on = crate::flags::is_enabled(&st, crate::flags::BARGAINING, true).await;
+    let pricing_mode = match body.pricing_mode.as_deref() {
+        Some("bid") if bargaining_on => "bid",
+        _ => "instant",
     };
 
-    // Bargaining: clamp the rider's proposed fare to [floor, legal ceiling] and
-    // recompute the split on the agreed amount (commission still capped at 10%).
+    // Bargaining is a dashboard-toggleable feature; when off, ignore any
+    // proposed fare and charge the algorithmic price.
+    let offered_fare = if bargaining_on { body.offered_fare } else { None };
+
+    // Bid mode: the rider's fare is decided later, when a bid is accepted
+    // (`routes::bidding::accept_bid` reuses this exact clamp-and-split
+    // math). The money columns here are just placeholders until then; only
+    // `ask_fare` — the rider's starting price — is actually meaningful.
+    let ask_fare = (pricing_mode == "bid")
+        .then(|| offered_fare.unwrap_or(est.gross_fare).max(est.fare_floor).min(est.fare_ceiling));
+
+    // Bargaining (instant mode only): clamp the rider's proposed fare to
+    // [floor, legal ceiling] and recompute the split on the agreed amount.
     let (gross_fare, commission, accident_fund, driver_payout, final_fare, agreed) =
-        if let Some(offered) = offered_fare {
-            let agreed = offered.max(est.fare_floor).min(est.fare_ceiling);
-            let commission = (agreed * st.config.commission_rate).round_dp(2);
-            let fund = (agreed * Decimal::new(1, 2)).round_dp(2);
-            let payout = agreed - commission - fund;
-            let final_fare = (agreed - est.discount_amount).max(Decimal::ZERO);
-            (agreed, commission, fund, payout, final_fare, Some(agreed))
+        if pricing_mode == "instant" {
+            if let Some(offered) = offered_fare {
+                let agreed = offered.max(est.fare_floor).min(est.fare_ceiling);
+                let (commission, fund, payout, final_fare) = pricing::split_agreed_fare(
+                    agreed,
+                    est.discount_amount,
+                    st.config.commission_rate,
+                );
+                (agreed, commission, fund, payout, final_fare, Some(agreed))
+            } else {
+                (
+                    est.gross_fare,
+                    est.commission,
+                    est.accident_fund,
+                    est.driver_payout,
+                    est.final_fare,
+                    None,
+                )
+            }
         } else {
             (
                 est.gross_fare,
@@ -240,8 +274,9 @@ async fn create(
     let trip: Trip = sqlx::query_as(&format!(
         "INSERT INTO trips (rider_id, vehicle_class, origin_lat, origin_lng, dest_lat, dest_lng, \
             distance_km, duration_secs, gross_fare, discount_code, discount_amount, final_fare, \
-            commission, accident_fund, driver_payout, payment_method, stops) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING {TRIP_COLS}"
+            commission, accident_fund, driver_payout, payment_method, stops, pricing_mode, ask_fare, \
+            search_radius_km) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING {TRIP_COLS}"
     ))
     .bind(claims.sub)
     .bind(&body.vehicle_class)
@@ -260,6 +295,9 @@ async fn create(
     .bind(driver_payout)
     .bind(method)
     .bind(serde_json::to_value(&body.stops).unwrap_or_else(|_| serde_json::json!([])))
+    .bind(pricing_mode)
+    .bind(ask_fare)
+    .bind(body.radius_km)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -350,6 +388,47 @@ async fn update_status(
         ));
     }
 
+    // Completion is its own path, shared with the automatic "arrived at
+    // destination" geofence trigger in tracking.rs — see `complete_trip`.
+    // Validated here with a plain (non-locking) read since the money-
+    // critical part re-validates under its own row lock inside that
+    // function; no need to hold this connection's lock across the call.
+    if body.status == "completed" {
+        let row: Option<(Uuid, Option<Uuid>, String)> = sqlx::query_as(
+            "SELECT rider_id, driver_id, trip_type::text FROM trips WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&st.db)
+        .await?;
+        let (rider_id, driver_id, trip_type) = row.ok_or(AppError::NotFound)?;
+        if rider_id != claims.sub && driver_id != Some(claims.sub) {
+            return Err(AppError::Forbidden);
+        }
+        // A *parcel-send* delivery (rider sends a parcel P2P) settles through
+        // the proof-of-delivery endpoint (OTP + POD + COD) — never the plain
+        // status endpoint, so proof is guaranteed before payment. A
+        // marketplace-order courier leg (spawned by the merchant service on
+        // `POST /v1/internal/delivery-trips`) is also `trip_type='delivery'`
+        // but has no `parcel_details`/OTP row at all, since the order itself
+        // is the record of what's owed — that one completes normally, or it
+        // would have no completion path whatsoever (the POD endpoint 404s
+        // without a `parcel_details` row to check against).
+        if trip_type == "delivery" {
+            let has_parcel: Option<Uuid> =
+                sqlx::query_scalar("SELECT trip_id FROM parcel_details WHERE trip_id = $1")
+                    .bind(id)
+                    .fetch_optional(&st.db)
+                    .await?;
+            if has_parcel.is_some() {
+                return Err(AppError::BadRequest(
+                    "complete a delivery via its proof-of-delivery endpoint".into(),
+                ));
+            }
+        }
+        let trip = complete_trip(&st, id, claims.sub).await?;
+        return Ok(Json(trip));
+    }
+
     let mut tx = st.db.begin().await?;
     let row: Option<TripMoney> = sqlx::query_as(
         "SELECT rider_id, driver_id, trip_type::text AS trip_type, status::text AS status, \
@@ -363,16 +442,8 @@ async fn update_status(
     if m.rider_id != claims.sub && m.driver_id != Some(claims.sub) {
         return Err(AppError::Forbidden);
     }
-    // Deliveries settle through the proof-of-delivery endpoint (OTP + POD + COD),
-    // never the plain status endpoint — that guarantees proof before payment.
-    if m.trip_type == "delivery" && body.status == "completed" {
-        return Err(AppError::BadRequest(
-            "complete a delivery via its proof-of-delivery endpoint".into(),
-        ));
-    }
 
     let ts_col = match body.status.as_str() {
-        "completed" => ", completed_at = now()",
         "cancelled" => ", cancelled_at = now()",
         _ => "",
     };
@@ -397,24 +468,22 @@ async fn update_status(
     .fetch_one(&mut *tx)
     .await?;
 
-    // On first completion, append the immutable ledger entry + settle the wallet.
-    if body.status == "completed" && m.status != "completed" {
-        crate::settle::on_completion(
-            &st,
-            &mut tx,
-            id,
-            &crate::settle::Completion {
-                rider_id: m.rider_id,
-                driver_id: m.driver_id,
-                gross_fare: m.gross_fare,
-                commission: m.commission,
-                accident_fund: m.accident_fund,
-                driver_payout: m.driver_payout,
-                final_fare: m.final_fare,
-                payment_method: m.payment_method.clone(),
-                vehicle_class: trip.vehicle_class.clone(),
-            },
+    // A marketplace order's `status` otherwise never leaves 'ready' once its
+    // courier trip is dispatched — nothing else advances it. Mirror the
+    // courier leg onto the order directly (cross-service write into the
+    // merchant service's `orders` table, sharing this Postgres instance,
+    // same established convention other services already use). Excludes
+    // orders already in a terminal state (delivered/cancelled/rejected) so a
+    // late-arriving trip status can't clobber one, e.g., cancelled by staff
+    // support in the meantime. (`completed` isn't handled here — it never
+    // reaches this function anymore, see the early-return above.)
+    if m.trip_type == "delivery" && body.status == "in_progress" {
+        sqlx::query(
+            "UPDATE orders SET status = 'picked_up', updated_at = now() \
+             WHERE trip_id = $1 AND status NOT IN ('delivered', 'cancelled', 'rejected')",
         )
+        .bind(id)
+        .execute(&mut *tx)
         .await?;
     }
 
@@ -424,17 +493,7 @@ async fn update_status(
         id,
         json!({ "type": "status", "status": body.status }).to_string(),
     );
-    if body.status == "completed" && m.status != "completed" {
-        crate::routes::metrics::track(
-            &st.db,
-            "ride_completed",
-            m.driver_id,
-            Some("driver"),
-            Some(id),
-            json!({ "gross": m.gross_fare, "payment_method": m.payment_method }),
-        )
-        .await;
-    } else if body.status == "cancelled" && m.status != "cancelled" {
+    if body.status == "cancelled" && m.status != "cancelled" {
         crate::routes::metrics::track(
             &st.db,
             "ride_cancelled",
@@ -449,6 +508,92 @@ async fn update_status(
         notify_status_change(&st, &m, id, claims.sub, &body.status).await;
     }
     Ok(Json(trip))
+}
+
+/// Marks a trip completed — settlement, delivery/order-sync, hub publish,
+/// metrics, and the "Trip completed" notify. The one path both the manual
+/// `update_status` handler and the automatic "arrived at destination"
+/// geofence trigger (`tracking.rs::post_location`) go through, so this
+/// money-critical logic never has two implementations to drift apart.
+/// Idempotent — a trip already completed is returned as-is (under its own
+/// row lock), so a manual "Complete trip" tap racing the auto-trigger can't
+/// double-settle. `actor` drives who the "Trip completed" notify goes to
+/// (whichever side didn't act) — pass the caller's own id for a manual
+/// completion, or the driver's id for the automatic one.
+pub(crate) async fn complete_trip(st: &AppState, id: Uuid, actor: Uuid) -> AppResult<Trip> {
+    let mut tx = st.db.begin().await?;
+    let row: Option<TripMoney> = sqlx::query_as(
+        "SELECT rider_id, driver_id, trip_type::text AS trip_type, status::text AS status, \
+                gross_fare, commission, accident_fund, driver_payout, final_fare, payment_method \
+         FROM trips WHERE id = $1 FOR UPDATE",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let m = row.ok_or(AppError::NotFound)?;
+    if m.status == "completed" {
+        drop(tx);
+        let trip: Trip = sqlx::query_as(&format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1"))
+            .bind(id)
+            .fetch_one(&st.db)
+            .await?;
+        return Ok(trip);
+    }
+
+    let trip: Trip = sqlx::query_as(&format!(
+        "UPDATE trips SET status = 'completed', updated_at = now(), completed_at = now() \
+         WHERE id = $1 RETURNING {TRIP_COLS}"
+    ))
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    crate::settle::on_completion(
+        st,
+        &mut tx,
+        id,
+        &crate::settle::Completion {
+            rider_id: m.rider_id,
+            driver_id: m.driver_id,
+            gross_fare: m.gross_fare,
+            commission: m.commission,
+            accident_fund: m.accident_fund,
+            driver_payout: m.driver_payout,
+            final_fare: m.final_fare,
+            payment_method: m.payment_method.clone(),
+            vehicle_class: trip.vehicle_class.clone(),
+        },
+    )
+    .await?;
+
+    if m.trip_type == "delivery" {
+        sqlx::query(
+            "UPDATE orders SET status = 'delivered', updated_at = now() \
+             WHERE trip_id = $1 AND status NOT IN ('delivered', 'cancelled', 'rejected')",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    st.hub.publish(
+        id,
+        json!({ "type": "status", "status": "completed" }).to_string(),
+    );
+    crate::routes::metrics::track(
+        &st.db,
+        "ride_completed",
+        m.driver_id,
+        Some("driver"),
+        Some(id),
+        json!({ "gross": m.gross_fare, "payment_method": m.payment_method }),
+    )
+    .await;
+    notify_status_change(st, &m, id, actor, "completed").await;
+
+    Ok(trip)
 }
 
 /// Notify whichever side of the trip didn't just act — a status change is
@@ -469,8 +614,9 @@ async fn notify_status_change(
             // Enrich with the driver's actual vehicle so the rider can spot
             // them on the street, not just a generic "driver is close" ping.
             let vehicle: Option<(String, String, String)> = sqlx::query_as(
-                "SELECT class::text, COALESCE(model, ''), COALESCE(plate_number, '') \
-                 FROM vehicles WHERE driver_id = $1",
+                "SELECT v.class::text, COALESCE(v.model, ''), COALESCE(v.plate_number, '') \
+                 FROM vehicles v JOIN drivers d ON d.id = v.driver_id \
+                 WHERE d.user_id = $1",
             )
             .bind(driver_id)
             .fetch_optional(&st.db)
@@ -539,27 +685,330 @@ async fn get_trip(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
-) -> AppResult<Json<Trip>> {
+) -> AppResult<Json<Value>> {
     let trip: Trip = sqlx::query_as(&format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1"))
         .bind(id)
         .fetch_optional(&st.db)
         .await?
         .ok_or(AppError::NotFound)?;
-    if trip.rider_id != claims.sub && trip.driver_id != Some(claims.sub) && !claims.is_staff() {
+    let authorized = trip.rider_id == claims.sub
+        || trip.driver_id == Some(claims.sub)
+        || claims.is_staff()
+        || (trip.trip_type == "delivery" && owns_delivery_merchant(&st, id, claims.sub).await?);
+    if !authorized {
         return Err(AppError::Forbidden);
     }
-    Ok(Json(trip))
+    // Only relevant once completed (rating happens post-trip) — skip the
+    // extra query on the hot path this endpoint is on while a trip is
+    // still active (polled every few seconds by the tracking screen).
+    let rated = if trip.status == "completed" {
+        sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT trip_id FROM ratings WHERE trip_id = $1 AND rater_id = $2",
+        )
+        .bind(id)
+        .bind(claims.sub)
+        .fetch_optional(&st.db)
+        .await?
+        .flatten()
+        .is_some()
+    } else {
+        false
+    };
+    let mut v = serde_json::to_value(trip).unwrap_or_default();
+    v["rated"] = json!(rated);
+    Ok(Json(v))
+}
+
+/// A delivery trip's courier leg is also visible to the merchant whose order
+/// it's fulfilling — they're neither the trip's rider (the customer) nor its
+/// driver (the courier), but still need to track their own courier once it's
+/// dispatched. Cross-service read against the merchant service's
+/// `orders`/`merchants` tables, sharing this Postgres instance — same
+/// established convention other services already use against rides-owned
+/// tables, just in the other direction here.
+async fn owns_delivery_merchant(st: &AppState, trip_id: Uuid, user_id: Uuid) -> AppResult<bool> {
+    let owns: Option<Uuid> = sqlx::query_scalar(
+        "SELECT m.id FROM orders o JOIN merchants m ON m.id = o.merchant_id \
+         WHERE o.trip_id = $1 AND m.owner_user_id = $2",
+    )
+    .bind(trip_id)
+    .bind(user_id)
+    .fetch_optional(&st.db)
+    .await?;
+    Ok(owns.is_some())
+}
+
+#[derive(Serialize)]
+struct Person {
+    name: Option<String>,
+    phone: Option<String>,
+    rating: Option<f64>,
+    rating_count: i64,
+}
+
+#[derive(Serialize)]
+struct DriverParticipant {
+    #[serde(flatten)]
+    person: Person,
+    vehicle_class: Option<String>,
+    make: Option<String>,
+    model: Option<String>,
+    plate_number: Option<String>,
+    color: Option<String>,
+    partner_name: Option<String>,
+    photo_url: Option<String>,
+}
+
+#[derive(Serialize)]
+struct Participants {
+    rider: Person,
+    driver: Option<DriverParticipant>,
+}
+
+/// Counterpart identity for the sticky in-trip card: both sides' name/phone/
+/// rating, plus the driver's vehicle, fleet-partner name (if any), and photo.
+/// Authz mirrors `get_trip` exactly (rider, driver, staff, or — for a
+/// delivery trip — the fulfilling merchant) — this is the same trip, just a
+/// different projection of it.
+async fn get_participants(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Participants>> {
+    let trip: Trip = sqlx::query_as(&format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1"))
+        .bind(id)
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let authorized = trip.rider_id == claims.sub
+        || trip.driver_id == Some(claims.sub)
+        || claims.is_staff()
+        || (trip.trip_type == "delivery" && owns_delivery_merchant(&st, id, claims.sub).await?);
+    if !authorized {
+        return Err(AppError::Forbidden);
+    }
+
+    // Real phone numbers only while the trip is actively underway — never
+    // for a still-pending or already-finished trip.
+    let phone_visible = matches!(
+        trip.status.as_str(),
+        "accepted" | "arriving" | "in_progress"
+    );
+
+    let rider_row: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT full_name, phone FROM users WHERE id = $1")
+            .bind(trip.rider_id)
+            .fetch_optional(&st.db)
+            .await?;
+    let (rider_name, rider_phone) = rider_row.unwrap_or((None, None));
+    let (rider_rating, rider_rating_count): (Option<f64>, i64) = sqlx::query_as(
+        "SELECT AVG(stars)::float8, count(*) FROM ratings \
+         WHERE ratee_id = $1 AND role = 'driver_rates_rider'",
+    )
+    .bind(trip.rider_id)
+    .fetch_one(&st.db)
+    .await?;
+    let rider = Person {
+        name: rider_name,
+        phone: if phone_visible { rider_phone } else { None },
+        rating: rider_rating,
+        rating_count: rider_rating_count,
+    };
+
+    let driver = if let Some(driver_user_id) = trip.driver_id {
+        let driver_row: Option<(Option<String>, Option<String>)> =
+            sqlx::query_as("SELECT full_name, phone FROM users WHERE id = $1")
+                .bind(driver_user_id)
+                .fetch_optional(&st.db)
+                .await?;
+        let (driver_name, driver_phone) = driver_row.unwrap_or((None, None));
+        let (driver_rating, driver_rating_count): (Option<f64>, i64) = sqlx::query_as(
+            "SELECT AVG(stars)::float8, count(*) FROM ratings \
+             WHERE ratee_id = $1 AND role = 'rider_rates_driver'",
+        )
+        .bind(driver_user_id)
+        .fetch_one(&st.db)
+        .await?;
+
+        let vehicle: Option<(String, Option<String>, Option<String>, String, Option<String>)> =
+            sqlx::query_as(
+                "SELECT v.class::text, v.make, v.model, v.plate_number, v.color \
+                 FROM vehicles v JOIN drivers d ON d.id = v.driver_id \
+                 WHERE d.user_id = $1",
+            )
+            .bind(driver_user_id)
+            .fetch_optional(&st.db)
+            .await?;
+
+        let partner_name: Option<String> = sqlx::query_scalar(
+            "SELECT p.name FROM partner_drivers pd JOIN partners p ON p.id = pd.partner_id \
+             WHERE pd.driver_user_id = $1 AND pd.status = 'active' AND p.status = 'active'",
+        )
+        .bind(driver_user_id)
+        .fetch_optional(&st.db)
+        .await?;
+
+        let has_photo: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM driver_documents dd JOIN drivers d ON d.id = dd.driver_id \
+             WHERE d.user_id = $1 AND dd.kind = 'profile_photo')",
+        )
+        .bind(driver_user_id)
+        .fetch_one(&st.db)
+        .await?;
+
+        Some(DriverParticipant {
+            person: Person {
+                name: driver_name,
+                phone: if phone_visible { driver_phone } else { None },
+                rating: driver_rating,
+                rating_count: driver_rating_count,
+            },
+            vehicle_class: vehicle.as_ref().map(|v| v.0.clone()),
+            make: vehicle.as_ref().and_then(|v| v.1.clone()),
+            model: vehicle.as_ref().and_then(|v| v.2.clone()),
+            plate_number: vehicle.as_ref().map(|v| v.3.clone()),
+            color: vehicle.as_ref().and_then(|v| v.4.clone()),
+            partner_name,
+            photo_url: has_photo.then(|| format!("/v1/driver/{driver_user_id}/photo")),
+        })
+    } else {
+        None
+    };
+
+    Ok(Json(Participants { rider, driver }))
 }
 
 async fn list_mine(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
-) -> AppResult<Json<Vec<Trip>>> {
+) -> AppResult<Json<Vec<Value>>> {
     let trips: Vec<Trip> = sqlx::query_as(&format!(
         "SELECT {TRIP_COLS} FROM trips WHERE rider_id = $1 OR driver_id = $1 ORDER BY created_at DESC LIMIT 100"
     ))
     .bind(claims.sub)
     .fetch_all(&st.db)
     .await?;
-    Ok(Json(trips))
+
+    // Whether *this caller* already rated each trip — the Activity tab uses
+    // it to gate retroactive rating and the pending-reviews count. A second
+    // query rather than a join on TRIP_COLS-based queries generally, since
+    // that const is shared across many call sites that don't have (or want)
+    // a per-caller EXISTS subquery.
+    let trip_ids: Vec<Uuid> = trips.iter().map(|t| t.id).collect();
+    let rated_ids: Vec<Uuid> =
+        sqlx::query_scalar("SELECT trip_id FROM ratings WHERE rater_id = $1 AND trip_id = ANY($2)")
+            .bind(claims.sub)
+            .bind(&trip_ids)
+            .fetch_all(&st.db)
+            .await?;
+
+    let out = trips
+        .into_iter()
+        .map(|t| {
+            let rated = rated_ids.contains(&t.id);
+            let mut v = serde_json::to_value(t).unwrap_or_default();
+            v["rated"] = json!(rated);
+            v
+        })
+        .collect();
+    Ok(Json(out))
+}
+
+/// Self-service mirror of the staff-only `rider_detail` aggregate
+/// (`insights.rs`) — same shape, gated to the caller's own id instead of a
+/// staff-picked `Path(id)`, and without the account-metadata/recent-trips
+/// fields that only make sense in a staff detail view (the Activity tab
+/// already covers "my recent trips").
+async fn my_stats(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<Value>> {
+    let (total_rides, completed_rides, cancelled_rides, total_spend, total_distance_km): (
+        i64,
+        i64,
+        i64,
+        Decimal,
+        Decimal,
+    ) = sqlx::query_as(
+        "SELECT count(*), \
+                count(*) FILTER (WHERE status = 'completed'), \
+                count(*) FILTER (WHERE status = 'cancelled'), \
+                COALESCE(SUM(final_fare) FILTER (WHERE status = 'completed'), 0), \
+                COALESCE(SUM(distance_km) FILTER (WHERE status = 'completed'), 0) \
+         FROM trips WHERE rider_id = $1",
+    )
+    .bind(claims.sub)
+    .fetch_one(&st.db)
+    .await?;
+
+    // The rating the rider has *received* from drivers, not given.
+    let (avg_rating, rating_count): (Option<f64>, i64) = sqlx::query_as(
+        "SELECT AVG(stars)::float8, count(*) FROM ratings \
+         WHERE ratee_id = $1 AND role = 'driver_rates_rider'",
+    )
+    .bind(claims.sub)
+    .fetch_one(&st.db)
+    .await?;
+
+    Ok(Json(json!({
+        "total_rides": total_rides,
+        "completed_rides": completed_rides,
+        "cancelled_rides": cancelled_rides,
+        "total_spend": total_spend,
+        "total_distance_km": total_distance_km,
+        "avg_rating": avg_rating,
+        "rating_count": rating_count,
+    })))
+}
+
+#[derive(sqlx::FromRow)]
+struct DriverGoalCampaign {
+    id: Uuid,
+    title: String,
+    kind: String,
+    value: Decimal,
+    rules: sqlx::types::Json<Vec<crate::rules::CampaignRule>>,
+}
+
+/// A driver's progress today toward any live "complete N rides today"
+/// campaign — the app-facing counterpart to the automatic bonus payout in
+/// `bonus.rs`. Purely informational; the bonus itself is still granted at
+/// trip-completion time, not by this endpoint.
+async fn driver_today(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<Value>> {
+    let rides_today = crate::rules::rides_today(&st.db, claims.sub, "driver").await;
+
+    let candidates: Vec<DriverGoalCampaign> = sqlx::query_as(
+        "SELECT id, title, kind::text, value, rules FROM campaigns \
+         WHERE audience = 'driver' AND active = true \
+           AND (starts_at IS NULL OR starts_at <= now()) \
+           AND (ends_at IS NULL OR ends_at >= now())",
+    )
+    .fetch_all(&st.db)
+    .await?;
+
+    let goals: Vec<Value> = candidates
+        .into_iter()
+        .filter_map(|c| {
+            let target = c.rules.0.iter().find_map(|r| match r {
+                crate::rules::CampaignRule::RidesToday { count } => Some(*count),
+                _ => None,
+            })?;
+            Some(json!({
+                "campaign_id": c.id,
+                "title": c.title,
+                "target": target,
+                "reward_kind": c.kind,
+                "reward_value": c.value,
+                "achieved": rides_today >= target,
+            }))
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "rides_today": rides_today,
+        "goals": goals,
+    })))
 }

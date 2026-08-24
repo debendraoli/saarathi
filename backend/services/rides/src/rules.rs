@@ -22,6 +22,29 @@ pub struct RuleContext {
     pub gross: Decimal,
     pub now_minute: i32,
     pub now_daymask: i32,
+    pub rides_today: i64,
+}
+
+/// Rides completed by `user_id` (as `driver_id` or `rider_id`, matching
+/// [`load_context`]'s own `col` selection) so far in the current Nepal-time
+/// day. Extracted so the `GET /v1/rides/driver/today` endpoint can reuse the
+/// exact same count `RidesToday` rules are evaluated against.
+pub async fn rides_today(pool: &PgPool, user_id: Uuid, audience: &str) -> i64 {
+    let col = if audience == "driver" {
+        "driver_id"
+    } else {
+        "rider_id"
+    };
+    sqlx::query_scalar(&format!(
+        "SELECT count(*) FROM trips \
+         WHERE {col} = $1 AND status = 'completed' \
+           AND (completed_at AT TIME ZONE 'Asia/Kathmandu')::date \
+             = (now() AT TIME ZONE 'Asia/Kathmandu')::date"
+    ))
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0)
 }
 
 /// Gather the facts needed to evaluate a campaign's rules for one user.
@@ -70,6 +93,8 @@ pub async fn load_context(
     .await
     .unwrap_or(0);
 
+    let today = rides_today(pool, user_id, audience).await;
+
     let tz = FixedOffset::east_opt(NPT_OFFSET_SECS).expect("valid offset");
     let now = tz.from_utc_datetime(&Utc::now().naive_utc());
     RuleContext {
@@ -79,6 +104,7 @@ pub async fn load_context(
         gross,
         now_minute: (now.hour() * 60 + now.minute()) as i32,
         now_daymask: 1_i32 << now.weekday().num_days_from_sunday(),
+        rides_today: today,
     }
 }
 
@@ -94,6 +120,7 @@ pub fn evaluate(rules: &[CampaignRule], ctx: &RuleContext) -> bool {
         }
         CampaignRule::MinRides { count } => ctx.prior_completed_rides >= *count,
         CampaignRule::MaxRides { count } => ctx.prior_completed_rides <= *count,
+        CampaignRule::RidesToday { count } => ctx.rides_today >= *count,
         CampaignRule::TimeOfDay {
             start_minute,
             end_minute,
@@ -127,7 +154,20 @@ mod tests {
             gross,
             now_minute: 18 * 60,
             now_daymask: 1 << 3, // Wednesday
+            rides_today: 0,
         }
+    }
+
+    #[test]
+    fn rides_today_goal() {
+        let rules = vec![CampaignRule::RidesToday { count: 5 }];
+        let mut c = ctx(0, 100, 0, dec!(50));
+        c.rides_today = 4;
+        assert!(!evaluate(&rules, &c));
+        c.rides_today = 5;
+        assert!(evaluate(&rules, &c));
+        c.rides_today = 6;
+        assert!(evaluate(&rules, &c)); // still true past the threshold
     }
 
     #[test]

@@ -63,6 +63,7 @@ services:
       PathPrefix(`/v1/auth`) || Path(`/v1/me`) || PathPrefix(`/v1/me/`)
       || PathPrefix(`/v1/driver/register`) || PathPrefix(`/v1/driver/documents`) || PathPrefix(`/v1/driver/status`)
       || PathPrefix(`/v1/driver/kyc`)
+      || PathRegexp(`^/v1/driver/[0-9a-fA-F-]+/photo$`)
       || PathPrefix(`/v1/admin/drivers`) || PathPrefix(`/v1/admin/documents`)
       || PathPrefix(`/v1/admin/staff`)
     pvc:
@@ -193,6 +194,10 @@ services:
     config:
       port: "8089"
       placesStorageDir: /data/places
+      # Best-effort write of approved, navigable contributions into
+      # Pelias's search index — see pelias_index.rs. Internal service DNS
+      # name from the Pelias StatefulSet's own Service.
+      peliasEsUrl: "http://pelias-opensearch:9200"
 
   routing:
     port: 8084
@@ -237,8 +242,15 @@ valhalla:
   serverThreads: "4"
 
 pelias:
+  # Despite the field/resource name, this runs real Elasticsearch, not
+  # OpenSearch — verified directly (both 1.x and 2.x) that OpenSearch
+  # reports its own independent version number from its info endpoint
+  # ("1.3.20", "2.19.6", ...), which fails Pelias's schema tool's hard
+  # version check (SUPPORTED_ES_VERSIONS = '>=7.4.2' in pelias/schema).
+  # Kept the field name `opensearch` so it doesn't ripple through every
+  # other file that references `.Values.pelias.opensearch.*`.
   opensearch:
-    image: opensearchproject/opensearch:2
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
     resources:
       requests: { cpu: 500m, memory: 1.5Gi }
       limits: { cpu: 1000m, memory: 2.5Gi }
@@ -250,6 +262,11 @@ pelias:
       requests: { cpu: 100m, memory: 256Mi }
       limits: { cpu: 300m, memory: 512Mi }
     hpa: { minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 75 }
+  # One-off, run manually after opensearch is up and before either import
+  # Job — see README's "Pelias bootstrap" section. Not a Deployment/HPA:
+  # pelias-schema-job.yaml is a single Job, no scaling knobs needed.
+  schema:
+    image: pelias/schema:latest
   import:
     osmPbfUrl: "https://download.geofabrik.de/asia/nepal-latest.osm.pbf"
     whosOnFirstCountryCode: "NP"

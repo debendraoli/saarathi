@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../shared/geocode_cache.dart';
 import '../../../shared/widgets/common.dart';
 import '../../../shared/widgets/skeleton.dart';
+import '../../places/data/places_repository.dart';
 import '../application/ride_controller.dart';
 import '../domain/models.dart';
 
@@ -42,19 +44,45 @@ class TripHistoryList extends ConsumerWidget {
   }
 }
 
-class TripTile extends StatelessWidget {
+class TripTile extends ConsumerStatefulWidget {
   const TripTile({super.key, required this.trip});
   final Trip trip;
 
   @override
+  ConsumerState<TripTile> createState() => _TripTileState();
+}
+
+class _TripTileState extends ConsumerState<TripTile> {
+  String? _originLabel;
+  String? _destLabel;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLabels();
+  }
+
+  Future<void> _loadLabels() async {
+    final repo = ref.read(placesRepositoryProvider);
+    final origin = await reverseGeocodeCached(repo, widget.trip.origin);
+    final dest = await reverseGeocodeCached(repo, widget.trip.dest);
+    if (mounted) {
+      setState(() {
+        _originLabel = origin;
+        _destLabel = dest;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final trip = widget.trip;
     final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
     final isDelivery = trip.tripType == 'delivery';
     return Card(
       child: ListTile(
-        onTap: trip.isActive
-            ? () => context.push('${Routes.trip}/${trip.id}')
-            : null,
+        onTap: () => context.push('${Routes.trip}/${trip.id}'),
         leading: CircleAvatar(
           backgroundColor: scheme.surfaceContainerHighest,
           child: Icon(
@@ -70,7 +98,22 @@ class TripTile extends StatelessWidget {
           '${trip.distanceKm.toStringAsFixed(1)} km · NPR ${trip.finalFare.toStringAsFixed(0)}',
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
-        subtitle: Text(_fmtDate(trip.createdAt)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 2),
+            _RoutePreview(
+              origin: _originLabel,
+              dest: _destLabel,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 2),
+            Text(_fmtDate(trip.createdAt), style: theme.textTheme.bodySmall),
+          ],
+        ),
+        isThreeLine: true,
         trailing: _StatusChip(status: trip.status),
       ),
     );
@@ -81,6 +124,26 @@ class TripTile extends StatelessWidget {
     final l = d.toLocal();
     String two(int n) => n.toString().padLeft(2, '0');
     return '${l.year}-${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
+  }
+}
+
+/// "Origin → Destination", one line, truncated — shown while a label is
+/// still resolving (or unavailable) as "…" rather than a jarring layout
+/// jump once it loads.
+class _RoutePreview extends StatelessWidget {
+  const _RoutePreview({required this.origin, required this.dest, this.style});
+  final String? origin;
+  final String? dest;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      '${origin ?? '…'} → ${dest ?? '…'}',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
+    );
   }
 }
 

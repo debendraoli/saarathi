@@ -26,6 +26,9 @@ pub enum CampaignRule {
     MinRides { count: i64 },
     /// The user has at most `count` prior completed rides.
     MaxRides { count: i64 },
+    /// The user has completed at least `count` rides today (local NPT day).
+    /// Distinct from `MinRides` (lifetime) — this is the "daily goal" rule.
+    RidesToday { count: i64 },
     /// Active only within a local (NPT) time-of-day window on the given days
     /// (`days_mask` bit0=Sun … bit6=Sat). `end` may wrap past midnight.
     TimeOfDay {

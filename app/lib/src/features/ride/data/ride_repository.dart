@@ -35,14 +35,50 @@ class RideRepository {
         'stops': [for (final s in draft.stops) s.toJson()],
         'vehicle_class': draft.vehicleClass.wire,
         'payment_method': draft.paymentMethod,
+        'pricing_mode': draft.pricingMode,
+        if (draft.askFare != null) 'offered_fare': draft.askFare,
+        if (draft.radiusKm != null) 'radius_km': draft.radiusKm,
       },
     );
     return Trip.fromJson(res as Map<String, dynamic>);
   }
 
+  /// Rider raises (or lowers) the asking price mid-auction; re-broadcasts to
+  /// drivers who were passed over at the old price.
+  Future<Trip> changeAsk(String tripId, double amount) async {
+    final res = await _api.post('/v1/rides/$tripId/ask', body: {
+      'amount': amount,
+    });
+    return Trip.fromJson(res as Map<String, dynamic>);
+  }
+
+  /// Live bids against a bid-mode trip's ask — rider/staff only (blind
+  /// bidding: a driver never sees this list).
+  Future<List<Bid>> bids(String tripId) async {
+    final res = await _api.get('/v1/rides/$tripId/bids') as List;
+    return res.cast<Map<String, dynamic>>().map(Bid.fromJson).toList();
+  }
+
+  /// Rider accepts a bid — binding, assigns the trip immediately.
+  Future<Trip> acceptBid(String tripId, String bidId) async {
+    final res = await _api.post('/v1/rides/$tripId/bids/$bidId/accept');
+    return Trip.fromJson(res as Map<String, dynamic>);
+  }
+
+  /// Driver places or revises a bid against a trip's current ask.
+  Future<void> placeBid(String tripId, double amount) =>
+      _api.post('/v1/rides/$tripId/bid', body: {'amount': amount});
+
   Future<Trip> trip(String id) async {
     final res = await _api.get('/v1/rides/$id');
     return Trip.fromJson(res as Map<String, dynamic>);
+  }
+
+  /// Counterpart identity for the sticky in-trip card — both sides' name/
+  /// phone/rating, plus the driver's vehicle, fleet-partner name and photo.
+  Future<TripParticipants> participants(String id) async {
+    final res = await _api.get('/v1/rides/$id/participants');
+    return TripParticipants.fromJson(res as Map<String, dynamic>);
   }
 
   /// Road-following route geometry for the map polyline. [points] is the ordered
@@ -73,6 +109,39 @@ class RideRepository {
     ];
   }
 
+  /// Distance + duration between two points — a thin sibling to
+  /// [routeGeometry] hitting the same endpoint, for a live ETA rather than
+  /// the map polyline (which discards everything but `geometry`).
+  Future<RouteEta> routeEta(
+    LatLng from,
+    LatLng to, {
+    String vehicleClass = 'two_wheeler',
+  }) async {
+    final res = await _api.post(
+      '/v1/rides/route',
+      body: {
+        'origin': {'lat': from.latitude, 'lng': from.longitude},
+        'dest': {'lat': to.latitude, 'lng': to.longitude},
+        'stops': [],
+        'vehicle_class': vehicleClass,
+      },
+    ) as Map<String, dynamic>;
+    return RouteEta(
+      distanceKm: asDouble(res['distance_km']),
+      durationSecs: (res['duration_secs'] as num).toInt(),
+    );
+  }
+
+  Future<RiderStats> myStats() async {
+    final res = await _api.get('/v1/rides/mine/stats') as Map<String, dynamic>;
+    return RiderStats.fromJson(res);
+  }
+
+  Future<DriverGoals> todayGoals() async {
+    final res = await _api.get('/v1/rides/driver/today') as Map<String, dynamic>;
+    return DriverGoals.fromJson(res);
+  }
+
   Future<List<Trip>> myTrips() => cacheThroughList(
         prefs: _prefs,
         key: 'cache.rides.mytrips',
@@ -80,23 +149,37 @@ class RideRepository {
         parse: Trip.fromJson,
       );
 
-  Future<void> cancel(String id) =>
-      _api.post('/v1/rides/$id/status', body: {'status': 'cancelled'});
+  Future<void> cancel(String id, {String? reason}) => _api.post(
+        '/v1/rides/$id/status',
+        body: {
+          'status': 'cancelled',
+          if (reason != null) 'reason': reason,
+        },
+      );
 
   /// Driver advances the trip: arriving → in_progress → completed.
   Future<void> updateStatus(String id, String status) =>
       _api.post('/v1/rides/$id/status', body: {'status': status});
 
   /// Driver publishes live position during an active trip (fanned out over WS).
-  Future<void> postLocation(String id, double lat, double lng) =>
-      _api.post('/v1/rides/$id/location', body: {'lat': lat, 'lng': lng});
+  Future<void> postLocation(
+    String id,
+    double lat,
+    double lng, {
+    double? heading,
+    double? speed,
+  }) =>
+      _api.post('/v1/rides/$id/location', body: {
+        'lat': lat,
+        'lng': lng,
+        if (heading != null) 'heading': heading,
+        if (speed != null) 'speed': speed,
+      });
 
-  Future<void> rate(String id, int stars, {String? comment}) => _api.post(
+  Future<void> rate(String id, int stars, {List<String> tags = const []}) =>
+      _api.post(
         '/v1/rides/$id/rate',
-        body: {
-          'stars': stars,
-          if (comment != null && comment.isNotEmpty) 'comment': comment
-        },
+        body: {'stars': stars, 'tags': tags},
       );
 
   Future<void> sos(String id, {double? lat, double? lng, String? note}) =>
@@ -107,7 +190,8 @@ class RideRepository {
 
   /// Approximate (jittered) online-driver positions near [center], purely for
   /// the "searching" map animation — not real dispatch candidates.
-  Future<List<LatLng>> nearbyDrivers(LatLng center, {double radiusKm = 3}) async {
+  Future<List<LatLng>> nearbyDrivers(LatLng center,
+      {double radiusKm = 3}) async {
     final res = await _api.get('/v1/rides/nearby-drivers', query: {
       'lat': center.latitude,
       'lng': center.longitude,

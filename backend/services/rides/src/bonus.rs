@@ -89,6 +89,29 @@ pub async fn grant_driver_bonus(
                 continue;
             }
         }
+        // A `RidesToday` goal pays out once when the threshold is crossed,
+        // not on every trip for the rest of the day — everything else (a
+        // plain per-trip bonus with no such rule) keeps paying every trip.
+        let is_daily_goal = c
+            .rules
+            .0
+            .iter()
+            .any(|r| matches!(r, crate::rules::CampaignRule::RidesToday { .. }));
+        if is_daily_goal {
+            let already_today: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM driver_bonus_grants \
+                 WHERE campaign_id = $1 AND driver_id = $2 \
+                   AND (created_at AT TIME ZONE 'Asia/Kathmandu')::date \
+                     = (now() AT TIME ZONE 'Asia/Kathmandu')::date)",
+            )
+            .bind(c.id)
+            .bind(driver_id)
+            .fetch_one(&mut **tx)
+            .await?;
+            if already_today {
+                continue;
+            }
+        }
         let bonus = compute_bonus(&c.kind, c.value, c.max_discount, gross);
         if bonus <= Decimal::ZERO {
             continue;

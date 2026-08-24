@@ -20,6 +20,9 @@ export default function MerchantDetailPage({ params }: { params: Promise<{ id: s
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [zoneBusy, setZoneBusy] = useState(false);
+  const [decisionBusy, setDecisionBusy] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
 
   async function load() {
     setError(null);
@@ -46,6 +49,38 @@ export default function MerchantDetailPage({ params }: { params: Promise<{ id: s
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function approve() {
+    setDecisionBusy(true);
+    setError(null);
+    try {
+      await merchant.approve(id);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDecisionBusy(false);
+    }
+  }
+
+  async function reject() {
+    if (!reason.trim()) {
+      setError("A rejection reason is required.");
+      return;
+    }
+    setDecisionBusy(true);
+    setError(null);
+    try {
+      await merchant.reject(id, reason.trim());
+      setRejecting(false);
+      setReason("");
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDecisionBusy(false);
+    }
+  }
 
   async function toggleOpen() {
     if (!row) return;
@@ -106,12 +141,54 @@ export default function MerchantDetailPage({ params }: { params: Promise<{ id: s
 
       <div className="row">
         <h1 className="page-title" style={{ margin: 0 }}>{row.name}</h1>
-        <span className={`badge ${row.is_open ? "approved" : "pending"}`}>
-          {row.is_open ? "open" : "closed"}
-        </span>
+        <span className={`badge ${row.status}`}>{row.status}</span>
+        {row.status === "approved" && (
+          <span className={`badge ${row.is_open ? "approved" : "pending"}`}>
+            {row.is_open ? "open" : "closed"}
+          </span>
+        )}
       </div>
 
       {error && <div className="error">{error}</div>}
+      {row.status === "rejected" && row.rejection_reason && (
+        <div className="error">Rejected: {row.rejection_reason}</div>
+      )}
+
+      {row.status === "pending" && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Decision</h3>
+          {rejecting ? (
+            <>
+              <div className="field">
+                <label>Rejection reason (shown to the owner)</label>
+                <input
+                  className="input"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="e.g. Address could not be verified"
+                />
+              </div>
+              <div className="row">
+                <button className="btn danger" disabled={decisionBusy} onClick={reject}>
+                  Confirm rejection
+                </button>
+                <button className="btn ghost" onClick={() => setRejecting(false)}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="row">
+              <button className="btn primary" disabled={decisionBusy} onClick={approve}>
+                Approve store
+              </button>
+              <button className="btn danger" disabled={decisionBusy} onClick={() => setRejecting(true)}>
+                Reject
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid-2">
         <div className="card">
@@ -144,9 +221,16 @@ export default function MerchantDetailPage({ params }: { params: Promise<{ id: s
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Availability</h3>
           <p className="subtle">
-            Staff override — closes or reopens the store regardless of what the owner has set.
+            {row.status === "approved"
+              ? "Staff override — closes or reopens the store regardless of what the owner has set."
+              : "The store can't open for business until it's approved."}
           </p>
-          <button className="btn primary" style={{ marginTop: 12 }} disabled={busy} onClick={toggleOpen}>
+          <button
+            className="btn primary"
+            style={{ marginTop: 12 }}
+            disabled={busy || row.status !== "approved"}
+            onClick={toggleOpen}
+          >
             {busy ? "Saving…" : row.is_open ? "Close store" : "Open store"}
           </button>
         </div>

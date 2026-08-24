@@ -140,11 +140,16 @@ export const auth = {
 
 // ── Core request helper (with one refresh retry) ────────────────────────────
 
-async function raw(path: string, init: RequestInit, withAuth: boolean): Promise<Response> {
+async function raw(
+  path: string,
+  init: RequestInit,
+  withAuth: boolean,
+  base: string = API_BASE,
+): Promise<Response> {
   const headers = new Headers(init.headers);
   if (withAuth && auth.access) headers.set("Authorization", `Bearer ${auth.access}`);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  return fetch(`${API_BASE}${path}`, { ...init, headers });
+  return fetch(`${base}${path}`, { ...init, headers });
 }
 
 // Parse the standard error envelope { error: { code, message } } → a display
@@ -161,10 +166,17 @@ async function apiError(res: Response): Promise<string> {
   return `Request failed (${res.status})`;
 }
 
-async function request<T>(path: string, init: RequestInit = {}, withAuth = true): Promise<T> {
-  let res = await raw(path, init, withAuth);
+async function request<T>(
+  path: string,
+  init: RequestInit = {},
+  withAuth = true,
+  base: string = API_BASE,
+): Promise<T> {
+  let res = await raw(path, init, withAuth, base);
 
   if (res.status === 401 && withAuth && auth.refresh) {
+    // The refresh call itself always goes through the main gateway
+    // (API_BASE), regardless of which base this request was for.
     const refreshed = await raw(
       "/v1/auth/refresh",
       { method: "POST", body: JSON.stringify({ refresh_token: auth.refresh }) },
@@ -173,7 +185,7 @@ async function request<T>(path: string, init: RequestInit = {}, withAuth = true)
     if (refreshed.ok) {
       const data = (await refreshed.json()) as TokenPair;
       auth.set(data.access_token, data.refresh_token, data.user);
-      res = await raw(path, init, withAuth);
+      res = await raw(path, init, withAuth, base);
     }
   }
 
@@ -465,6 +477,7 @@ export type CampaignRule =
   | { type: "new_user"; within_days?: number | null; max_prior_rides?: number | null }
   | { type: "min_rides"; count: number }
   | { type: "max_rides"; count: number }
+  | { type: "rides_today"; count: number }
   | { type: "time_of_day"; start_minute: number; end_minute: number; days_mask?: number }
   | { type: "min_fare"; amount: number }
   | { type: "max_per_user"; count: number };
@@ -484,15 +497,14 @@ export interface NewCampaign {
   rules?: CampaignRule[];
 }
 
+// Same refresh-and-retry behavior as the default `request()` — this used to
+// be a separate hand-rolled fetch with no 401 retry, so anything routed
+// through it (admin credit top-up, campaigns, credit plans, …) would hard-
+// fail with "Request failed (401)" the moment the access token expired,
+// even though the staff member was still logged in and every other page
+// (backed by `request()`) kept working fine.
 async function ridesRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  if (auth.access) headers.set("Authorization", `Bearer ${auth.access}`);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const res = await fetch(`${RIDES_BASE}${path}`, { ...init, headers });
-  if (!res.ok) {
-    throw new Error(await apiError(res));
-  }
-  return (await res.json()) as T;
+  return request<T>(path, init, true, RIDES_BASE);
 }
 
 export const rides = {
@@ -933,6 +945,8 @@ export interface MerchantRow {
   is_open: boolean;
   rating: string;
   image_key: string | null;
+  status: "pending" | "approved" | "rejected";
+  rejection_reason: string | null;
 }
 
 export interface NewMerchant {
@@ -992,6 +1006,20 @@ export const merchant = {
     merchantRequest<{ id: string; owner_user_id: string }>("/v1/admin/merchants", {
       method: "POST",
       body: JSON.stringify(m),
+    }),
+
+  // Pending applications by default; pass "all" for every store regardless
+  // of review state (mirrors listDrivers' status param).
+  queue: (status: "pending" | "all" = "pending") =>
+    merchantRequest<MerchantRow[]>(`/v1/admin/merchants/queue?status=${status}`),
+
+  approve: (id: string) =>
+    merchantRequest<{ ok: boolean }>(`/v1/admin/merchants/${id}/approve`, { method: "POST" }),
+
+  reject: (id: string, reason: string) =>
+    merchantRequest<{ ok: boolean }>(`/v1/admin/merchants/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
     }),
 
   menu: (id: string) => merchantRequest<MerchantMenuItem[]>(`/v1/merchant/merchants/${id}/menu`),

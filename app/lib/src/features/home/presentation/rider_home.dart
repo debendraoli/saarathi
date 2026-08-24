@@ -6,9 +6,14 @@ import 'package:saarathi/l10n/app_localizations.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../campaigns/data/campaigns_repository.dart';
+import '../../marketplace/data/marketplace_repository.dart';
+import '../../merchant/data/merchant_repository.dart';
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
 import '../../ride/application/ride_controller.dart';
+import '../../ride/application/trip_ws.dart';
+import '../../ride/domain/models.dart' show TripStatus;
 
 /// Opens the address search; routes the pick into the ride flow (map picker or
 /// a prefilled destination).
@@ -59,11 +64,15 @@ class RiderHome extends ConsumerWidget {
       padding: const EdgeInsets.all(16),
       children: [
         const _ActiveTripCard(),
+        const _PendingReviewsPrompt(),
         _WhereToCard(onTap: onWhereToTap, locked: hasActiveRide),
         if (!hasActiveRide) const _RecentDropoffs(),
         const SizedBox(height: 20),
         GridView.count(
-          crossAxisCount: 4,
+          // Parcel moved out of this grid — it's promoted via the showcase
+          // carousel below instead, and booked from the same pickup/
+          // destination screen as a ride (see WhereToScreen's mode toggle).
+          crossAxisCount: 3,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 12,
@@ -79,11 +88,6 @@ class RiderHome extends ConsumerWidget {
               icon: Icons.restaurant_rounded,
               label: l.food,
               onTap: () => context.push(Routes.food),
-            ),
-            _Service(
-              icon: Icons.inventory_2_rounded,
-              label: 'Parcel',
-              onTap: () => context.push(Routes.parcel),
             ),
             _Service(
               icon: Icons.local_grocery_store_rounded,
@@ -137,49 +141,60 @@ class _RecentDropoffs extends ConsumerWidget {
   }
 }
 
-/// Branded launch-offer banner (can be wired to campaigns later).
-class _PromoBanner extends StatelessWidget {
+/// Branded launch-offer banner — shows a real active campaign when one
+/// exists (auto-applied at checkout, no code to enter), falling back to
+/// the static launch copy when nothing's currently live so the card is
+/// never empty.
+class _PromoBanner extends ConsumerWidget {
   const _PromoBanner();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          colors: [scheme.primary, scheme.tertiary],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  l.promoTitle,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 20,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  l.promoBody,
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-              ],
-            ),
+    final offer = ref.watch(activeOffersProvider).valueOrNull?.firstOrNull;
+    final title = offer?.title ?? l.promoTitle;
+    final body = offer?.discountLine ?? l.promoBody;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => openWhereTo(context),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            colors: [scheme.primary, scheme.tertiary],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-          const SizedBox(width: 12),
-          const Icon(Icons.local_offer_rounded, color: Colors.white, size: 44),
-        ],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 20,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    body,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Icon(Icons.local_offer_rounded, color: Colors.white, size: 44),
+          ],
+        ),
       ),
     );
   }
@@ -207,6 +222,13 @@ class _InfoSliderState extends State<_InfoSlider> {
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final cards = <_InfoData>[
+      _InfoData(
+        Icons.inventory_2_rounded,
+        l.parcelTitle,
+        l.parcelShowcaseBody,
+        const [Color(0xFFEF6C00), Color(0xFFFFA726)],
+        onTap: () => context.push('${Routes.whereTo}?mode=delivery'),
+      ),
       _InfoData(Icons.shield_rounded, l.infoSafetyTitle, l.infoSafetyBody,
           const [Color(0xFF2E7D32), Color(0xFF66BB6A)]),
       _InfoData(Icons.support_agent_rounded, l.infoHelpTitle, l.infoHelpBody,
@@ -250,11 +272,16 @@ class _InfoSliderState extends State<_InfoSlider> {
 }
 
 class _InfoData {
-  const _InfoData(this.icon, this.title, this.body, this.colors);
+  const _InfoData(this.icon, this.title, this.body, this.colors, {this.onTap});
   final IconData icon;
   final String title;
   final String body;
   final List<Color> colors;
+
+  /// Only the parcel-delivery showcase slide is tappable today — the
+  /// safety/help/refer slides are pure information, no destination to send
+  /// them to.
+  final VoidCallback? onTap;
 }
 
 class _InfoCard extends StatelessWidget {
@@ -263,7 +290,7 @@ class _InfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final card = Container(
       margin: const EdgeInsets.symmetric(horizontal: 2),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -301,8 +328,16 @@ class _InfoCard extends StatelessWidget {
               ],
             ),
           ),
+          if (data.onTap != null)
+            const Icon(Icons.chevron_right_rounded, color: Colors.white70),
         ],
       ),
+    );
+    if (data.onTap == null) return card;
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: data.onTap,
+      child: card,
     );
   }
 }
@@ -321,6 +356,25 @@ class _ActiveTripCard extends ConsumerWidget {
     final active = trips.where((t) => t.isActive).firstOrNull;
     if (active == null) return const SizedBox.shrink();
 
+    // Same live-preview data the full trip screen shows, so the resume card
+    // is actually useful at a glance instead of a bare "tap to resume" line.
+    final destLabel = ref.watch(tripDestLabelProvider(active.id)).valueOrNull;
+    final driverLoc = ref.watch(tripLocationProvider(active.id)).valueOrNull;
+    final routingToPickup = active.status == TripStatus.accepted ||
+        active.status == TripStatus.arriving;
+    String? etaText;
+    if (driverLoc != null &&
+        (routingToPickup || active.status == TripStatus.inProgress)) {
+      final target = routingToPickup ? active.origin : active.dest;
+      final eta =
+          ref.watch(tripEtaProvider(EtaQuery(driverLoc, target))).valueOrNull;
+      if (eta != null) {
+        etaText = routingToPickup
+            ? l.etaArriving(eta.durationMins)
+            : l.etaToDestination(eta.durationMins);
+      }
+    }
+
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -333,20 +387,85 @@ class _ActiveTripCard extends ConsumerWidget {
             child: Icon(Icons.directions_car_rounded, color: scheme.onPrimary),
           ),
           title: Text(
-            l.ongoingRide,
+            destLabel ?? l.ongoingRide,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontWeight: FontWeight.w700,
               color: scheme.onPrimaryContainer,
             ),
           ),
           subtitle: Text(
-            l.ongoingRideBody,
+            [
+              'NPR ${active.finalFare.toStringAsFixed(2)}',
+              if (etaText != null) etaText,
+            ].join(' · '),
             style: TextStyle(color: scheme.onPrimaryContainer),
           ),
           trailing: Icon(Icons.chevron_right_rounded,
               color: scheme.onPrimaryContainer),
           onTap: () => context.push('${Routes.trip}/${active.id}'),
         ),
+      ),
+    );
+  }
+}
+
+/// Set once a dialog has been shown so it doesn't reappear on every rebuild
+/// of the home screen — reset naturally on app restart (session-scoped).
+bool _pendingReviewsPromptShown = false;
+
+/// Passive nudge to rate completed rides/deliveries: renders nothing itself,
+/// just pops a one-time dialog (per app session) the first time it notices
+/// something unrated, and links through to Activity to act on it.
+class _PendingReviewsPrompt extends ConsumerStatefulWidget {
+  const _PendingReviewsPrompt();
+
+  @override
+  ConsumerState<_PendingReviewsPrompt> createState() =>
+      _PendingReviewsPromptState();
+}
+
+class _PendingReviewsPromptState extends ConsumerState<_PendingReviewsPrompt> {
+  @override
+  Widget build(BuildContext context) {
+    final trips = ref.watch(myTripsProvider).valueOrNull ?? const [];
+    final orders = ref.watch(myOrdersProvider).valueOrNull ?? const [];
+    final pendingTrips =
+        trips.where((t) => t.status == TripStatus.completed && !t.rated);
+    final pendingOrders = orders
+        .where((o) => o.status == 'delivered' && o.tripId != null && !o.rated);
+    final count = pendingTrips.length + pendingOrders.length;
+
+    if (count > 0 && !_pendingReviewsPromptShown) {
+      _pendingReviewsPromptShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showPrompt(count);
+      });
+    }
+    return const SizedBox.shrink();
+  }
+
+  void _showPrompt(int count) {
+    final l = AppL10n.of(context);
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l.pendingReviewsBanner(count)),
+        content: Text(l.pendingReviewsPromptBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(l.reviewsPromptLater),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              context.push(Routes.activity);
+            },
+            child: Text(l.reviewsPromptGo),
+          ),
+        ],
       ),
     );
   }
@@ -468,11 +587,18 @@ class _BecomeDriverCard extends ConsumerWidget {
   }
 }
 
-class _BecomeMerchantCard extends StatelessWidget {
+/// Hidden once the account already has a store registration (pending,
+/// approved, or rejected-but-not-yet-resolved) — one registration owns
+/// exactly one store, so there's no "apply again" path while one is on file.
+class _BecomeMerchantCard extends ConsumerWidget {
   const _BecomeMerchantCard();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final myMerchants = ref.watch(myMerchantsProvider).valueOrNull;
+    if (myMerchants != null && myMerchants.any((m) => !m.isRejected)) {
+      return const SizedBox.shrink();
+    }
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
     return Card(

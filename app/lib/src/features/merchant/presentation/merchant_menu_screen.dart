@@ -112,7 +112,8 @@ class _ItemTileState extends ConsumerState<_ItemTile> {
                 width: 48,
                 height: 48,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox(width: 48, height: 48),
+                errorBuilder: (_, __, ___) =>
+                    const SizedBox(width: 48, height: 48),
               ),
             ),
       title: Text(it.name),
@@ -180,7 +181,8 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
       ),
     );
     if (source == null) return;
-    final file = await ImagePicker().pickImage(source: source, imageQuality: 70);
+    final file =
+        await ImagePicker().pickImage(source: source, imageQuality: 70);
     if (file != null && mounted) setState(() => _photo = file);
   }
 
@@ -260,7 +262,8 @@ class _AddItemSheetState extends ConsumerState<_AddItemSheet> {
           if (_photo != null)
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.file(File(_photo!.path), height: 120, fit: BoxFit.cover),
+              child: Image.file(File(_photo!.path),
+                  height: 120, fit: BoxFit.cover),
             ),
           const SizedBox(height: 8),
           OutlinedButton.icon(

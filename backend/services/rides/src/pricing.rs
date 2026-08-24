@@ -64,6 +64,23 @@ pub fn parse_vehicle_class(s: &str) -> AppResult<VehicleClass> {
     }
 }
 
+/// Splits an already-agreed fare into the same commission/accident-fund/
+/// payout/final-fare shape `create()`'s bargaining branch computes — shared
+/// so a bid's acceptance (`routes::bidding::accept_bid`) recomputes the
+/// money split through this one path rather than a second copy of the math.
+/// Returns `(commission, accident_fund, driver_payout, final_fare)`.
+pub fn split_agreed_fare(
+    agreed: Decimal,
+    discount_amount: Decimal,
+    commission_rate: Decimal,
+) -> (Decimal, Decimal, Decimal, Decimal) {
+    let commission = (agreed * commission_rate).round_dp(2);
+    let fund = (agreed * dec!(0.01)).round_dp(2);
+    let payout = agreed - commission - fund;
+    let final_fare = (agreed - discount_amount).max(Decimal::ZERO);
+    (commission, fund, payout, final_fare)
+}
+
 fn class_str(v: VehicleClass) -> &'static str {
     match v {
         VehicleClass::TwoWheeler => "two_wheeler",
@@ -119,7 +136,13 @@ pub async fn estimate(
                 Err(msg) => (None, Decimal::ZERO, Some(msg)),
             }
         }
-        _ => (None, Decimal::ZERO, None),
+        // No code supplied — auto-apply whichever active rider offer gives
+        // the biggest discount, so redemption needs no code-entry UI at
+        // all (offers are just shown, not typed in).
+        _ => match auto_pick_rider_discount(st, user_id, gross, vclass).await {
+            Some((c, amount)) => (Some(c), amount, None),
+            None => (None, Decimal::ZERO, None),
+        },
     };
 
     let final_fare = (gross - discount_amount).max(Decimal::ZERO);
@@ -224,4 +247,84 @@ async fn apply_rider_discount(
         discount = gross;
     }
     Ok(discount)
+}
+
+#[derive(sqlx::FromRow)]
+struct AutoPromoRow {
+    id: Uuid,
+    code: String,
+    kind: String,
+    value: Decimal,
+    min_fare: Decimal,
+    max_discount: Option<Decimal>,
+    vehicle_class: Option<String>,
+    usage_limit: Option<i32>,
+    used_count: i32,
+    rules: sqlx::types::Json<Vec<crate::rules::CampaignRule>>,
+}
+
+/// Scans every active, in-window rider campaign and picks whichever gives
+/// the biggest discount for this fare/vehicle/user — the no-code-needed
+/// counterpart to [`apply_rider_discount`]. Offers are surfaced to the
+/// rider purely as informational banners; nothing needs to be typed in.
+async fn auto_pick_rider_discount(
+    st: &AppState,
+    user_id: Uuid,
+    gross: Decimal,
+    vclass: VehicleClass,
+) -> Option<(String, Decimal)> {
+    let rows: Vec<AutoPromoRow> = sqlx::query_as(
+        "SELECT id, code, kind::text, value, min_fare, max_discount, vehicle_class, \
+                usage_limit, used_count, rules \
+             FROM campaigns \
+             WHERE audience = 'rider' AND active = true AND code IS NOT NULL \
+               AND (starts_at IS NULL OR starts_at <= now()) \
+               AND (ends_at IS NULL OR ends_at >= now())",
+    )
+    .fetch_all(&st.db)
+    .await
+    .unwrap_or_default();
+
+    let mut best: Option<(String, Decimal)> = None;
+    for row in rows {
+        if let Some(vc) = &row.vehicle_class {
+            if vc != class_str(vclass) {
+                continue;
+            }
+        }
+        if gross < row.min_fare {
+            continue;
+        }
+        if let Some(limit) = row.usage_limit {
+            if row.used_count >= limit {
+                continue;
+            }
+        }
+        if !row.rules.0.is_empty() {
+            let ctx =
+                crate::rules::load_context(&st.db, user_id, "rider", row.id, gross, None).await;
+            if !crate::rules::evaluate(&row.rules.0, &ctx) {
+                continue;
+            }
+        }
+        let mut discount = match row.kind.as_str() {
+            "percent" => (gross * row.value / dec!(100)).round_dp(2),
+            _ => row.value,
+        };
+        if let Some(cap) = row.max_discount {
+            if discount > cap {
+                discount = cap;
+            }
+        }
+        if discount > gross {
+            discount = gross;
+        }
+        if discount <= Decimal::ZERO {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(_, best_amt)| discount > *best_amt) {
+            best = Some((row.code, discount));
+        }
+    }
+    best
 }

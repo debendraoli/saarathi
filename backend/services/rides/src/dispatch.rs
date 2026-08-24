@@ -267,42 +267,62 @@ async fn eligible(st: &AppState, driver_id: Uuid, job_type: &str) -> anyhow::Res
 /// offered driver, or `None` if none are available yet. Idempotent while an
 /// offer is live.
 pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Option<Uuid>> {
-    let trip: Option<(String, Option<Uuid>, f64, f64, String)> = sqlx::query_as(
-        "SELECT status::text, driver_id, origin_lat, origin_lng, trip_type::text \
+    let trip: Option<(String, Option<Uuid>, f64, f64, String, String, Option<f64>)> = sqlx::query_as(
+        "SELECT status::text, driver_id, origin_lat, origin_lng, trip_type::text, pricing_mode, \
+                search_radius_km \
          FROM trips WHERE id = $1",
     )
     .bind(trip_id)
     .fetch_optional(&st.db)
     .await?;
-    let Some((status, driver, lat, lng, job_type)) = trip else {
+    let Some((status, driver, lat, lng, job_type, pricing_mode, radius_override)) = trip else {
         return Ok(None);
     };
     if status != "requested" || driver.is_some() {
         return Ok(None);
     }
+    let bid_mode = pricing_mode == "bid";
 
-    // Already have a live offer? Leave it be.
-    let live: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT id FROM trip_offers WHERE trip_id = $1 AND status = 'offered' AND expires_at > now()",
-    )
-    .bind(trip_id)
-    .fetch_optional(&st.db)
-    .await?;
-    if live.is_some() {
-        return Ok(None);
+    // Instant mode wants exactly one committed driver, so a live offer means
+    // "leave it be" — nothing more to do until it's accepted or expires. Bid
+    // mode wants as many bidders as possible, so it keeps inviting eligible
+    // drivers who haven't been reached yet on every call instead of stopping
+    // once someone's been offered.
+    if !bid_mode {
+        let live: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT id FROM trip_offers WHERE trip_id = $1 AND status = 'offered' AND expires_at > now()",
+        )
+        .bind(trip_id)
+        .fetch_optional(&st.db)
+        .await?;
+        if live.is_some() {
+            return Ok(None);
+        }
     }
 
-    let already: Vec<Uuid> =
-        sqlx::query_scalar("SELECT driver_id FROM trip_offers WHERE trip_id = $1")
-            .bind(trip_id)
-            .fetch_all(&st.db)
-            .await?;
+    // Only a currently-live invite excludes a driver — an *expired* one
+    // (they were slow, or briefly out of range) must not permanently rule
+    // them out, or a trip with only one nearby driver becomes undispatchable
+    // forever the moment that single offer times out.
+    let already: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT driver_id FROM trip_offers \
+         WHERE trip_id = $1 AND status = 'offered' AND expires_at > now()",
+    )
+    .bind(trip_id)
+    .fetch_all(&st.db)
+    .await?;
 
     // Gather eligible, not-yet-offered drivers, widening the radius until we
-    // have more than the broadcast threshold or exhaust the max radius.
-    let mut radius = st.config.dispatch_radius_km;
+    // have more than the broadcast threshold or exhaust the max radius. A
+    // re-request's `search_radius_km` override starts wider than the
+    // default — and raises the ceiling to match, since a starting radius
+    // past the normal max would otherwise make the loop below run zero times.
+    let mut radius = radius_override.unwrap_or(st.config.dispatch_radius_km);
+    let max_radius = radius_override
+        .map(|r| r.max(st.config.dispatch_max_radius_km))
+        .unwrap_or(st.config.dispatch_max_radius_km);
     let mut candidates: Vec<Uuid> = Vec::new();
-    while radius <= st.config.dispatch_max_radius_km {
+    while radius <= max_radius {
         for did in nearby(st, lng, lat, radius).await? {
             if already.contains(&did) || candidates.contains(&did) {
                 continue;
@@ -324,15 +344,30 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
     // Blast radius: when supply is thin (few candidates, or drivers going
     // offline), broadcast the offer to all of them at once so a scarce ride is
     // not stuck cycling through sequential timeouts. When supply is plentiful,
-    // keep the polite one-at-a-time offer to the nearest driver.
-    let broadcast = candidates.len() <= st.config.dispatch_broadcast_threshold;
+    // keep the polite one-at-a-time offer to the nearest driver. Bid mode
+    // always broadcasts — an auction needs multiple bidders to be worth
+    // anything, so the thin-supply threshold doesn't apply to it.
+    let broadcast = bid_mode || candidates.len() <= st.config.dispatch_broadcast_threshold;
     let targets: &[Uuid] = if broadcast {
         &candidates
     } else {
         &candidates[..1]
     };
 
-    let expires_at = chrono::Utc::now() + chrono::Duration::seconds(st.config.offer_ttl_secs);
+    // Bid-mode invites need to stay visible in the driver's offer list for
+    // as long as the auction is realistically open, not the tight 15s
+    // instant-offer TTL — the same `SEARCH_TIMEOUT_MINUTES` window the
+    // background loop uses as the trip's own give-up backstop.
+    let expires_at = if bid_mode {
+        chrono::Utc::now() + chrono::Duration::minutes(SEARCH_TIMEOUT_MINUTES)
+    } else {
+        chrono::Utc::now() + chrono::Duration::seconds(st.config.offer_ttl_secs)
+    };
+    let offer_title = if job_type == "delivery" {
+        "New delivery request nearby"
+    } else {
+        "New ride request nearby"
+    };
     for &did in targets {
         sqlx::query("INSERT INTO trip_offers (trip_id, driver_id, expires_at) VALUES ($1, $2, $3)")
             .bind(trip_id)
@@ -351,6 +386,19 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
             })
             .to_string(),
         );
+        // The WebSocket event above only reaches a driver whose app is
+        // foregrounded — push so a backgrounded/killed app still learns
+        // about the offer (falls back to SMS too, TRANSACTIONAL is in the
+        // CRITICAL class set).
+        crate::notify::send(
+            &st.nats,
+            did,
+            saarathi_core::domain::notif::TRANSACTIONAL,
+            offer_title,
+            "Open the app to respond before it expires.",
+            None,
+        )
+        .await;
     }
     Ok(Some(targets[0]))
 }
@@ -374,6 +422,16 @@ pub async fn run_dispatcher(st: AppState) {
         }
         let _ = sqlx::query(
             "UPDATE trip_offers SET status = 'expired' WHERE status = 'offered' AND expires_at <= now()",
+        )
+        .execute(&st.db)
+        .await;
+        // Same idea for individual bids: `list_bids` already filters on
+        // `expires_at`, so this doesn't change what the rider sees, but a
+        // driver's expired bid should read as 'expired', not sit at 'live'
+        // forever — and it frees the one-live-bid-per-driver slot for a
+        // fresh bid without relying on the upsert's ON CONFLICT alone.
+        let _ = sqlx::query(
+            "UPDATE trip_bids SET status = 'expired' WHERE status = 'live' AND expires_at <= now()",
         )
         .execute(&st.db)
         .await;

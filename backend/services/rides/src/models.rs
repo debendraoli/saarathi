@@ -12,6 +12,7 @@ pub const TRIP_COLS: &str = "id, rider_id, driver_id, trip_type::text AS trip_ty
     status::text AS status, vehicle_class, origin_lat, origin_lng, dest_lat, dest_lng, \
     distance_km, duration_secs, gross_fare, discount_code, discount_amount, final_fare, \
     commission, accident_fund, driver_payout, stops, cancel_reason, cancelled_by_role, \
+    pricing_mode, ask_fare, search_radius_km, payment_method, \
     created_at, accepted_at, completed_at, cancelled_at";
 
 #[derive(Debug, Serialize, FromRow)]
@@ -38,6 +39,15 @@ pub struct Trip {
     pub stops: serde_json::Value,
     pub cancel_reason: Option<String>,
     pub cancelled_by_role: Option<String>,
+    /// 'instant' (default, today's algorithmic-fare dispatch) or 'bid' (fare
+    /// auction — see `routes::bidding`).
+    pub pricing_mode: String,
+    /// The rider's current asking price, bid mode only.
+    pub ask_fare: Option<Decimal>,
+    /// Per-trip override for dispatch's starting search radius (km), set on
+    /// a "search wider" re-request. Null = use the service default.
+    pub search_radius_km: Option<f64>,
+    pub payment_method: String,
     pub created_at: DateTime<Utc>,
     pub accepted_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,

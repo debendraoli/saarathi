@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import 'deep_links.dart';
+
 import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/domain/models.dart';
 import '../../features/auth/presentation/otp_screen.dart';
@@ -12,11 +14,11 @@ import '../../features/comms/presentation/chat_screen.dart';
 import '../../features/contributions/presentation/contribute_screen.dart';
 import '../../features/contributions/presentation/my_contributions_screen.dart';
 import '../../features/contributions/presentation/points_badges_screen.dart';
-import '../../features/delivery/presentation/parcel_screen.dart';
 import '../../features/driver/presentation/become_driver_screen.dart';
 import '../../features/driver/presentation/kyc_documents_screen.dart';
 import '../../features/home/presentation/account_tab.dart';
 import '../../features/home/presentation/activity_tab.dart';
+import '../../features/home/presentation/settings_screen.dart';
 import '../../features/home/presentation/home_shell.dart';
 import '../../features/marketplace/domain/models.dart';
 import '../../features/marketplace/presentation/checkout_screen.dart';
@@ -24,6 +26,8 @@ import '../../features/marketplace/presentation/marketplace_screen.dart';
 import '../../features/marketplace/presentation/merchant_screen.dart';
 import '../../features/marketplace/presentation/order_screen.dart';
 import '../../features/merchant/presentation/merchant_dashboard_screen.dart';
+import '../../features/merchant/presentation/merchant_analytics_screen.dart';
+import '../../features/merchant/presentation/merchant_offers_screen.dart';
 import '../../features/merchant/presentation/merchant_menu_screen.dart';
 import '../../features/merchant/presentation/merchant_onboarding_screen.dart';
 import '../../features/merchant/presentation/merchant_orders_screen.dart';
@@ -33,8 +37,7 @@ import '../../features/onboarding/presentation/splash_screen.dart';
 import '../../features/places/data/places_repository.dart';
 import '../../features/places/presentation/saved_places_screen.dart';
 import '../../features/wallet/presentation/wallet_screen.dart';
-import '../../features/ride/domain/models.dart';
-import '../../features/ride/presentation/confirm_ride_screen.dart';
+import '../../features/ride/presentation/rider_stats_screen.dart';
 import '../../features/ride/presentation/trip_screen.dart';
 import '../../features/ride/presentation/where_to_screen.dart';
 import '../prefs.dart';
@@ -48,16 +51,16 @@ class Routes {
   static const activity = '/activity';
   static const account = '/account';
   static const whereTo = '/ride/where-to';
-  static const confirm = '/ride/confirm';
   static const trip = '/ride/trip'; // /ride/trip/:id
   static const becomeDriver = '/driver/register';
   static const kyc = '/driver/kyc';
-  static const parcel = '/delivery/parcel';
   static const chat = '/ride/chat';
   static const call = '/ride/call';
   static const notifications = '/notifications';
   static const savedPlaces = '/places/saved';
+  static const settings = '/settings';
   static const wallet = '/wallet';
+  static const myStats = '/me/stats';
   static const food = '/food';
   static const grocery = '/grocery';
   static const merchant = '/marketplace/merchant';
@@ -67,6 +70,8 @@ class Routes {
   static const merchantOnboarding = '/store/apply';
   static const merchantOrders = '/store/orders';
   static const merchantMenu = '/store/menu';
+  static const merchantAnalytics = '/store/analytics';
+  static const merchantOffers = '/store/offers';
   static const contribute = '/places/contribute';
   static const myContributions = '/places/mine';
   static const pointsBadges = '/places/points';
@@ -184,14 +189,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.whereTo,
         pageBuilder: (_, state) => _page(
-          WhereToScreen(initialDest: state.extra as PlaceHit?),
-          key: state.pageKey,
-        ),
-      ),
-      GoRoute(
-        path: Routes.confirm,
-        pageBuilder: (_, state) => _page(
-          ConfirmRideScreen(draft: state.extra as RideDraft),
+          WhereToScreen(
+            initialDest: state.extra as PlaceHit?,
+            initialMode: state.uri.queryParameters['mode'] == 'delivery'
+                ? RideMode.delivery
+                : RideMode.ride,
+          ),
           key: state.pageKey,
         ),
       ),
@@ -211,11 +214,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: Routes.kyc,
         pageBuilder: (_, state) =>
             _page(const KycDocumentsScreen(), key: state.pageKey),
-      ),
-      GoRoute(
-        path: Routes.parcel,
-        pageBuilder: (_, state) =>
-            _page(const ParcelScreen(), key: state.pageKey),
       ),
       GoRoute(
         path: Routes.chat,
@@ -242,9 +240,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             _page(const SavedPlacesScreen(), key: state.pageKey),
       ),
       GoRoute(
+        path: Routes.settings,
+        pageBuilder: (_, state) =>
+            _page(const SettingsScreen(), key: state.pageKey),
+      ),
+      GoRoute(
         path: Routes.wallet,
         pageBuilder: (_, state) =>
             _page(const WalletScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.myStats,
+        pageBuilder: (_, state) =>
+            _page(const RiderStatsScreen(), key: state.pageKey),
       ),
       GoRoute(
         path: Routes.food,
@@ -304,6 +312,20 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: Routes.merchantAnalytics,
+        pageBuilder: (_, state) => _page(
+          MerchantAnalyticsScreen(merchant: state.extra as Merchant),
+          key: state.pageKey,
+        ),
+      ),
+      GoRoute(
+        path: Routes.merchantOffers,
+        pageBuilder: (_, state) => _page(
+          MerchantOffersScreen(merchant: state.extra as Merchant),
+          key: state.pageKey,
+        ),
+      ),
+      GoRoute(
         path: Routes.contribute,
         pageBuilder: (_, state) =>
             _page(const ContributeScreen(), key: state.pageKey),
@@ -319,5 +341,23 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             _page(const PointsBadgesScreen(), key: state.pageKey),
       ),
     ],
+    // Android's Flutter embedding independently pushes an incoming
+    // `saarathi://…` deep link to go_router's own route parser via
+    // `onNewIntent` (separate from — and racing — `deep_links.dart`'s own
+    // `app_links` stream handling), and go_router has no route registered
+    // for a raw custom-scheme URI, so it 404s here instead of ever reaching
+    // `routeForDeepLink`. Recover by mapping it ourselves and redirecting.
+    errorBuilder: (context, state) {
+      final mapped = routeForDeepLink(state.uri);
+      if (mapped != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          GoRouter.of(context).go(mapped);
+        });
+        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      }
+      return Scaffold(
+        body: Center(child: Text('Page not found: ${state.uri}')),
+      );
+    },
   );
 });

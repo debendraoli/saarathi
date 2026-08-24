@@ -22,6 +22,7 @@ http:
         PathPrefix(`/v1/auth`) || Path(`/v1/me`) || PathPrefix(`/v1/me/`)
         || PathPrefix(`/v1/driver/register`) || PathPrefix(`/v1/driver/documents`) || PathPrefix(`/v1/driver/status`)
         || PathPrefix(`/v1/driver/kyc`)
+        || PathRegexp(`^/v1/driver/[0-9a-fA-F-]+/photo$`)
         || PathPrefix(`/v1/admin/drivers`) || PathPrefix(`/v1/admin/documents`)
         || PathPrefix(`/v1/admin/staff`)
 
@@ -152,7 +153,7 @@ http:
         # Wi-Fi) instead of localhost. Update the IP if your machine's changes.
         accessControlAllowOriginList: ["http://localhost:3000", "http://192.168.1.66:3000"]
         accessControlAllowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-        accessControlAllowHeaders: ["authorization", "content-type"]
+        accessControlAllowHeaders: ["authorization", "content-type", "x-idempotency-key"]
         accessControlMaxAge: 3600
         addVaryHeader: true
     # Coarse per-source-IP DoS protection (domain throttles, e.g. per-phone OTP,

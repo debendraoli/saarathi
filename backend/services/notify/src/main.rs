@@ -133,16 +133,18 @@ async fn deliver(
     fcm: Option<&fcm::FcmSender>,
     sms: Option<&sms::SmsSender>,
 ) -> anyhow::Result<()> {
-    sqlx::query(
-        "INSERT INTO notifications (user_id, class, title, body, link) VALUES ($1, $2, $3, $4, $5)",
-    )
-    .bind(req.user_id)
-    .bind(&req.class)
-    .bind(&req.title)
-    .bind(&req.body)
-    .bind(&req.link)
-    .execute(pool)
-    .await?;
+    if !req.silent {
+        sqlx::query(
+            "INSERT INTO notifications (user_id, class, title, body, link) VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(req.user_id)
+        .bind(&req.class)
+        .bind(&req.title)
+        .bind(&req.body)
+        .bind(&req.link)
+        .execute(pool)
+        .await?;
+    }
 
     // Fan out to the user's registered devices via FCM (when configured). A
     // stale token (FCM UNREGISTERED) is pruned on the spot — no point paying
@@ -157,10 +159,19 @@ async fn deliver(
                 .await
                 .unwrap_or_default();
         for (token,) in tokens {
-            match sender
-                .send(&token, &req.title, &req.body, req.link.as_deref())
-                .await
-            {
+            // Silent = a device-to-device signal (e.g. forced sign-out), not
+            // user-facing content — send it as a bare data message so it
+            // never surfaces a tray notification.
+            let result = if req.silent {
+                sender
+                    .send_data(&token, req.data.as_ref().unwrap_or(&Value::Null))
+                    .await
+            } else {
+                sender
+                    .send(&token, &req.title, &req.body, req.link.as_deref())
+                    .await
+            };
+            match result {
                 Ok(()) => any_push_sent = true,
                 Err(fcm::SendError::StaleToken) => {
                     let _ = sqlx::query("DELETE FROM device_tokens WHERE token = $1")
@@ -180,8 +191,10 @@ async fn deliver(
     // when push didn't land — no registered device, every token was stale,
     // or FCM isn't configured on this deployment. Not for every class: a
     // marketing notification with no push is just... not delivered, which
-    // is fine.
-    if notif::CRITICAL.contains(&req.class.as_str()) && !any_push_sent {
+    // is fine. Silent signals never escalate to SMS — there's no user-
+    // facing content to send, and a device-to-device signal that can't
+    // reach the device isn't something to text about.
+    if !req.silent && notif::CRITICAL.contains(&req.class.as_str()) && !any_push_sent {
         if let Some(sender) = sms {
             let phone: Option<String> =
                 sqlx::query_scalar("SELECT phone FROM users WHERE id = $1")

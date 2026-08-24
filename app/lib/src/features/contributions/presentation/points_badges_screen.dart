@@ -85,7 +85,8 @@ class _PointsBadgesScreenState extends ConsumerState<PointsBadgesScreen> {
           return RefreshIndicator(
             onRefresh: () async => ref.invalidate(pointsSummaryProvider),
             child: ListView(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.fromLTRB(
+                  16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
               children: [
                 Card(
                   child: Padding(

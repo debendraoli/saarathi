@@ -1,13 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../../shared/request_ring.dart';
 import '../../../shared/widgets/common.dart';
 import '../../../shared/widgets/skeleton.dart';
+import '../../../shared/widgets/swipe_to_confirm.dart';
 import '../../marketplace/domain/models.dart';
 import '../data/merchant_repository.dart';
+
+/// Statuses where a courier trip exists and hasn't finished yet — the order
+/// has left "preparing" (courier is dispatched once it's marked ready) but
+/// isn't delivered. Mirrors the customer-side order screen's track-courier
+/// gate (`o.tripId != null && o.isActive`, minus the earlier prep statuses
+/// which never have a trip yet).
+const _trackableStatuses = {'ready', 'picked_up'};
 
 /// Live order queue for one store. Polls every few seconds and lets the owner
 /// accept → prepare → mark ready (which hands off to a courier).
@@ -42,6 +52,7 @@ class _MerchantOrdersScreenState extends ConsumerState<MerchantOrdersScreen> {
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final async = ref.watch(merchantOrdersProvider(widget.merchant.id));
+    final stale = ref.watch(merchantOrdersStaleProvider(widget.merchant.id));
 
     final filters = <(String, String)>[
       ('active', l.merchantFilterActive),
@@ -55,6 +66,7 @@ class _MerchantOrdersScreenState extends ConsumerState<MerchantOrdersScreen> {
       appBar: AppBar(title: Text(widget.merchant.name)),
       body: Column(
         children: [
+          if (stale) const StaleBanner(),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -77,8 +89,7 @@ class _MerchantOrdersScreenState extends ConsumerState<MerchantOrdersScreen> {
               loading: () => const SkeletonList(),
               error: (_, __) => ErrorRetry(
                 message: l.errorNetwork,
-                onRetry: () =>
-                    ref.invalidate(merchantOrdersProvider(widget.merchant.id)),
+                onRetry: () => refreshMerchantOrders(ref, widget.merchant.id),
               ),
               data: (orders) {
                 final shown = orders.where(_matches).toList();
@@ -86,7 +97,8 @@ class _MerchantOrdersScreenState extends ConsumerState<MerchantOrdersScreen> {
                   return Center(child: Text(l.merchantNoOrders));
                 }
                 return ListView.separated(
-                  padding: const EdgeInsets.all(16),
+                  padding: EdgeInsets.fromLTRB(
+                      16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
                   itemCount: shown.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (_, i) => _OrderCard(
@@ -129,10 +141,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     }
   }
 
-  Future<void> _advance(String status) async {
+  /// [viaSwipe] actions get their success haptic from [SwipeToConfirm] itself,
+  /// so firing another one here would double-buzz.
+  Future<void> _advance(String status, {bool viaSwipe = false}) async {
     if (status == 'rejected') {
       Haptics.warning();
-    } else {
+    } else if (!viaSwipe) {
       Haptics.success();
     }
     RequestRing.stop();
@@ -141,7 +155,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       await ref
           .read(merchantRepositoryProvider)
           .advance(widget.order.id, status);
-      ref.invalidate(merchantOrdersProvider(widget.merchantId));
+      refreshMerchantOrders(ref, widget.merchantId);
     } catch (_) {
       Haptics.error();
       if (mounted) {
@@ -185,6 +199,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
               style: theme.textTheme.bodySmall,
             ),
             _Items(orderId: o.id),
+            if (o.tripId != null && _trackableStatuses.contains(o.status)) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.map_rounded),
+                label: Text(l.trackCourier),
+                onPressed: () => context.push('${Routes.trip}/${o.tripId}'),
+              ),
+            ],
             if (next != null || canReject) ...[
               const SizedBox(height: 12),
               Row(
@@ -194,20 +216,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       onPressed: _busy ? null : () => _advance('rejected'),
                       child: Text(l.merchantReject),
                     ),
-                  const Spacer(),
+                  if (canReject && next != null) const SizedBox(width: 10),
                   if (next != null)
-                    FilledButton(
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 44),
+                    Expanded(
+                      child: SwipeToConfirm(
+                        label: next.$2,
+                        busy: _busy,
+                        onConfirmed: () => _advance(next.$1, viaSwipe: true),
                       ),
-                      onPressed: _busy ? null : () => _advance(next.$1),
-                      child: _busy
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(next.$2),
                     ),
                 ],
               ),
@@ -270,12 +286,16 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final (color, _) = switch (status) {
-      'placed' => (scheme.primary, 0),
-      'confirmed' || 'preparing' => (scheme.tertiary, 0),
-      'ready' || 'picked_up' => (scheme.secondary, 0),
-      'delivered' => (Colors.green, 0),
-      _ => (scheme.error, 0),
+    // `scheme.secondary` is the brand's crimson accent — reads as an error
+    // even though "ready"/"picked up" is good progress, not a problem.
+    // Blue reads as calm/in-progress; only genuine problem states (the
+    // default arm below) use `scheme.error`.
+    final color = switch (status) {
+      'placed' => scheme.primary,
+      'confirmed' || 'preparing' => scheme.tertiary,
+      'ready' || 'picked_up' => Colors.blue,
+      'delivered' => Colors.green,
+      _ => scheme.error,
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -284,9 +304,17 @@ class _StatusChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
-        status,
+        _label(status),
         style: TextStyle(color: color, fontWeight: FontWeight.w600),
       ),
     );
+  }
+
+  /// snake_case status → a readable chip label ("picked_up" → "Picked up").
+  String _label(String s) {
+    final words = s.split('_');
+    return words
+        .map((w) => w.isEmpty ? w : w[0].toUpperCase() + w.substring(1))
+        .join(' ');
   }
 }

@@ -41,6 +41,13 @@ pub struct Config {
     pub presence_ttl_secs: i64,
     /// Lowest fraction of the algorithmic fare a rider may bargain down to.
     pub bargain_floor_ratio: Decimal,
+    /// How long a single driver bid stays live before it drops off the
+    /// rider's list on its own (the bidding round itself has no deadline —
+    /// only individual bids expire).
+    pub bid_ttl_secs: i64,
+    /// A driver's counter may not exceed the rider's ask by more than this
+    /// multiple (also capped by the legal ceiling, whichever is lower).
+    pub bid_counter_max_ratio: Decimal,
     /// VAT rate applied to the platform's commission (reporting / liability).
     pub vat_rate: Decimal,
     /// Parcel delivery pricing (config-driven; not bound by the ride per-km caps).
@@ -82,6 +89,8 @@ impl Config {
             dispatch_broadcast_threshold: int_env("DISPATCH_BROADCAST_THRESHOLD", 3) as usize,
             presence_ttl_secs: int_env("DISPATCH_PRESENCE_TTL_SECS", 60),
             bargain_floor_ratio: dec_env("BARGAIN_FLOOR_RATIO", "0.5"),
+            bid_ttl_secs: int_env("BID_TTL_SECS", 60),
+            bid_counter_max_ratio: dec_env("BID_COUNTER_MAX_RATIO", "1.5"),
             vat_rate: dec_env("VAT_RATE", "0.13"),
             delivery_base_fare: dec_env("DELIVERY_BASE_FARE", "30"),
             delivery_per_km: dec_env("DELIVERY_PER_KM", "15"),

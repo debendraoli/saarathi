@@ -6,6 +6,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
 import '../../../shared/widgets/skeleton.dart';
+import '../../merchant/domain/models.dart' show MerchantOffer;
 import '../application/cart_controller.dart';
 import '../data/marketplace_repository.dart';
 import '../domain/models.dart';
@@ -42,7 +43,12 @@ class MerchantScreen extends ConsumerWidget {
                 .add(it);
           }
           // Flatten header + category sections + items into one bounded list.
-          final rows = <Widget>[_Header(merchant: loaded)];
+          final offers = ref.watch(storeOffersProvider(merchant.id)).valueOrNull ??
+              const [];
+          final rows = <Widget>[
+            _Header(merchant: loaded),
+            if (offers.isNotEmpty) _OfferBanner(offer: offers.first),
+          ];
           if (items.isEmpty) {
             rows.add(Padding(
               padding: const EdgeInsets.all(40),
@@ -207,6 +213,43 @@ class _InfoChip extends StatelessWidget {
           Text(label,
               style: TextStyle(
                   color: c, fontWeight: FontWeight.w600, fontSize: 12.5)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Store offer banner — informational only, auto-applied at checkout, no
+/// code to enter or tap to redeem.
+class _OfferBanner extends StatelessWidget {
+  const _OfferBanner({required this.offer});
+  final MerchantOffer offer;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: scheme.tertiaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.local_offer_rounded,
+              size: 18, color: scheme.onTertiaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              offer.summaryLine,
+              style: TextStyle(
+                color: scheme.onTertiaryContainer,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ),
         ],
       ),
     );

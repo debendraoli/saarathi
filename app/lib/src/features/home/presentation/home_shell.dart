@@ -9,18 +9,30 @@ import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/models.dart';
+import '../../driver/data/driver_kyc_repository.dart';
+import '../../driver/domain/models.dart' show KycStatus;
+import '../../merchant/data/merchant_repository.dart';
+import '../../merchant/presentation/merchant_dashboard_screen.dart';
 import '../../notifications/data/notifications_repository.dart';
 import '../../places/data/places_repository.dart';
 import '../../ride/application/ride_controller.dart';
+import '../../../shared/widgets/skeleton.dart';
 import 'driver_home.dart';
 import 'rider_home.dart';
 
-/// The signed-in shell. The Home tab (rider or driver experience, based on
-/// the active mode) fills the whole screen — Activity and Account live behind
-/// a hamburger menu on the top right instead of eating vertical space with a
-/// bottom bar, leaving room to grow the menu with more entries later.
-/// Drivers can flip modes from the top switch; riders see a "become a
-/// driver" nudge.
+/// The signed-in shell. The Home tab fills the whole screen — Activity and
+/// Account live behind a hamburger menu on the top right instead of eating
+/// vertical space with a bottom bar, leaving room to grow the menu with more
+/// entries later.
+///
+/// Which experience fills that Home slot is a one-way ratchet once staff
+/// approves something: an approved merchant becomes merchant-only (their
+/// store is the home screen — no more rider/driver access at all, though
+/// they can still register additional stores from within it), and an
+/// approved driver becomes driver-only (the rider/driver switch disappears —
+/// no more requesting rides as a rider on this account). Short of that, a
+/// driver whose KYC isn't approved yet can still flip modes, and a plain
+/// rider sees the normal "become a driver"/"become a merchant" nudges.
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
@@ -49,6 +61,18 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final l = AppL10n.of(context);
     final auth = ref.watch(authControllerProvider);
     final isDriverMode = auth.mode == AppMode.driver;
+    final isDriverAccount = auth.user?.isDriver ?? false;
+
+    // Only fetch KYC status for accounts that could possibly need it — an
+    // autoDispose provider a rider account never watches never fires its
+    // request at all.
+    final driverKycAsync =
+        isDriverAccount ? ref.watch(driverKycProvider) : null;
+    final driverKycApproved =
+        driverKycAsync?.valueOrNull?.status == KycStatus.approved;
+    final merchantsAsync = ref.watch(myMerchantsProvider);
+    final hasApprovedMerchant =
+        merchantsAsync.valueOrNull?.any((m) => m.isApproved) ?? false;
 
     // Reconcile cached data when connectivity is restored.
     ref.listen(connectivityProvider, (prev, next) {
@@ -61,13 +85,38 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final online = ref.watch(connectivityProvider).valueOrNull ?? true;
     final gpsOff = ref.watch(locationServiceProvider).valueOrNull == false;
 
-    final home = isDriverMode ? const DriverHome() : const RiderHome();
+    // Avoid flashing the rider/driver toggle home (with its "become a
+    // merchant"/"become a driver" nudges) for the split second before we
+    // actually know whether this account is merchant- or driver-locked —
+    // both providers are `autoDispose` and refetch fresh every time Home is
+    // (re)entered, so without this every navigation back to Home would
+    // flash the wrong body first.
+    final identityLoading =
+        (!merchantsAsync.hasValue && merchantsAsync.isLoading) ||
+            (driverKycAsync != null &&
+                !driverKycAsync.hasValue &&
+                driverKycAsync.isLoading);
+
+    final Widget home;
+    if (identityLoading) {
+      home = const _HomeLoading();
+    } else if (hasApprovedMerchant) {
+      home = const MerchantHomeBody();
+    } else if (driverKycApproved) {
+      home = const DriverHome();
+    } else {
+      home = isDriverMode ? const DriverHome() : const RiderHome();
+    }
+    // The rider/driver switch only makes sense while both sides are still
+    // reachable — gone once either lock (merchant or approved-driver) kicks in.
+    final showModeSwitch =
+        isDriverAccount && !driverKycApproved && !hasApprovedMerchant;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(_greeting(l, auth.user)),
         actions: [
-          if (auth.user?.isDriver ?? false) _ModeSwitch(mode: auth.mode),
+          if (showModeSwitch) _ModeSwitch(mode: auth.mode),
           const _NotificationBell(),
           Builder(
             builder: (context) => IconButton(
@@ -137,8 +186,7 @@ class _MenuDrawer extends ConsumerWidget {
                       (user?.fullName?.isNotEmpty ?? false)
                           ? user!.fullName![0].toUpperCase()
                           : '👤',
-                      style: TextStyle(
-                          fontSize: 20, color: scheme.onPrimary),
+                      style: TextStyle(fontSize: 20, color: scheme.onPrimary),
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -202,6 +250,18 @@ class _MenuDrawer extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+/// Neutral placeholder shown only until we know which home body an account
+/// actually gets — never the rider/driver toggle home itself, so there's
+/// nothing to visibly swap away from a moment later.
+class _HomeLoading extends StatelessWidget {
+  const _HomeLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SkeletonList();
   }
 }
 

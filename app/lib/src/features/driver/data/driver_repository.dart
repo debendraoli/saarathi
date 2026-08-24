@@ -32,6 +32,12 @@ class DriverRepository {
 
   Future<void> decline(String tripId) =>
       _api.post('/v1/rides/$tripId/offer/decline');
+
+  /// Bids at the rider's ask exactly (an "accept" in bid mode) or counters
+  /// above it — the backend tells them apart by comparing [amount] to the
+  /// trip's current ask.
+  Future<void> placeBid(String tripId, double amount) =>
+      _api.post('/v1/rides/$tripId/bid', body: {'amount': amount});
 }
 
 final driverRepositoryProvider = Provider<DriverRepository>((ref) {

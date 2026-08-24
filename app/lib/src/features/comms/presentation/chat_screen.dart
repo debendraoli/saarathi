@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../auth/application/auth_controller.dart';
+import '../../ride/application/ride_controller.dart';
 import '../../ride/application/trip_channel.dart';
 
 class _Msg {
@@ -60,16 +62,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
-  void _send() {
-    final text = _input.text.trim();
-    if (text.isEmpty) return;
-    ref.read(tripChannelProvider(widget.tripId)).sendChat(text);
-    _input.clear();
+  void _send([String? text]) {
+    final body = (text ?? _input.text).trim();
+    if (body.isEmpty) return;
+    ref.read(tripChannelProvider(widget.tripId)).sendChat(body);
+    if (text == null) _input.clear();
     // The message returns via the fan-out echo, so we don't append locally.
   }
 
   @override
   Widget build(BuildContext context) {
+    final l = AppL10n.of(context);
+    final myId = ref.watch(authControllerProvider).user?.id;
+    final trip = ref.watch(tripStreamProvider(widget.tripId)).valueOrNull;
+    final iAmDriver = myId != null && myId == trip?.driverId;
+    final quickReplies = iAmDriver
+        ? [l.quickReplyImArriving, l.quickReplyRunningLate]
+        : [
+            l.quickReplyImAtLocation,
+            l.quickReplyComingDown,
+            l.quickReplyPleaseWait
+          ];
+
     return Scaffold(
       appBar: AppBar(title: const Text('Chat')),
       body: Column(
@@ -90,10 +104,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     itemBuilder: (_, i) => _Bubble(msg: _messages[i]),
                   ),
           ),
+          SizedBox(
+            height: 40,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: quickReplies.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) => ActionChip(
+                label: Text(quickReplies[i]),
+                onPressed: () => _send(quickReplies[i]),
+              ),
+            ),
+          ),
           SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               child: Row(
                 children: [
                   Expanded(

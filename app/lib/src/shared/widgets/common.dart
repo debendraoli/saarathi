@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 
-/// Brand wordmark: सा monogram + name. Used on splash + auth.
+/// Brand mark: the real Saarathi icon (same source render as the launcher
+/// icon's foreground layer) + name. Used on the login screen.
 class BrandLogo extends StatelessWidget {
   const BrandLogo({super.key, this.size = 72, this.showName = true});
 
@@ -9,26 +11,13 @@ class BrandLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
+        Image.asset(
+          'assets/images/app_icon_foreground.png',
           height: size,
           width: size,
-          decoration: BoxDecoration(
-            color: scheme.primary,
-            borderRadius: BorderRadius.circular(size * 0.28),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            'सा',
-            style: TextStyle(
-              fontSize: size * 0.46,
-              fontWeight: FontWeight.w800,
-              color: scheme.onPrimary,
-            ),
-          ),
         ),
         if (showName) ...[
           const SizedBox(height: 12),
@@ -94,6 +83,40 @@ class ErrorRetry extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Slim inline banner for a screen whose live data is stale because the most
+/// recent background refresh failed — used instead of [ErrorRetry] wherever
+/// a `resilientPoll`-backed provider has a last-known value to keep showing.
+/// The poll loop is already retrying on its own, so there's nothing to tap;
+/// this just says "what you're looking at might be a few seconds behind"
+/// without blanking the screen the way a full error state would.
+class StaleBanner extends StatelessWidget {
+  const StaleBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: scheme.errorContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.wifi_off_rounded,
+              size: 16, color: scheme.onErrorContainer),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              AppL10n.of(context).connectionIssueRetrying,
+              style: TextStyle(color: scheme.onErrorContainer, fontSize: 12),
+            ),
+          ),
+        ],
       ),
     );
   }

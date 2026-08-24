@@ -46,6 +46,14 @@ class PushService {
   final _receivedController = StreamController<void>.broadcast();
   Stream<void> get onForegroundMessage => _receivedController.stream;
 
+  /// Fires when this account signed in on another device (single-device-
+  /// per-account enforcement) — carries the *new* device's id so the
+  /// listener can tell whether this signal is about itself (the device
+  /// that just logged in, ignore) or a sibling being kicked (sign out).
+  /// Silent/data-only, so it never surfaces a tray notification.
+  final _forceLogoutController = StreamController<String>.broadcast();
+  Stream<String> get onForceLogout => _forceLogoutController.stream;
+
   Future<void> init() async {
     try {
       await Firebase.initializeApp();
@@ -53,6 +61,10 @@ class PushService {
       _authStatus = (await messaging.requestPermission()).authorizationStatus;
       _token = await messaging.getToken();
       FirebaseMessaging.onMessage.listen((m) {
+        if (m.data['type'] == 'force_logout') {
+          _forceLogoutController.add(m.data['new_device_id'] as String? ?? '');
+          return;
+        }
         final n = m.notification;
         if (n != null) {
           NotificationService.instance.show(

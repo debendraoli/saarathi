@@ -13,6 +13,11 @@ const VERTICALS = [
   { key: "grocery", label: "Grocery" },
 ];
 
+const TABS = [
+  { key: "queue", label: "Review queue" },
+  { key: "all", label: "All stores" },
+];
+
 const EMPTY: NewMerchant = {
   name: "",
   vertical: "food",
@@ -24,6 +29,7 @@ const EMPTY: NewMerchant = {
 
 export default function MerchantsPage() {
   const router = useRouter();
+  const [tab, setTab] = useState("queue");
   const [rows, setRows] = useState<MerchantRow[]>([]);
   const [vertical, setVertical] = useState("all");
   const [query, setQuery] = useState("");
@@ -37,7 +43,7 @@ export default function MerchantsPage() {
     setError(null);
     setLoading(true);
     try {
-      setRows(await merchant.list());
+      setRows(tab === "queue" ? await merchant.queue("pending") : await merchant.list());
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -47,7 +53,8 @@ export default function MerchantsPage() {
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   const filtered = useMemo(() => {
     let list = rows;
@@ -100,6 +107,17 @@ export default function MerchantsPage() {
 
       <div className="toolbar">
         <Segmented
+          options={TABS}
+          value={tab}
+          onChange={(k) => {
+            setTab(k);
+            setPage(0);
+          }}
+        />
+      </div>
+
+      <div className="toolbar">
+        <Segmented
           options={VERTICALS}
           value={vertical}
           onChange={(k) => {
@@ -137,16 +155,22 @@ export default function MerchantsPage() {
                 <td className="subtle">{m.phone ?? "—"}</td>
                 <td className="subtle">{Number(m.rating).toFixed(1)}</td>
                 <td>
-                  <span className={`badge ${m.is_open ? "approved" : "pending"}`}>
-                    {m.is_open ? "open" : "closed"}
-                  </span>
+                  <span className={`badge ${m.status}`}>{m.status}</span>
+                  {m.status === "approved" && (
+                    <span
+                      className={`badge ${m.is_open ? "approved" : "pending"}`}
+                      style={{ marginLeft: 6 }}
+                    >
+                      {m.is_open ? "open" : "closed"}
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}
             {!loading && filtered.length === 0 && (
               <tr>
                 <td colSpan={5} className="subtle" style={{ textAlign: "center", padding: 32 }}>
-                  No merchants yet.
+                  {tab === "queue" ? "Nothing pending review." : "No merchants yet."}
                 </td>
               </tr>
             )}

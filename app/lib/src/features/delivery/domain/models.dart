@@ -66,3 +66,14 @@ class ParcelDraft {
         'payment_method': paymentMethod,
       };
 }
+
+/// Result of booking a parcel: the trackable trip, plus the proof-of-
+/// delivery OTP the recipient will need to show the driver at drop-off
+/// (`POST /v1/delivery/parcels/{id}/deliver` requires it — it's the only
+/// way to complete a delivery, so losing this after booking would strand
+/// the trip with no way to close it out).
+class ParcelBooking {
+  const ParcelBooking({required this.trip, this.deliveryOtp});
+  final Trip trip;
+  final String? deliveryOtp;
+}

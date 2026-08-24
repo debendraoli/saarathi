@@ -18,6 +18,7 @@ use axum::{
     Json, Router,
 };
 use rust_decimal::Decimal;
+use saarathi_core::api::ErrorCode;
 use saarathi_core::idempotency::{self, Reservation};
 use saarathi_core::routing::{LatLng, RouteProfile};
 use serde::{Deserialize, Serialize};
@@ -30,11 +31,26 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/merchants/{id}", get(merchant_detail))
         .route("/v1/items/search", get(search_items))
         .route("/v1/orders", get(my_orders).post(place_order))
+        .route("/v1/orders/mine/stats", get(my_order_stats))
         .route("/v1/orders/{id}", get(order_detail))
         .route("/v1/orders/{id}/status", post(update_order_status))
+        .route("/v1/orders/{id}/rate", post(rate_merchant))
         // Merchant-facing (owner of the merchant, or staff).
         .route("/v1/merchant/merchants", get(my_merchants))
         .route("/v1/merchant/merchants/{id}/menu", get(merchant_menu))
+        .route(
+            "/v1/merchant/merchants/{id}/analytics",
+            get(merchant_analytics),
+        )
+        .route(
+            "/v1/merchant/merchants/{id}/offers",
+            get(list_offers).post(create_offer),
+        )
+        .route(
+            "/v1/merchant/merchants/{id}/offers/{offer_id}/deactivate",
+            post(deactivate_offer),
+        )
+        .route("/v1/merchants/{id}/offers/active", get(active_offers))
         .route("/v1/merchant/orders", get(merchant_orders))
         .route("/v1/merchant/menu", post(add_menu_item))
         .route(
@@ -53,6 +69,10 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/merchant/apply", post(apply_merchant))
         // Ops onboarding.
         .route("/v1/admin/merchants", post(create_merchant))
+        // Staff review queue.
+        .route("/v1/admin/merchants/queue", get(merchant_queue))
+        .route("/v1/admin/merchants/{id}/approve", post(approve_merchant))
+        .route("/v1/admin/merchants/{id}/reject", post(reject_merchant))
 }
 
 /// True when the user owns the merchant (or is staff).
@@ -89,6 +109,11 @@ struct Merchant {
     rating: Decimal,
     image_key: Option<String>,
     distance_m: f64,
+    /// Staff approval state: pending | approved | rejected. Not sensitive —
+    /// the owner's own `my_merchants` view needs it to show pending/rejected
+    /// stores, so it's simplest to include on every projection.
+    status: String,
+    rejection_reason: Option<String>,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -119,9 +144,10 @@ async fn list_merchants(
     let lng = q.lng.unwrap_or(82.484);
     let rows: Vec<Merchant> = sqlx::query_as(
         "SELECT id, name, vertical, address, phone, lat, lng, prep_mins, is_open, rating, image_key, \
+                status::text, rejection_reason, \
                 ST_Distance(geog, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography) AS distance_m \
          FROM merchants \
-         WHERE is_open AND ($3::text IS NULL OR vertical = $3) \
+         WHERE is_open AND status = 'approved' AND ($3::text IS NULL OR vertical = $3) \
          ORDER BY distance_m ASC LIMIT 50",
     )
     .bind(lat)
@@ -196,7 +222,7 @@ async fn search_items(
                 mi.description, mi.category, mi.price, mi.image_key, m.rating, \
                 ST_Distance(m.geog, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography) AS distance_m \
          FROM menu_items mi JOIN merchants m ON m.id = mi.merchant_id \
-         WHERE mi.is_available AND m.is_open AND mi.name ILIKE $3 \
+         WHERE mi.is_available AND m.is_open AND m.status = 'approved' AND mi.name ILIKE $3 \
                AND ($4::text IS NULL OR m.vertical = $4) \
          ORDER BY {order} LIMIT 40"
     );
@@ -217,6 +243,7 @@ async fn merchant_detail(
 ) -> AppResult<Json<Value>> {
     let merchant: Merchant = sqlx::query_as(
         "SELECT id, name, vertical, address, phone, lat, lng, prep_mins, is_open, rating, image_key, \
+                status::text, rejection_reason, \
                 0::double precision AS distance_m FROM merchants WHERE id = $1",
     )
     .bind(id)
@@ -345,21 +372,39 @@ async fn place_order(
             RouteProfile::Motorcycle,
         )
         .await;
-    let delivery_fee =
+    let mut delivery_fee =
         (st.config.delivery_base_fare + route.distance_km * st.config.delivery_per_km).round_dp(2);
-    let total = subtotal + delivery_fee;
+
+    // At most one store offer auto-applies, whichever saves the most —
+    // no code to enter, same "just show it, don't make them type it"
+    // philosophy as the rider ride-discount auto-apply.
+    let mut discount_amount = Decimal::ZERO;
+    let mut offer_id: Option<Uuid> = None;
+    if let Some((oid, kind, savings)) =
+        best_matching_offer(&st, body.merchant_id, subtotal, delivery_fee).await
+    {
+        offer_id = Some(oid);
+        if kind == "free_delivery" {
+            delivery_fee = Decimal::ZERO;
+        } else {
+            discount_amount = savings;
+        }
+    }
+    let total = (subtotal - discount_amount + delivery_fee).max(Decimal::ZERO);
 
     let mut tx = st.db.begin().await?;
     let order_id: Uuid = sqlx::query_scalar(
         "INSERT INTO orders (customer_id, merchant_id, subtotal, delivery_fee, total, \
-            payment_method, delivery_lat, delivery_lng, delivery_note) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id",
+            discount_amount, offer_id, payment_method, delivery_lat, delivery_lng, delivery_note) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
     )
     .bind(claims.sub)
     .bind(body.merchant_id)
     .bind(subtotal)
     .bind(delivery_fee)
     .bind(total)
+    .bind(discount_amount)
+    .bind(offer_id)
     .bind(method)
     .bind(body.delivery.lat)
     .bind(body.delivery.lng)
@@ -424,7 +469,7 @@ async fn my_orders(
 ) -> AppResult<Json<Value>> {
     let rows: Vec<OrderRow> = sqlx::query_as(
         "SELECT o.id, o.customer_id, o.merchant_id, m.name AS merchant_name, o.status, o.subtotal, \
-                o.delivery_fee, o.total, o.payment_method, o.delivery_lat, o.delivery_lng, \
+                o.delivery_fee, o.total, o.discount_amount, o.payment_method, o.delivery_lat, o.delivery_lng, \
                 o.trip_id, o.created_at \
          FROM orders o JOIN merchants m ON m.id = o.merchant_id \
          WHERE o.customer_id = $1 ORDER BY o.created_at DESC LIMIT 50",
@@ -432,7 +477,65 @@ async fn my_orders(
     .bind(claims.sub)
     .fetch_all(&st.db)
     .await?;
-    Ok(Json(json!(rows)))
+
+    // Whether *this caller* already rated each order's courier — read
+    // directly against the rides service's own `ratings` table (shared
+    // Postgres instance, same established cross-service-read convention
+    // already used elsewhere, e.g. delivery-trip visibility). Only orders
+    // with a dispatched courier (trip_id set) can be rated at all.
+    let trip_ids: Vec<Uuid> = rows.iter().filter_map(|o| o.trip_id).collect();
+    let rated_ids: Vec<Uuid> =
+        sqlx::query_scalar("SELECT trip_id FROM ratings WHERE rater_id = $1 AND trip_id = ANY($2)")
+            .bind(claims.sub)
+            .bind(&trip_ids)
+            .fetch_all(&st.db)
+            .await?;
+
+    // Whether the caller already rated the merchant itself — every order
+    // (not just ones with a courier) is eligible once delivered.
+    let order_ids: Vec<Uuid> = rows.iter().map(|o| o.id).collect();
+    let merchant_rated_ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT order_id FROM merchant_ratings WHERE rater_id = $1 AND order_id = ANY($2)",
+    )
+    .bind(claims.sub)
+    .bind(&order_ids)
+    .fetch_all(&st.db)
+    .await?;
+
+    let out: Vec<Value> = rows
+        .into_iter()
+        .map(|o| {
+            let rated = o.trip_id.is_some_and(|id| rated_ids.contains(&id));
+            let merchant_rated = merchant_rated_ids.contains(&o.id);
+            let mut v = serde_json::to_value(o).unwrap_or_default();
+            v["rated"] = json!(rated);
+            v["merchant_rated"] = json!(merchant_rated);
+            v
+        })
+        .collect();
+    Ok(Json(json!(out)))
+}
+
+/// Self-service order-spend rollup for the rider stats screen — mirrors
+/// `saarathi-rides`' `GET /v1/rides/mine/stats` in shape.
+async fn my_order_stats(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<Value>> {
+    let (total_orders, delivered_orders, total_spent): (i64, i64, Decimal) = sqlx::query_as(
+        "SELECT count(*), \
+                count(*) FILTER (WHERE status = 'delivered'), \
+                COALESCE(SUM(total) FILTER (WHERE status = 'delivered'), 0) \
+         FROM orders WHERE customer_id = $1",
+    )
+    .bind(claims.sub)
+    .fetch_one(&st.db)
+    .await?;
+    Ok(Json(json!({
+        "total_orders": total_orders,
+        "delivered_orders": delivered_orders,
+        "total_spent": total_spent,
+    })))
 }
 
 async fn order_detail(
@@ -454,6 +557,7 @@ struct OrderRow {
     subtotal: Decimal,
     delivery_fee: Decimal,
     total: Decimal,
+    discount_amount: Decimal,
     payment_method: String,
     delivery_lat: f64,
     delivery_lng: f64,
@@ -471,7 +575,7 @@ struct OrderItemRow {
 async fn order_json(st: &AppState, id: Uuid, uid: Uuid, is_staff: bool) -> AppResult<Json<Value>> {
     let order: OrderRow = sqlx::query_as(
         "SELECT o.id, o.customer_id, o.merchant_id, m.name AS merchant_name, o.status, o.subtotal, \
-                o.delivery_fee, o.total, o.payment_method, o.delivery_lat, o.delivery_lng, \
+                o.delivery_fee, o.total, o.discount_amount, o.payment_method, o.delivery_lat, o.delivery_lng, \
                 o.trip_id, o.created_at \
          FROM orders o JOIN merchants m ON m.id = o.merchant_id WHERE o.id = $1",
     )
@@ -490,7 +594,77 @@ async fn order_json(st: &AppState, id: Uuid, uid: Uuid, is_staff: bool) -> AppRe
             .bind(id)
             .fetch_all(&st.db)
             .await?;
-    Ok(Json(json!({ "order": order, "items": items })))
+    let rated = if let Some(trip_id) = order.trip_id {
+        sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT trip_id FROM ratings WHERE trip_id = $1 AND rater_id = $2",
+        )
+        .bind(trip_id)
+        .bind(uid)
+        .fetch_optional(&st.db)
+        .await?
+        .flatten()
+        .is_some()
+    } else {
+        false
+    };
+    let merchant_rated = sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT order_id FROM merchant_ratings WHERE order_id = $1 AND rater_id = $2",
+    )
+    .bind(id)
+    .bind(uid)
+    .fetch_optional(&st.db)
+    .await?
+    .flatten()
+    .is_some();
+    let mut order_v = serde_json::to_value(order).unwrap_or_default();
+    order_v["rated"] = json!(rated);
+    order_v["merchant_rated"] = json!(merchant_rated);
+    Ok(Json(json!({ "order": order_v, "items": items })))
+}
+
+#[derive(Deserialize)]
+struct RateMerchantRequest {
+    stars: i32,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+async fn rate_merchant(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    Json(b): Json<RateMerchantRequest>,
+) -> AppResult<Json<Value>> {
+    if !(1..=5).contains(&b.stars) {
+        return Err(AppError::BadRequest("stars must be 1–5".into()));
+    }
+    let row: Option<(Uuid, Uuid, String)> =
+        sqlx::query_as("SELECT customer_id, merchant_id, status FROM orders WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&st.db)
+            .await?;
+    let (customer_id, merchant_id, status) = row.ok_or(AppError::NotFound)?;
+    if customer_id != claims.sub {
+        return Err(AppError::Forbidden);
+    }
+    if status != "delivered" {
+        return Err(AppError::BadRequest(
+            "can only rate a delivered order".into(),
+        ));
+    }
+    sqlx::query(
+        "INSERT INTO merchant_ratings (order_id, merchant_id, rater_id, stars, tags) \
+         VALUES ($1, $2, $3, $4, $5) \
+         ON CONFLICT (order_id, rater_id) DO UPDATE SET stars = EXCLUDED.stars, tags = EXCLUDED.tags",
+    )
+    .bind(id)
+    .bind(merchant_id)
+    .bind(claims.sub)
+    .bind(b.stars)
+    .bind(&b.tags)
+    .execute(&st.db)
+    .await?;
+    Ok(Json(json!({ "ok": true, "merchant_id": merchant_id })))
 }
 
 #[derive(Deserialize)]
@@ -715,6 +889,7 @@ async fn my_merchants(
 ) -> AppResult<Json<Vec<Merchant>>> {
     let rows: Vec<Merchant> = sqlx::query_as(
         "SELECT id, name, vertical, address, phone, lat, lng, prep_mins, is_open, rating, image_key, \
+                status::text, rejection_reason, \
                 0::double precision AS distance_m \
          FROM merchants WHERE ($2 OR owner_user_id = $1) ORDER BY name",
     )
@@ -742,6 +917,319 @@ async fn merchant_menu(
     .fetch_all(&st.db)
     .await?;
     Ok(Json(items))
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+struct MerchantOverview {
+    total_orders: i64,
+    delivered_orders: i64,
+    cancelled_orders: i64,
+    total_revenue: Decimal,
+    avg_order_value: Decimal,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+struct TopItem {
+    menu_item_id: Uuid,
+    name: String,
+    units: i64,
+    revenue: Decimal,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+struct RatingBucket {
+    stars: i32,
+    count: i64,
+}
+
+/// Owner-scoped store analytics — mirrors the aggregate-query shape of
+/// `partners/src/routes/fleet.rs`'s `analytics()` (ownership check → one
+/// overview aggregate → a GROUP BY leaderboard, here "top items" instead of
+/// "top drivers").
+async fn merchant_analytics(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    if !owns_or_staff(&st, claims.sub, claims.is_staff(), id).await? {
+        return Err(AppError::Forbidden);
+    }
+
+    let overview: MerchantOverview = sqlx::query_as(
+        "SELECT count(*) AS total_orders, \
+                count(*) FILTER (WHERE status = 'delivered') AS delivered_orders, \
+                count(*) FILTER (WHERE status IN ('cancelled', 'rejected')) AS cancelled_orders, \
+                COALESCE(SUM(total) FILTER (WHERE status = 'delivered'), 0) AS total_revenue, \
+                COALESCE(AVG(total) FILTER (WHERE status = 'delivered'), 0) AS avg_order_value \
+         FROM orders WHERE merchant_id = $1",
+    )
+    .bind(id)
+    .fetch_one(&st.db)
+    .await?;
+
+    let today: MerchantOverview = sqlx::query_as(
+        "SELECT count(*) AS total_orders, \
+                count(*) FILTER (WHERE status = 'delivered') AS delivered_orders, \
+                count(*) FILTER (WHERE status IN ('cancelled', 'rejected')) AS cancelled_orders, \
+                COALESCE(SUM(total) FILTER (WHERE status = 'delivered'), 0) AS total_revenue, \
+                COALESCE(AVG(total) FILTER (WHERE status = 'delivered'), 0) AS avg_order_value \
+         FROM orders WHERE merchant_id = $1 AND created_at::date = current_date",
+    )
+    .bind(id)
+    .fetch_one(&st.db)
+    .await?;
+
+    let top_items: Vec<TopItem> = sqlx::query_as(
+        "SELECT oi.menu_item_id, oi.name, SUM(oi.qty)::bigint AS units, \
+                SUM(oi.qty * oi.unit_price) AS revenue \
+         FROM order_items oi JOIN orders o ON o.id = oi.order_id \
+         WHERE o.merchant_id = $1 AND o.status = 'delivered' \
+         GROUP BY oi.menu_item_id, oi.name ORDER BY units DESC LIMIT 10",
+    )
+    .bind(id)
+    .fetch_all(&st.db)
+    .await?;
+
+    let rating_breakdown: Vec<RatingBucket> = sqlx::query_as(
+        "SELECT stars, count(*) FROM merchant_ratings WHERE merchant_id = $1 \
+         GROUP BY stars ORDER BY stars DESC",
+    )
+    .bind(id)
+    .fetch_all(&st.db)
+    .await?;
+
+    Ok(Json(json!({
+        "overview": overview,
+        "today": today,
+        "top_items": top_items,
+        "rating_breakdown": rating_breakdown,
+    })))
+}
+
+// ── Store offers (self-service, owner-configured) ──────────────────────────
+
+const OFFER_COLS: &str = "id, merchant_id, kind, value, max_discount, min_order_amount, \
+    starts_at, ends_at, daily_start_minute, daily_end_minute, active, created_at";
+
+#[derive(Serialize, sqlx::FromRow)]
+struct MerchantOffer {
+    id: Uuid,
+    merchant_id: Uuid,
+    kind: String,
+    value: Option<Decimal>,
+    max_discount: Option<Decimal>,
+    min_order_amount: Decimal,
+    starts_at: Option<chrono::DateTime<chrono::Utc>>,
+    ends_at: Option<chrono::DateTime<chrono::Utc>>,
+    daily_start_minute: Option<i32>,
+    daily_end_minute: Option<i32>,
+    active: bool,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+async fn list_offers(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Vec<MerchantOffer>>> {
+    if !owns_or_staff(&st, claims.sub, claims.is_staff(), id).await? {
+        return Err(AppError::Forbidden);
+    }
+    let rows: Vec<MerchantOffer> = sqlx::query_as(&format!(
+        "SELECT {OFFER_COLS} FROM merchant_offers WHERE merchant_id = $1 ORDER BY created_at DESC"
+    ))
+    .bind(id)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+/// Active, in-window offers for the customer-facing banner — no ownership
+/// check, any signed-in user browsing/ordering from this store can see them.
+async fn active_offers(
+    State(st): State<AppState>,
+    _auth: AuthUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Vec<MerchantOffer>>> {
+    let rows: Vec<MerchantOffer> = sqlx::query_as(&format!(
+        "SELECT {OFFER_COLS} FROM merchant_offers \
+         WHERE merchant_id = $1 AND active = true \
+           AND (starts_at IS NULL OR starts_at <= now()) \
+           AND (ends_at IS NULL OR ends_at >= now()) \
+         ORDER BY created_at DESC"
+    ))
+    .bind(id)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+#[derive(Deserialize)]
+struct NewOffer {
+    kind: String, // free_delivery | percent | flat
+    value: Option<Decimal>,
+    max_discount: Option<Decimal>,
+    #[serde(default)]
+    min_order_amount: Option<Decimal>,
+    starts_at: Option<chrono::DateTime<chrono::Utc>>,
+    ends_at: Option<chrono::DateTime<chrono::Utc>>,
+    daily_start_minute: Option<i32>,
+    daily_end_minute: Option<i32>,
+}
+
+async fn create_offer(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<NewOffer>,
+) -> AppResult<Json<MerchantOffer>> {
+    if !owns_or_staff(&st, claims.sub, claims.is_staff(), id).await? {
+        return Err(AppError::Forbidden);
+    }
+    if !matches!(body.kind.as_str(), "free_delivery" | "percent" | "flat") {
+        return Err(AppError::BadRequest(
+            "kind must be 'free_delivery', 'percent', or 'flat'".into(),
+        ));
+    }
+    if body.kind != "free_delivery" && body.value.is_none() {
+        return Err(AppError::BadRequest(
+            "value is required for a percent/flat offer".into(),
+        ));
+    }
+    if body.kind == "percent" {
+        let v = body.value.unwrap_or_default();
+        if v <= Decimal::ZERO || v > Decimal::from(100) {
+            return Err(AppError::BadRequest(
+                "percent value must be between 0 and 100".into(),
+            ));
+        }
+    }
+    if body.daily_start_minute.is_some() != body.daily_end_minute.is_some() {
+        return Err(AppError::BadRequest(
+            "daily_start_minute and daily_end_minute must be set together".into(),
+        ));
+    }
+
+    let offer: MerchantOffer = sqlx::query_as(&format!(
+        "INSERT INTO merchant_offers (merchant_id, kind, value, max_discount, min_order_amount, \
+            starts_at, ends_at, daily_start_minute, daily_end_minute) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING {OFFER_COLS}"
+    ))
+    .bind(id)
+    .bind(&body.kind)
+    .bind(body.value)
+    .bind(body.max_discount)
+    .bind(body.min_order_amount.unwrap_or(Decimal::ZERO))
+    .bind(body.starts_at)
+    .bind(body.ends_at)
+    .bind(body.daily_start_minute)
+    .bind(body.daily_end_minute)
+    .fetch_one(&st.db)
+    .await?;
+    Ok(Json(offer))
+}
+
+async fn deactivate_offer(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path((id, offer_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Json<Value>> {
+    if !owns_or_staff(&st, claims.sub, claims.is_staff(), id).await? {
+        return Err(AppError::Forbidden);
+    }
+    let res = sqlx::query(
+        "UPDATE merchant_offers SET active = false WHERE id = $1 AND merchant_id = $2",
+    )
+    .bind(offer_id)
+    .bind(id)
+    .execute(&st.db)
+    .await?;
+    if res.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(sqlx::FromRow)]
+struct OfferCandidate {
+    id: Uuid,
+    kind: String,
+    value: Option<Decimal>,
+    max_discount: Option<Decimal>,
+    daily_start_minute: Option<i32>,
+    daily_end_minute: Option<i32>,
+}
+
+/// Picks whichever active, eligible offer saves the customer the most —
+/// a `free_delivery` offer's "savings" is the delivery fee it waives,
+/// percent/flat is the computed (capped) discount. At most one offer
+/// applies per order, no stacking.
+async fn best_matching_offer(
+    st: &AppState,
+    merchant_id: Uuid,
+    subtotal: Decimal,
+    delivery_fee: Decimal,
+) -> Option<(Uuid, String, Decimal)> {
+    let rows: Vec<OfferCandidate> = sqlx::query_as(
+        "SELECT id, kind, value, max_discount, daily_start_minute, daily_end_minute \
+         FROM merchant_offers \
+         WHERE merchant_id = $1 AND active = true AND min_order_amount <= $2 \
+           AND (starts_at IS NULL OR starts_at <= now()) \
+           AND (ends_at IS NULL OR ends_at >= now())",
+    )
+    .bind(merchant_id)
+    .bind(subtotal)
+    .fetch_all(&st.db)
+    .await
+    .ok()?;
+    if rows.is_empty() {
+        return None;
+    }
+
+    // Nepal Time (UTC+5:45), matching rides' rules.rs — a self-contained,
+    // one-off check here rather than pulling in the rides rule engine for
+    // what's just a single daily window, not a general rule set.
+    let now_minute = {
+        use chrono::{TimeZone, Timelike};
+        let tz = chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).expect("valid offset");
+        let now = tz.from_utc_datetime(&chrono::Utc::now().naive_utc());
+        (now.hour() * 60 + now.minute()) as i32
+    };
+
+    let mut best: Option<(Uuid, String, Decimal)> = None;
+    for row in rows {
+        if let (Some(start), Some(end)) = (row.daily_start_minute, row.daily_end_minute) {
+            let in_window = if start <= end {
+                now_minute >= start && now_minute < end
+            } else {
+                now_minute >= start || now_minute < end
+            };
+            if !in_window {
+                continue;
+            }
+        }
+        let savings = match row.kind.as_str() {
+            "free_delivery" => delivery_fee,
+            "percent" => {
+                let mut d = (subtotal * row.value.unwrap_or_default() / Decimal::from(100))
+                    .round_dp(2);
+                if let Some(cap) = row.max_discount {
+                    if d > cap {
+                        d = cap;
+                    }
+                }
+                d
+            }
+            _ => row.value.unwrap_or_default(),
+        };
+        if savings <= Decimal::ZERO {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(_, _, best_amt)| savings > *best_amt) {
+            best = Some((row.id, row.kind, savings));
+        }
+    }
+    best
 }
 
 #[derive(Deserialize)]
@@ -785,7 +1273,7 @@ async fn merchant_orders(
 ) -> AppResult<Json<Value>> {
     let rows: Vec<OrderRow> = sqlx::query_as(
         "SELECT o.id, o.customer_id, o.merchant_id, m.name AS merchant_name, o.status, o.subtotal, \
-                o.delivery_fee, o.total, o.payment_method, o.delivery_lat, o.delivery_lng, \
+                o.delivery_fee, o.total, o.discount_amount, o.payment_method, o.delivery_lat, o.delivery_lng, \
                 o.trip_id, o.created_at \
          FROM orders o JOIN merchants m ON m.id = o.merchant_id \
          WHERE ($2 OR m.owner_user_id = $1) AND ($3::text IS NULL OR o.status = $3) \
@@ -948,6 +1436,18 @@ async fn set_open(
     if !owns_or_staff(&st, claims.sub, claims.is_staff(), body.merchant_id).await? {
         return Err(AppError::Forbidden);
     }
+    if body.is_open {
+        let status: Option<String> =
+            sqlx::query_scalar("SELECT status::text FROM merchants WHERE id = $1")
+                .bind(body.merchant_id)
+                .fetch_optional(&st.db)
+                .await?;
+        if status.as_deref() != Some("approved") {
+            return Err(AppError::BadRequest(
+                "store must be approved before it can open for business".into(),
+            ));
+        }
+    }
     sqlx::query("UPDATE merchants SET is_open = $2 WHERE id = $1")
         .bind(body.merchant_id)
         .bind(body.is_open)
@@ -981,6 +1481,22 @@ async fn apply_merchant(
     }
     if body.name.trim().is_empty() {
         return Err(AppError::BadRequest("name is required".into()));
+    }
+    // One store per registration: a prior rejection doesn't hold the slot,
+    // but a pending or approved store does — backed by
+    // merchants_one_active_per_owner_idx.
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM merchants WHERE owner_user_id = $1 AND status <> 'rejected'",
+    )
+    .bind(claims.sub)
+    .fetch_optional(&st.db)
+    .await?;
+    if existing.is_some() {
+        return Err(AppError::Coded(
+            StatusCode::CONFLICT,
+            ErrorCode::Conflict,
+            "you already have a registered store".into(),
+        ));
     }
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO merchants \
@@ -1019,7 +1535,12 @@ struct CreateMerchant {
     lng: f64,
     address: Option<String>,
     phone: Option<String>,
-    /// Optional owner (the merchant-app account); defaults to the creating staff.
+    /// Ties this store to a merchant-app account the vendor already has.
+    /// Left unset for a plain walk-in vendor with no app account yet — the
+    /// store stays unowned (`owner_user_id NULL`) rather than defaulting to
+    /// the onboarding staff member's own account, which would (a) be wrong
+    /// attribution and (b) collide with the one-store-per-owner rule the
+    /// moment that staff member onboards a second walk-in.
     owner_user_id: Option<Uuid>,
     prep_mins: Option<i32>,
 }
@@ -1034,10 +1555,33 @@ async fn create_merchant(
             "vertical must be 'food' or 'grocery'".into(),
         ));
     }
-    let owner = body.owner_user_id.unwrap_or(claims.sub);
+    let owner = body.owner_user_id;
+    // One store per registration, same rule as self-service apply — only
+    // applies when an owner was actually specified; unowned walk-ins are
+    // exempt since they don't hold anyone's one-store slot.
+    if let Some(owner) = owner {
+        let existing: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM merchants WHERE owner_user_id = $1 AND status <> 'rejected'",
+        )
+        .bind(owner)
+        .fetch_optional(&st.db)
+        .await?;
+        if existing.is_some() {
+            return Err(AppError::Coded(
+                StatusCode::CONFLICT,
+                ErrorCode::Conflict,
+                "this owner already has a registered store".into(),
+            ));
+        }
+    }
+    // Staff-onboarded (on-site) stores skip the review queue entirely — a
+    // staff member creating this directly has already vetted it in person,
+    // same reasoning as drivers' `onboarded_by` walk-in KYC path.
     let id: Uuid = sqlx::query_scalar(
-        "INSERT INTO merchants (owner_user_id, name, vertical, address, phone, lat, lng, prep_mins) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+        "INSERT INTO merchants \
+             (owner_user_id, name, vertical, address, phone, lat, lng, prep_mins, \
+              status, approved_at, reviewed_by, reviewed_at) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'approved',now(),$9,now()) RETURNING id",
     )
     .bind(owner)
     .bind(body.name.trim())
@@ -1047,7 +1591,127 @@ async fn create_merchant(
     .bind(body.lat)
     .bind(body.lng)
     .bind(body.prep_mins.unwrap_or(20))
+    .bind(claims.sub)
     .fetch_one(&st.db)
     .await?;
     Ok(Json(json!({ "id": id, "owner_user_id": owner })))
+}
+
+// ── Staff review queue ──────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct MerchantQueueQuery {
+    #[serde(default)]
+    status: Option<String>,
+}
+
+/// Pending applications by default (`?status=all` for every store, any
+/// state) — the review queue's landing view.
+async fn merchant_queue(
+    State(st): State<AppState>,
+    crate::auth::StaffUser(_claims): crate::auth::StaffUser,
+    Query(q): Query<MerchantQueueQuery>,
+) -> AppResult<Json<Vec<Merchant>>> {
+    let all = q.status.as_deref() == Some("all");
+    let rows: Vec<Merchant> = sqlx::query_as(
+        "SELECT id, name, vertical, address, phone, lat, lng, prep_mins, is_open, rating, image_key, \
+                status::text, rejection_reason, \
+                0::double precision AS distance_m \
+         FROM merchants WHERE $1 OR status = 'pending' ORDER BY created_at",
+    )
+    .bind(all)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+async fn approve_merchant(
+    State(st): State<AppState>,
+    crate::auth::StaffUser(claims): crate::auth::StaffUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    if !claims.can_approve() {
+        return Err(AppError::Forbidden);
+    }
+    // Guarded on the current status so two staff acting on the same
+    // application at once can't clobber each other — the loser's WHERE
+    // matches nothing (same pattern as driver KYC approval).
+    let updated: Option<(Option<Uuid>,)> = sqlx::query_as(
+        "UPDATE merchants SET status = 'approved', approved_at = now(), reviewed_at = now(), \
+         reviewed_by = $2, rejection_reason = NULL \
+         WHERE id = $1 AND status = 'pending' RETURNING owner_user_id",
+    )
+    .bind(id)
+    .bind(claims.sub)
+    .fetch_optional(&st.db)
+    .await?;
+    let Some((owner,)) = updated else {
+        return Err(AppError::Coded(
+            StatusCode::CONFLICT,
+            ErrorCode::Conflict,
+            "store has already been reviewed".into(),
+        ));
+    };
+    if let Some(owner) = owner {
+        crate::notify::send(
+            &st.nats,
+            owner,
+            saarathi_core::domain::notif::TRANSACTIONAL,
+            "Store approved",
+            "Your store is approved — you can open it and start taking orders.",
+            Some("saarathi://merchant/dashboard".to_string()),
+        )
+        .await;
+    }
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct RejectMerchant {
+    reason: String,
+}
+
+async fn reject_merchant(
+    State(st): State<AppState>,
+    crate::auth::StaffUser(claims): crate::auth::StaffUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<RejectMerchant>,
+) -> AppResult<Json<Value>> {
+    if !claims.can_approve() {
+        return Err(AppError::Forbidden);
+    }
+    if body.reason.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "a rejection reason is required".into(),
+        ));
+    }
+    let updated: Option<(Option<Uuid>,)> = sqlx::query_as(
+        "UPDATE merchants SET status = 'rejected', reviewed_at = now(), reviewed_by = $2, \
+         rejection_reason = $3, approved_at = NULL \
+         WHERE id = $1 AND status = 'pending' RETURNING owner_user_id",
+    )
+    .bind(id)
+    .bind(claims.sub)
+    .bind(&body.reason)
+    .fetch_optional(&st.db)
+    .await?;
+    let Some((owner,)) = updated else {
+        return Err(AppError::Coded(
+            StatusCode::CONFLICT,
+            ErrorCode::Conflict,
+            "store has already been reviewed".into(),
+        ));
+    };
+    if let Some(owner) = owner {
+        crate::notify::send(
+            &st.nats,
+            owner,
+            saarathi_core::domain::notif::TRANSACTIONAL,
+            "Store application rejected",
+            &format!("Your store application was rejected: {}", body.reason),
+            None,
+        )
+        .await;
+    }
+    Ok(Json(json!({ "ok": true })))
 }

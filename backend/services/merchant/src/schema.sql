@@ -47,6 +47,27 @@ ALTER TABLE merchants ADD COLUMN IF NOT EXISTS zone_polygon jsonb;
 -- instead. Null until the owner uploads one.
 ALTER TABLE merchants ADD COLUMN IF NOT EXISTS photo_storage_key text;
 
+-- Staff approval gate, mirroring drivers.kyc_status in auth's schema (minus
+-- the document-completeness 'under_review' step — a merchant application has
+-- nothing to upload, so staff review directly off 'pending'). A merchant
+-- can't open for business (`is_open=true`) or appear in public discovery
+-- until 'approved'.
+DO $$ BEGIN
+    CREATE TYPE merchant_status AS ENUM ('pending', 'approved', 'rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS status merchant_status NOT NULL DEFAULT 'pending';
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS rejection_reason text;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS reviewed_by uuid;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS approved_at timestamptz;
+CREATE INDEX IF NOT EXISTS merchants_status_idx ON merchants (status);
+
+-- One store per registration: a rejected application doesn't hold the slot
+-- (the owner can re-apply), but a pending or approved one does. Backstops
+-- the application-level check in apply_merchant/create_merchant.
+CREATE UNIQUE INDEX IF NOT EXISTS merchants_one_active_per_owner_idx
+    ON merchants (owner_user_id) WHERE status <> 'rejected' AND owner_user_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS menu_items (
     id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id  uuid        NOT NULL REFERENCES merchants (id) ON DELETE CASCADE,
@@ -80,6 +101,30 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE INDEX IF NOT EXISTS orders_customer_idx ON orders (customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS orders_merchant_idx ON orders (merchant_id, status);
 
+-- Store-owned promotions: free delivery or a %/flat discount over a
+-- minimum order amount, optionally boxed to a date range and/or a daily
+-- time-of-day window ("between 5pm and 8pm"). Self-service — configured by
+-- the merchant owner, not staff; no rider/driver "audience" or rule engine
+-- like rides' `campaigns` table, just a threshold and an optional window.
+CREATE TABLE IF NOT EXISTS merchant_offers (
+    id                 uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    merchant_id        uuid        NOT NULL REFERENCES merchants (id) ON DELETE CASCADE,
+    kind               text        NOT NULL,   -- 'free_delivery' | 'percent' | 'flat'
+    value              numeric,                -- % or flat NPR; unused for free_delivery
+    max_discount       numeric,                -- cap, percent only
+    min_order_amount   numeric     NOT NULL DEFAULT 0,
+    starts_at          timestamptz,            -- date-range window (e.g. "this week/month")
+    ends_at            timestamptz,
+    daily_start_minute int,                    -- optional "between time X and Y" window,
+    daily_end_minute   int,                    -- both null = all day, both set = daily window
+    active             boolean     NOT NULL DEFAULT true,
+    created_at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS merchant_offers_merchant_idx ON merchant_offers (merchant_id, active);
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount numeric NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS offer_id uuid REFERENCES merchant_offers (id);
+
 CREATE TABLE IF NOT EXISTS order_items (
     id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     order_id     uuid        NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
@@ -89,6 +134,37 @@ CREATE TABLE IF NOT EXISTS order_items (
     qty          int         NOT NULL
 );
 CREATE INDEX IF NOT EXISTS order_items_order_idx ON order_items (order_id);
+
+-- Customer ratings of the merchant itself (separate from rides' `ratings`,
+-- which is trip-centric — an order isn't always tied to a courier trip, but
+-- should always be ratable once delivered).
+CREATE TABLE IF NOT EXISTS merchant_ratings (
+    id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id    uuid        NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
+    merchant_id uuid        NOT NULL REFERENCES merchants (id),
+    rater_id    uuid        NOT NULL,
+    stars       int         NOT NULL,
+    tags        text[]      NOT NULL DEFAULT '{}',
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS merchant_ratings_order_rater_idx ON merchant_ratings (order_id, rater_id);
+CREATE INDEX IF NOT EXISTS merchant_ratings_merchant_idx ON merchant_ratings (merchant_id);
+
+-- Keeps `merchants.rating` fresh on every new/updated rating so listing
+-- queries (a hot path) stay a plain column read instead of an aggregate.
+CREATE OR REPLACE FUNCTION recompute_merchant_rating() RETURNS trigger AS $$
+BEGIN
+    UPDATE merchants SET rating = COALESCE(
+        (SELECT avg(stars) FROM merchant_ratings WHERE merchant_id = NEW.merchant_id), 0)
+    WHERE id = NEW.merchant_id;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS merchant_ratings_recompute ON merchant_ratings;
+CREATE TRIGGER merchant_ratings_recompute
+AFTER INSERT OR UPDATE ON merchant_ratings
+FOR EACH ROW EXECUTE FUNCTION recompute_merchant_rating();
 
 -- Dev seed: two demo merchants in Ghorahi so the app has something to browse.
 INSERT INTO merchants (id, name, vertical, address, phone, lat, lng, prep_mins, rating) VALUES

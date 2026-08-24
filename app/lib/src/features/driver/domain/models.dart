@@ -1,3 +1,5 @@
+import 'package:latlong2/latlong.dart';
+
 import '../../ride/domain/models.dart';
 
 /// A dispatch offer shown to an online driver (short TTL; accept/decline).
@@ -7,14 +9,29 @@ class DriverOffer {
     required this.grossFare,
     required this.finalFare,
     required this.vehicleClass,
+    required this.origin,
+    required this.dest,
     this.distanceKm,
+    this.expiresAt,
+    this.pricingMode = 'instant',
+    this.askFare,
   });
 
   final String tripId;
   final double grossFare;
   final double finalFare;
   final String vehicleClass;
+  final LatLng origin;
+  final LatLng dest;
   final double? distanceKm;
+  final DateTime? expiresAt;
+
+  /// 'instant' (accept at [finalFare]) or 'bid' (accept/counter [askFare]
+  /// instead — see `routes::bidding` server-side).
+  final String pricingMode;
+  final double? askFare;
+
+  bool get isBidding => pricingMode == 'bid';
 
   /// Driver keeps ≥ 90% (10% commission + 1% accident fund come off the top).
   double get netEarning => finalFare * 0.89;
@@ -24,8 +41,15 @@ class DriverOffer {
         grossFare: asDouble(j['gross_fare']),
         finalFare: asDouble(j['final_fare']),
         vehicleClass: (j['vehicle_class'] as String?) ?? 'two_wheeler',
+        origin: LatLng(asDouble(j['origin_lat']), asDouble(j['origin_lng'])),
+        dest: LatLng(asDouble(j['dest_lat']), asDouble(j['dest_lng'])),
         distanceKm:
             j['distance_km'] == null ? null : asDouble(j['distance_km']),
+        expiresAt: j['expires_at'] == null
+            ? null
+            : DateTime.tryParse(j['expires_at'] as String),
+        pricingMode: (j['pricing_mode'] as String?) ?? 'instant',
+        askFare: j['ask_fare'] == null ? null : asDouble(j['ask_fare']),
       );
 }
 
