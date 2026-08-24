@@ -13,19 +13,23 @@ import '../data/places_repository.dart';
 class AddressPick {
   const AddressPick.place(this.hit)
       : chooseOnMap = false,
-        forceDestination = false;
+        forceDestination = false,
+        originHit = null;
   const AddressPick.map()
       : hit = null,
         chooseOnMap = true,
-        forceDestination = false;
-  /// A resolved Google Maps link carries exactly one point — a caller
-  /// should treat it as the destination regardless of which field (pickup,
-  /// destination, or a stop) was open when it was pasted/shared, since
-  /// there's no second point to be the "other end" of anything.
-  const AddressPick.mapsLink(this.hit)
+        forceDestination = false,
+        originHit = null;
+  /// A resolved Google Maps link — [hit] (the destination) should be used
+  /// regardless of which field (pickup, destination, or a stop) was open
+  /// when it was pasted/shared. [originHit] is only set for a "Directions"
+  /// link that also encoded a start point; when present, the caller should
+  /// set it as pickup too, overriding whatever field was actually open.
+  const AddressPick.mapsLink(this.hit, {this.originHit})
       : chooseOnMap = false,
         forceDestination = true;
   final PlaceHit? hit;
+  final PlaceHit? originHit;
   final bool chooseOnMap;
   final bool forceDestination;
 }
@@ -92,26 +96,35 @@ class _AddressSearchScreenState extends ConsumerState<AddressSearchScreen> {
 
   /// A pasted Google Maps share link resolves straight to a pin — skips the
   /// `/v1/geo/search` autocomplete entirely, since it has no idea what to do
-  /// with a raw coordinate pair.
+  /// with a raw coordinate pair. A "Directions" link with both ends
+  /// resolves both — see [AddressPick.mapsLink]'s `originHit`.
   Future<void> _resolveMapsUrl(String value) async {
-    final point = await resolveGoogleMapsUrl(value);
+    final resolved = await resolveGoogleMapsUrl(value);
     if (!mounted || value != _query) return;
-    if (point == null) {
+    if (resolved == null) {
       setState(() => _loading = false);
       return;
     }
-    final reversed =
-        await ref.read(placesRepositoryProvider).reverse(point).catchError((_) {
-      return null;
-    });
+    final repo = ref.read(placesRepositoryProvider);
+    final destReversed =
+        await repo.reverse(resolved.destination).catchError((_) => null);
+    PlaceHit? originHit;
+    if (resolved.origin != null) {
+      final originReversed =
+          await repo.reverse(resolved.origin!).catchError((_) => null);
+      originHit = originReversed ??
+          PlaceHit(label: coordLabel(resolved.origin!), point: resolved.origin!);
+    }
     if (!mounted || value != _query) return;
     setState(() => _loading = false);
-    final hit = reversed ?? PlaceHit(label: value.trim(), point: point);
-    // Not `_select` — a Maps link is one point with no "which end is this"
-    // context, so it always lands on the destination, regardless of
-    // whether this screen was opened for pickup, destination, or a stop.
-    ref.read(placesRepositoryProvider).addRecent(hit).ignore();
-    Navigator.of(context).pop(AddressPick.mapsLink(hit));
+    final destHit = destReversed ??
+        PlaceHit(label: coordLabel(resolved.destination), point: resolved.destination);
+    // Not `_select` — a Maps link is destination-first with no "which end
+    // is this" context, so it always lands on the destination, regardless
+    // of whether this screen was opened for pickup, destination, or a stop.
+    repo.addRecent(destHit).ignore();
+    if (originHit != null) repo.addRecent(originHit).ignore();
+    Navigator.of(context).pop(AddressPick.mapsLink(destHit, originHit: originHit));
   }
 
   Future<void> _runSearch() async {

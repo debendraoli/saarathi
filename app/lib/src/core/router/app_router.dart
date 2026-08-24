@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import 'deep_links.dart';
@@ -193,15 +194,24 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: Routes.whereTo,
-        pageBuilder: (_, state) => _page(
-          WhereToScreen(
-            initialDest: state.extra as PlaceHit?,
-            initialMode: state.uri.queryParameters['mode'] == 'delivery'
-                ? RideMode.delivery
-                : RideMode.ride,
-          ),
-          key: state.pageKey,
-        ),
+        pageBuilder: (_, state) {
+          final originLat =
+              double.tryParse(state.uri.queryParameters['originLat'] ?? '');
+          final originLng =
+              double.tryParse(state.uri.queryParameters['originLng'] ?? '');
+          return _page(
+            WhereToScreen(
+              initialDest: state.extra as PlaceHit?,
+              initialPickup: originLat != null && originLng != null
+                  ? LatLng(originLat, originLng)
+                  : null,
+              initialMode: state.uri.queryParameters['mode'] == 'delivery'
+                  ? RideMode.delivery
+                  : RideMode.ride,
+            ),
+            key: state.pageKey,
+          );
+        },
       ),
       GoRoute(
         path: '${Routes.trip}/:id',

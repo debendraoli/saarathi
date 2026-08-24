@@ -45,21 +45,30 @@ final deepLinkHandlerProvider = Provider<void>((ref) {
   final links = AppLinks();
 
   Future<bool> tryOpenAsMapsPin(String text) async {
-    final mapsPoint = await resolveGoogleMapsUrl(text);
-    if (mapsPoint == null) return false;
+    final resolved = await resolveGoogleMapsUrl(text);
+    if (resolved == null) return false;
     // Navigate the moment there's a point — not once there's a human label
     // for it too. Waiting on the reverse-geocode here meant a cold start
     // via a shared link sat on whatever the router's initial route is
     // (Home) until both network calls finished; this way the request sheet
     // opens immediately, in its own "resolving…" shimmer state (see
     // `WhereToScreen`'s handling of this exact coordinate-string format),
-    // and the label fills in over it a moment later.
+    // and the label(s) fill in over it a moment later.
     final hit = PlaceHit(
-      label:
-          '${mapsPoint.latitude.toStringAsFixed(5)}, ${mapsPoint.longitude.toStringAsFixed(5)}',
-      point: mapsPoint,
+      label: coordLabel(resolved.destination),
+      point: resolved.destination,
     );
-    router.go(Routes.whereTo, extra: hit);
+    // A "Directions" link's origin (only ever a raw coordinate — see
+    // `resolveGoogleMapsUrl`'s doc comment) rides along as a query param
+    // rather than through `extra`, since `extra` here is `PlaceHit?` and
+    // several other callers of this same route already depend on that
+    // shape (`app_router.dart`'s `Routes.whereTo` GoRoute reads the param
+    // back into `WhereToScreen.initialPickup`).
+    final origin = resolved.origin;
+    final path = origin == null
+        ? Routes.whereTo
+        : '${Routes.whereTo}?originLat=${origin.latitude}&originLng=${origin.longitude}';
+    router.go(path, extra: hit);
     return true;
   }
 

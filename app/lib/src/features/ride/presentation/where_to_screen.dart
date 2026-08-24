@@ -18,6 +18,7 @@ import '../../../shared/widgets/wallet_balance_hint.dart';
 import '../../delivery/application/delivery_controller.dart';
 import '../../delivery/data/delivery_repository.dart';
 import '../../delivery/domain/models.dart' as delivery;
+import '../../places/data/maps_url_parser.dart' show coordLabel;
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
 import '../application/ride_controller.dart';
@@ -34,11 +35,21 @@ enum RideMode { ride, delivery }
 /// or a saved place), choose bike/car — or switch to Delivery to send a parcel
 /// along the same route — then book. Landmark-friendly for Dang.
 class WhereToScreen extends ConsumerStatefulWidget {
-  const WhereToScreen(
-      {super.key, this.initialDest, this.initialMode = RideMode.ride});
+  const WhereToScreen({
+    super.key,
+    this.initialDest,
+    this.initialPickup,
+    this.initialMode = RideMode.ride,
+  });
 
   /// Destination chosen upstream (from the home address search), if any.
   final PlaceHit? initialDest;
+
+  /// Pickup chosen upstream — only ever set by a Google Maps "Directions"
+  /// link that encoded both ends (see `deep_links.dart`); every other entry
+  /// point defaults pickup to the rider's current location via
+  /// [_loadLocation] instead.
+  final LatLng? initialPickup;
 
   /// Lets the parcel showcase card on the home screen land directly in
   /// Delivery mode instead of Ride.
@@ -68,6 +79,9 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   /// Maps-link deep link/share hands over (see [_rawCoordPattern]) and the
   /// background reverse-geocode to a human label hasn't landed yet.
   bool _resolvingDest = false;
+  /// Same, for [_pickupLabel] when [WhereToScreen.initialPickup] came from a
+  /// Directions link.
+  bool _resolvingPickup = false;
   static final _rawCoordPattern = RegExp(r'^-?\d+\.\d+, -?\d+\.\d+$');
 
   // Re-fetches the selected class's fare periodically while the sheet is
@@ -97,6 +111,13 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
         _resolveDestLabel(d.point);
       }
     }
+    final p = widget.initialPickup;
+    if (p != null) {
+      _pickup = p;
+      _pickupLabel = coordLabel(p);
+      _resolvingPickup = true;
+      _resolvePickupLabel(p);
+    }
     _loadLocation();
     _surgeCheckTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       if (!mounted || _mode != RideMode.ride) return;
@@ -121,9 +142,12 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     await ensureLocationPermission();
     final here = await currentLatLng();
     if (!mounted) return;
-    setState(() => _pickup = here);
+    // A Directions-link pickup (widget.initialPickup) already claimed
+    // _pickup in initState — GPS shouldn't override a rider's actual
+    // chosen start point with "here".
+    if (widget.initialPickup == null) setState(() => _pickup = here);
     // Keep an upstream-chosen destination centred; otherwise centre on pickup.
-    _mapController.move(_dest ?? here, 15);
+    _mapController.move(_dest ?? _pickup ?? here, 15);
   }
 
   /// Fills in the real address for a destination that arrived as bare
@@ -142,6 +166,19 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     });
   }
 
+  /// Same as [_resolveDestLabel], for a Directions link's origin point.
+  Future<void> _resolvePickupLabel(LatLng point) async {
+    final hit = await ref
+        .read(placesRepositoryProvider)
+        .reverse(point)
+        .catchError((_) => null);
+    if (!mounted) return;
+    setState(() {
+      _resolvingPickup = false;
+      if (hit != null) _pickupLabel = hit.label;
+    });
+  }
+
   Future<void> _openSearch({required bool forPickup}) async {
     final l = AppL10n.of(context);
     final pick = await Navigator.of(context).push<AddressPick>(
@@ -154,9 +191,10 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     );
     if (pick?.hit == null || !mounted) return;
     final hit = pick!.hit!;
-    // A pasted Maps link always means "this is the destination" — it's one
-    // point with no pickup/drop context of its own — regardless of which
-    // field was open when it was pasted.
+    // A pasted Maps link always means "this is the destination" — regardless
+    // of which field was open when it was pasted — unless it was a
+    // "Directions" link that also carried an origin, in which case that
+    // becomes pickup too (see AddressPick.mapsLink).
     final setPickup = forPickup && !pick.forceDestination;
     setState(() {
       if (setPickup) {
@@ -165,6 +203,11 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
       } else {
         _dest = hit.point;
         _destLabel.text = hit.label;
+      }
+      final origin = pick.originHit;
+      if (origin != null) {
+        _pickup = origin.point;
+        _pickupLabel = origin.label;
       }
     });
     _mapController.move(hit.point, 15);
@@ -185,6 +228,11 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
       setState(() {
         _dest = hit.point;
         _destLabel.text = hit.label;
+        final origin = pick.originHit;
+        if (origin != null) {
+          _pickup = origin.point;
+          _pickupLabel = origin.label;
+        }
       });
     } else {
       setState(() => _stops.add(Place(point: hit.point, label: hit.label)));
@@ -465,6 +513,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                   _ask = null;
                 }),
                 pickupText: _pickupLabel ?? l.useCurrentLocation,
+                resolvingPickup: _resolvingPickup,
                 destText: _dest == null ? null : _destLabel.text,
                 resolvingDest: _resolvingDest,
                 stops: [for (final s in _stops) s.label],
@@ -520,6 +569,7 @@ class _Sheet extends StatelessWidget {
     required this.mode,
     required this.onMode,
     required this.pickupText,
+    required this.resolvingPickup,
     required this.destText,
     required this.resolvingDest,
     required this.stops,
@@ -555,6 +605,10 @@ class _Sheet extends StatelessWidget {
   final RideMode mode;
   final ValueChanged<RideMode> onMode;
   final String pickupText;
+
+  /// True while a Directions-link-dropped pickup's human label is still
+  /// being resolved in the background.
+  final bool resolvingPickup;
   final String? destText;
 
   /// True while a Maps-link-dropped destination's human label is still
@@ -657,6 +711,7 @@ class _Sheet extends StatelessWidget {
                       icon: Icons.trip_origin,
                       text: pickupText,
                       isPlaceholder: false,
+                      loading: resolvingPickup,
                       onTap: onPickupTap,
                     ),
                     for (var i = 0; i < stops.length; i++) ...[
