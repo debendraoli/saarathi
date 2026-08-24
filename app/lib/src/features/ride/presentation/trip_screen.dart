@@ -234,10 +234,25 @@ Future<void> _leaveTrip(
     ref.invalidate(myTripsProvider);
   }
   if (!context.mounted) return;
-  // A rider whose still-searching request just got cancelled goes back to
-  // the booking sheet to re-request, not to Home — this status only ever
-  // occurs before a driver is assigned, i.e. only for riders.
-  context.go(cancelling ? Routes.whereTo : Routes.home);
+  if (cancelling) {
+    // A rider whose still-searching request just got cancelled goes back to
+    // the booking sheet to re-request, not wherever this screen happened to
+    // be pushed from — this status only ever occurs before a driver is
+    // assigned, i.e. only for riders, and only for the live booking flow
+    // (which reaches this screen via `context.go`, not a push).
+    context.go(Routes.whereTo);
+    return;
+  }
+  // This screen is reached two different ways: `context.go` from the live
+  // booking flow (nothing to pop back to — go home), and `context.push`
+  // from a trip in history (Activities, an order's "track courier", etc.),
+  // where there's a real caller to return to instead of blowing past it to
+  // Home.
+  if (context.canPop()) {
+    context.pop();
+  } else {
+    context.go(Routes.home);
+  }
 }
 
 /// The explicit "Cancel ride" button's flow — unlike [_leaveTrip] (back
@@ -521,7 +536,11 @@ class _StatusSheet extends ConsumerWidget {
                   FilledButton(
                     onPressed: () {
                       ref.invalidate(myTripsProvider);
-                      context.go(Routes.home);
+                      if (context.canPop()) {
+                        context.pop();
+                      } else {
+                        context.go(Routes.home);
+                      }
                     },
                     child: Text(l.actionDone),
                   ),

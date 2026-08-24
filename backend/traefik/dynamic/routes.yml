@@ -45,6 +45,7 @@ http:
         || PathPrefix(`/v1/admin/riders`) || PathPrefix(`/v1/admin/driver-analytics`)
         || PathPrefix(`/v1/admin/driver-directory`)
         || PathPrefix(`/v1/admin/reports`) || PathPrefix(`/v1/admin/rides`)
+        || PathPrefix(`/v1/admin/rates`)
         || PathPrefix(`/v1/admin/sos`)
         || PathPrefix(`/v1/admin/surge`) || PathPrefix(`/v1/admin/trips`)
 
