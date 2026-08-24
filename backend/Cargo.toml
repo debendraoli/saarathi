@@ -38,7 +38,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 futures-util = "0.3"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 async-nats = "0.38"
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 argon2 = "0.5"
 rand = "0.8"
 sha2 = "0.10"
