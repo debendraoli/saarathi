@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -142,6 +143,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   AnimationController? _navAnim;
   AnimationController? _fitAnim;
   List<LatLng>? _lastFitPoints;
+  Timer? _resizeFitDebounce;
 
   AnimationController? _routeAnim;
   List<LatLng> _revealedRoute = const [];
@@ -395,11 +397,33 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
     return out;
   }
 
+  /// The map's real box can be transiently smaller than its final size —
+  /// most commonly right as this screen regains focus while a keyboard
+  /// (from an address-search screen just popped) is still animating closed,
+  /// shrinking the available body height for a few frames. If a pin-fit
+  /// happens to run during that window it computes a valid but far-too-
+  /// zoomed-out camera (plenty of finite headroom, so the earlier NaN/
+  /// Infinite guards don't catch it), and since it's only re-triggered by
+  /// the *pins* changing, nothing ever corrects it afterwards. flutter_map
+  /// fires this event on every genuine resize, so re-fitting here (once the
+  /// resize settles) self-heals the moment the layout reaches its true
+  /// final size — debounced since a resize animation emits many events in
+  /// quick succession.
+  void _onMapEvent(MapEvent event) {
+    if (event is! MapEventNonRotatedSizeChange) return;
+    if (!widget.autoFitPins) return;
+    _resizeFitDebounce?.cancel();
+    _resizeFitDebounce = Timer(const Duration(milliseconds: 200), () {
+      if (mounted) _maybeFitPins(force: true);
+    });
+  }
+
   @override
   void dispose() {
     _navAnim?.dispose();
     _fitAnim?.dispose();
     _routeAnim?.dispose();
+    _resizeFitDebounce?.cancel();
     super.dispose();
   }
 
@@ -482,6 +506,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
             initialCenter: widget.center,
             initialZoom: widget.zoom,
             onTap: widget.onTap == null ? null : (_, p) => widget.onTap!(p),
+            onMapEvent: _onMapEvent,
             interactionOptions: const InteractionOptions(
               flags: InteractiveFlag.pinchZoom |
                   InteractiveFlag.drag |
