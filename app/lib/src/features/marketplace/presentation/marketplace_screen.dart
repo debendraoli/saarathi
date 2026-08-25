@@ -646,9 +646,31 @@ class _MerchantCard extends StatelessWidget {
         ? Icons.local_grocery_store_rounded
         : Icons.restaurant_rounded;
 
-    return Card(
+    // A real border + soft shadow instead of the app's default flat
+    // CardTheme (elevation 0, a surface tint one shade off the page
+    // background, no border) — scoped to this card rather than the global
+    // theme, since a dozen of these in a row is exactly where "no edges"
+    // reads worst: they blur into one continuous strip instead of a list of
+    // distinct shops.
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 5,
+            offset: const Offset(0, 2),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.09),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
       clipBehavior: Clip.antiAlias,
-      margin: EdgeInsets.zero,
       child: InkWell(
         onTap: () => context.push(Routes.merchant, extra: merchant),
         child: Padding(
@@ -684,6 +706,20 @@ class _MerchantCard extends StatelessWidget {
                       child:
                           Icon(fallbackIcon, color: Colors.white70, size: 30),
                     ),
+                    if (merchant.isOpen)
+                      Positioned(
+                        right: 6,
+                        top: 6,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: Colors.green.shade700,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: scheme.surface, width: 2),
+                          ),
+                        ),
+                      ),
                     if (offer != null)
                       Positioned(
                         left: 0,
