@@ -13,6 +13,8 @@
 
   "developedBy": "Developed by {company}",
   "@developedBy": { "placeholders": { "company": {} } },
+  "aboutSection": "About",
+  "appVersion": "App version",
   "chooseLanguage": "Choose your language",
   "languageEnglish": "English",
   "languageNepali": "नेपाली",

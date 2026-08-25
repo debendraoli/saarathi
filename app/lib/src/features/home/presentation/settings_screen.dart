@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/foreground/driver_foreground_service.dart';
@@ -54,14 +55,50 @@ class SettingsScreen extends ConsumerWidget {
                 .read(localeControllerProvider.notifier)
                 .set(Locale(s.first)),
           ),
-          const SizedBox(height: 32),
-          Center(
-            child: Text(
-              l.developedBy('Apex Infratech Pvt. Ltd.'),
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
+          const SizedBox(height: 24),
+          Text(l.aboutSection, style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 8),
+          const _AboutCard(),
+        ],
+      ),
+    );
+  }
+}
+
+class _AboutCard extends StatefulWidget {
+  const _AboutCard();
+
+  @override
+  State<_AboutCard> createState() => _AboutCardState();
+}
+
+class _AboutCardState extends State<_AboutCard> {
+  String? _version;
+
+  @override
+  void initState() {
+    super.initState();
+    PackageInfo.fromPlatform().then((info) {
+      if (mounted) setState(() => _version = info.version);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppL10n.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: Column(
+        children: [
+          if (_version != null)
+            ListTile(
+              leading: const Icon(Icons.info_outline_rounded),
+              title: Text(l.appVersion),
+              trailing: Text(_version!, style: TextStyle(color: scheme.outline)),
             ),
+          ListTile(
+            leading: const Icon(Icons.apartment_rounded),
+            title: Text(l.developedBy('Apex Infratech Pvt. Ltd.')),
           ),
         ],
       ),
