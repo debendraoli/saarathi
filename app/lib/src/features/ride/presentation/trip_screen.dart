@@ -1593,6 +1593,8 @@ class _DriverLocationPublisherState
       if (pos != null) _post(pos, previous: _lastPosted);
     });
     _connSub = ref.listenManual(connectivityProvider, (prev, next) {
+      // Same in-flight-event-vs-dispose race as the compass listener below.
+      if (!mounted) return;
       final backOnline = next.valueOrNull ?? false;
       final pending = _pendingRetry;
       if (backOnline && pending != null) {
@@ -1625,6 +1627,12 @@ class _DriverLocationPublisherState
       ),
     ).listen(_onPosition);
     _compassSub = ref.listenManual(compassHeadingProvider, (prev, next) {
+      // `compassHeadingProvider` is a keep-alive, app-lifetime provider — an
+      // event can still be in flight the instant this widget's dispose()
+      // closes the subscription, landing here just after `ref` is no longer
+      // safe to use ("Looking up a deactivated widget's ancestor is
+      // unsafe"). `close()` stops *future* events, not one already queued.
+      if (!mounted) return;
       final heading = next.valueOrNull;
       if (heading == null) return;
       _compassHeading = heading;
