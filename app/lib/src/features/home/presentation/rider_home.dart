@@ -77,21 +77,33 @@ class RiderHome extends ConsumerWidget {
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
+          // Slightly taller than square — the redesigned cards carry an
+          // icon badge + label + subtitle now, not just an icon + label.
+          childAspectRatio: 0.85,
           children: [
             _Service(
               icon: Icons.two_wheeler_rounded,
               label: l.modeRider,
+              subtitle: l.serviceRideSubtitle,
+              tint: _ServiceTint.ride,
+              iconColor: _ServiceTint.rideIcon,
               onTap: onWhereToTap,
               locked: hasActiveRide,
             ),
             _Service(
               icon: Icons.restaurant_rounded,
               label: l.food,
+              subtitle: l.serviceFoodSubtitle,
+              tint: _ServiceTint.food,
+              iconColor: _ServiceTint.foodIcon,
               onTap: () => context.push(Routes.food),
             ),
             _Service(
               icon: Icons.local_grocery_store_rounded,
               label: l.grocery,
+              subtitle: l.serviceGrocerySubtitle,
+              tint: _ServiceTint.grocery,
+              iconColor: _ServiceTint.groceryIcon,
               onTap: () => context.push(Routes.grocery),
             ),
           ],
@@ -524,16 +536,36 @@ class _WhereToCard extends StatelessWidget {
   }
 }
 
+/// Per-service accent colors for the home quick-action row — distinct hues
+/// (not one shared grey) so Ride/Food/Grocery read as different things at a
+/// glance, matching the tinted-icon treatment already used for the
+/// marketplace's category rail and offer ribbons this same redesign pass.
+class _ServiceTint {
+  const _ServiceTint._();
+  static const ride = Color(0xFFFEF3DF);
+  static const rideIcon = Color(0xFFC9820F);
+  static const food = Color(0xFFFDE8EC);
+  static const foodIcon = Color(0xFFDC143C);
+  static const grocery = Color(0xFFE4F5EA);
+  static const groceryIcon = Color(0xFF1C8A4B);
+}
+
 class _Service extends StatelessWidget {
   const _Service({
     required this.icon,
     required this.label,
+    required this.tint,
+    required this.iconColor,
+    this.subtitle,
     this.onTap,
     this.locked = false,
   }) : soon = false;
 
   final IconData icon;
   final String label;
+  final String? subtitle;
+  final Color tint;
+  final Color iconColor;
   final VoidCallback? onTap;
   final bool locked;
   final bool soon;
@@ -543,24 +575,48 @@ class _Service extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Opacity(
       opacity: soon || locked ? 0.5 : 1,
-      child: InkWell(
-        onTap: soon ? null : onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              height: 56,
-              width: 56,
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Icon(icon, color: scheme.primary),
+      child: Material(
+        color: tint,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: soon ? null : onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  height: 44,
+                  width: 44,
+                  decoration: BoxDecoration(
+                    color: iconColor.withValues(alpha: .16),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: iconColor, size: 23),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  label,
+                  style: Theme.of(context)
+                      .textTheme
+                      .labelLarge
+                      ?.copyWith(fontWeight: FontWeight.w800),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    subtitle!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ],
             ),
-            const SizedBox(height: 6),
-            Text(label, style: Theme.of(context).textTheme.labelMedium),
-          ],
+          ),
         ),
       ),
     );
