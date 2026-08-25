@@ -316,17 +316,35 @@ async fn eligible(st: &AppState, driver_id: Uuid, job_type: &str) -> anyhow::Res
 /// offered driver, or `None` if none are available yet. Idempotent while an
 /// offer is live.
 pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Option<Uuid>> {
-    let trip: Option<(String, Option<Uuid>, f64, f64, String, String, Option<f64>, String)> =
-        sqlx::query_as(
-            "SELECT status::text, driver_id, origin_lat, origin_lng, trip_type::text, pricing_mode, \
-                    search_radius_km, vehicle_class \
-             FROM trips WHERE id = $1",
-        )
-        .bind(trip_id)
-        .fetch_optional(&st.db)
-        .await?;
-    let Some((status, driver, lat, lng, job_type, pricing_mode, radius_override, vehicle_class)) =
-        trip
+    let trip: Option<(
+        String,
+        Option<Uuid>,
+        f64,
+        f64,
+        String,
+        String,
+        Option<f64>,
+        String,
+        Option<Uuid>,
+    )> = sqlx::query_as(
+        "SELECT status::text, driver_id, origin_lat, origin_lng, trip_type::text, pricing_mode, \
+                search_radius_km, vehicle_class, preferred_driver_id \
+         FROM trips WHERE id = $1",
+    )
+    .bind(trip_id)
+    .fetch_optional(&st.db)
+    .await?;
+    let Some((
+        status,
+        driver,
+        lat,
+        lng,
+        job_type,
+        pricing_mode,
+        radius_override,
+        vehicle_class,
+        preferred_driver_id,
+    )) = trip
     else {
         return Ok(None);
     };
@@ -365,58 +383,96 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
     .fetch_all(&st.db)
     .await?;
 
-    // Gather eligible, not-yet-offered drivers, widening the radius until we
-    // have more than the broadcast threshold or exhaust the max radius. A
-    // re-request's `search_radius_km` override starts wider than the
-    // default — and raises the ceiling to match, since a starting radius
-    // past the normal max would otherwise make the loop below run zero times.
-    let mut radius = radius_override.unwrap_or(st.config.dispatch_radius_km);
-    let max_radius = radius_override
-        .map(|r| r.max(st.config.dispatch_max_radius_km))
-        .unwrap_or(st.config.dispatch_max_radius_km);
-    let mut candidates: Vec<Uuid> = Vec::new();
-    while radius <= max_radius {
-        for did in nearby_by_eta(st, lng, lat, radius, profile).await? {
-            if already.contains(&did) || candidates.contains(&did) {
-                continue;
+    // A rider explicitly requested this driver (see rides.rs::create /
+    // resolve_preferred_driver) — try them alone, once, before falling back
+    // to normal radius matching. "Once" = no trip_offers row has ever been
+    // created for them on this trip; if they decline/expire, the next
+    // dispatch_trip call finds `tried_before == true` and proceeds straight
+    // to the normal candidate search like any other driver would.
+    let mut preferred_target: Option<Uuid> = None;
+    if !bid_mode {
+        if let Some(preferred) = preferred_driver_id {
+            if !already.contains(&preferred) {
+                let tried_before: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM trip_offers WHERE trip_id = $1 AND driver_id = $2)",
+                )
+                .bind(trip_id)
+                .bind(preferred)
+                .fetch_one(&st.db)
+                .await?;
+                if !tried_before && eligible(st, preferred, &job_type).await? {
+                    preferred_target = Some(preferred);
+                }
             }
-            if !eligible(st, did, &job_type).await? {
-                continue;
-            }
-            candidates.push(did);
         }
-        if candidates.len() > st.config.dispatch_broadcast_threshold {
-            break;
-        }
-        radius *= 2.0;
-    }
-    if candidates.is_empty() {
-        return Ok(None);
     }
 
-    // Blast radius: when supply is thin (few candidates, or drivers going
-    // offline), broadcast the offer to all of them at once so a scarce ride is
-    // not stuck cycling through sequential timeouts. When supply is plentiful,
-    // keep the polite one-at-a-time offer to the nearest driver. Bid mode
-    // always broadcasts — an auction needs multiple bidders to be worth
-    // anything, so the thin-supply threshold doesn't apply to it.
-    let broadcast = bid_mode || candidates.len() <= st.config.dispatch_broadcast_threshold;
-    let targets: &[Uuid] = if broadcast {
-        &candidates
+    let broadcast: bool;
+    let targets: Vec<Uuid>;
+    if let Some(preferred) = preferred_target {
+        broadcast = false;
+        targets = vec![preferred];
     } else {
-        &candidates[..1]
-    };
+        // Gather eligible, not-yet-offered drivers, widening the radius until
+        // we have more than the broadcast threshold or exhaust the max
+        // radius. A re-request's `search_radius_km` override starts wider
+        // than the default — and raises the ceiling to match, since a
+        // starting radius past the normal max would otherwise make the loop
+        // below run zero times.
+        let mut radius = radius_override.unwrap_or(st.config.dispatch_radius_km);
+        let max_radius = radius_override
+            .map(|r| r.max(st.config.dispatch_max_radius_km))
+            .unwrap_or(st.config.dispatch_max_radius_km);
+        let mut candidates: Vec<Uuid> = Vec::new();
+        while radius <= max_radius {
+            for did in nearby_by_eta(st, lng, lat, radius, profile).await? {
+                if already.contains(&did) || candidates.contains(&did) {
+                    continue;
+                }
+                if !eligible(st, did, &job_type).await? {
+                    continue;
+                }
+                candidates.push(did);
+            }
+            if candidates.len() > st.config.dispatch_broadcast_threshold {
+                break;
+            }
+            radius *= 2.0;
+        }
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        // Blast radius: when supply is thin (few candidates, or drivers going
+        // offline), broadcast the offer to all of them at once so a scarce
+        // ride is not stuck cycling through sequential timeouts. When supply
+        // is plentiful, keep the polite one-at-a-time offer to the nearest
+        // driver. Bid mode always broadcasts — an auction needs multiple
+        // bidders to be worth anything, so the thin-supply threshold doesn't
+        // apply to it.
+        broadcast = bid_mode || candidates.len() <= st.config.dispatch_broadcast_threshold;
+        targets = if broadcast {
+            candidates
+        } else {
+            candidates[..1].to_vec()
+        };
+    }
 
     // Bid-mode invites need to stay visible in the driver's offer list for
     // as long as the auction is realistically open, not the tight 15s
     // instant-offer TTL — the same `SEARCH_TIMEOUT_MINUTES` window the
-    // background loop uses as the trip's own give-up backstop.
+    // background loop uses as the trip's own give-up backstop. A personally
+    // requested driver gets longer than the cold-broadcast TTL too — they
+    // deserve more than a few seconds to notice and respond.
     let expires_at = if bid_mode {
         chrono::Utc::now() + chrono::Duration::minutes(SEARCH_TIMEOUT_MINUTES)
+    } else if preferred_target.is_some() {
+        chrono::Utc::now() + chrono::Duration::seconds((st.config.offer_ttl_secs * 3).max(60))
     } else {
         chrono::Utc::now() + chrono::Duration::seconds(st.config.offer_ttl_secs)
     };
-    let offer_title = if job_type == "delivery" {
+    let offer_title = if preferred_target.is_some() {
+        "A rider requested you personally"
+    } else if job_type == "delivery" {
         "New delivery request nearby"
     } else {
         "New ride request nearby"

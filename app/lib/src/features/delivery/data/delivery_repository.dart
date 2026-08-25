@@ -34,10 +34,18 @@ class DeliveryRepository {
   /// there's no other way to complete a delivery). The response is a
   /// `{trip, delivery_otp, delivery_fee, cod_amount}` wrapper, not a bare
   /// trip, so this can't just reuse `Trip.fromJson(res)` directly.
-  Future<ParcelBooking> book(ParcelDraft draft) async {
-    final res =
-        await _api.post('/v1/delivery/parcels', body: draft.bookBody())
-            as Map<String, dynamic>;
+  /// [idempotencyKey], when given, should be generated once per booking
+  /// attempt (via [newIdempotencyKey]) and reused across retries of that same
+  /// tap — a dropped response then replays the original parcel booking
+  /// (same OTP included) instead of creating a duplicate.
+  Future<ParcelBooking> book(ParcelDraft draft, {String? idempotencyKey}) async {
+    final res = await _api.post(
+      '/v1/delivery/parcels',
+      body: draft.bookBody(),
+      headers: {
+        'x-idempotency-key': idempotencyKey ?? newIdempotencyKey(),
+      },
+    ) as Map<String, dynamic>;
     return ParcelBooking(
       trip: Trip.fromJson(res['trip'] as Map<String, dynamic>),
       deliveryOtp: res['delivery_otp'] as String?,

@@ -133,6 +133,12 @@ ALTER TABLE trips ADD COLUMN IF NOT EXISTS stops jsonb NOT NULL DEFAULT '[]';
 -- re-requests after a "no driver found" cancellation, so the retry searches
 -- wider from the start instead of repeating the same radius that just failed.
 ALTER TABLE trips ADD COLUMN IF NOT EXISTS search_radius_km double precision;
+-- Rider requested a specific driver by phone (someone they've ridden with
+-- before — see rides.rs::create's eligibility check). `dispatch_trip` tries
+-- them first with a longer offer window before falling back to normal
+-- radius matching; never a hard requirement, so a rider can never get stuck
+-- waiting on one person who's offline.
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS preferred_driver_id uuid;
 
 -- Immutable, hash-chained ledger. One entry per completed trip (unique index).
 CREATE TABLE IF NOT EXISTS ledger_entries (

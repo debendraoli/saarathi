@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
@@ -21,6 +22,7 @@ import '../../delivery/domain/models.dart' as delivery;
 import '../../places/data/maps_url_parser.dart' show coordLabel;
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
+import '../../wallet/data/wallet_repository.dart';
 import '../application/ride_controller.dart';
 import '../data/ride_repository.dart';
 import '../domain/models.dart';
@@ -74,6 +76,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   /// vehicle class — stays at the platform's default price for that class.
   double? _ask;
   bool _booking = false;
+  String? _preferredDriverPhone;
 
   /// Guards `_openSearch`/`_addStop`/`_saveDest` — a rapid double-tap on
   /// their triggering row/button before the first push/dialog opens could
@@ -260,6 +263,11 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     setState(() => _stops.removeAt(index));
   }
 
+  /// "now + [durationMins]" formatted as a local HH:mm clock time, for the
+  /// "arrive at …" callout floated over the destination pin.
+  String _arrivalTime(int durationMins) =>
+      DateFormat.Hm().format(DateTime.now().add(Duration(minutes: durationMins)));
+
   /// The current draft — null until pickup + destination are both set and
   /// distinct, so this doubles as the "can we price/book yet" gate.
   RideDraft? _draft() {
@@ -276,6 +284,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
       stops: List.unmodifiable(_stops),
       vehicleClass: _vehicle,
       paymentMethod: _payment,
+      preferredDriverPhone: _preferredDriverPhone,
     );
   }
 
@@ -493,24 +502,38 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
             center: center,
             route: route?.valueOrNull ?? (path.length >= 2 ? path : const []),
             onTap: (p) => setState(() => _dest = p),
+            autoFitPins: true,
+            showRecenterButton: _pickup != null && _dest != null,
             pins: [
               if (_pickup != null)
                 MapPin(
                   _pickup!,
                   Icons.emoji_people_rounded,
                   Theme.of(context).colorScheme.primary,
+                  id: 'pickup',
                 ),
-              for (final s in _stops)
+              for (var i = 0; i < _stops.length; i++)
                 MapPin(
-                  s.point,
+                  _stops[i].point,
                   Icons.adjust_rounded,
                   Theme.of(context).colorScheme.tertiary,
+                  id: 'stop-$i',
+                  label: '${i + 1}',
                 ),
               if (_dest != null)
                 MapPin(
                   _dest!,
                   Icons.sports_score_rounded,
                   Theme.of(context).colorScheme.secondary,
+                  id: 'dest',
+                ),
+            ],
+            callouts: [
+              if (_dest != null && selectedEstimate?.valueOrNull != null)
+                MapCallout(
+                  point: _dest!,
+                  text: l.arriveAt(_arrivalTime(
+                      selectedEstimate!.valueOrNull!.durationMins)),
                 ),
             ],
           ),
@@ -573,6 +596,8 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                 canBookDelivery: _canBookDelivery,
                 onBookDelivery: _bookDelivery,
                 onFieldChanged: () => setState(() {}),
+                onPreferredDriverPhone: (phone) =>
+                    setState(() => _preferredDriverPhone = phone),
               ),
             ),
           ),
@@ -618,6 +643,7 @@ class _Sheet extends StatelessWidget {
     required this.canBookDelivery,
     required this.onBookDelivery,
     required this.onFieldChanged,
+    required this.onPreferredDriverPhone,
   });
 
   final RideMode mode;
@@ -669,6 +695,7 @@ class _Sheet extends StatelessWidget {
   final bool canBookDelivery;
   final VoidCallback onBookDelivery;
   final VoidCallback onFieldChanged;
+  final ValueChanged<String> onPreferredDriverPhone;
 
   @override
   Widget build(BuildContext context) {
@@ -699,98 +726,39 @@ class _Sheet extends StatelessWidget {
                   ),
                 ),
               ),
-              SegmentedButton<RideMode>(
-                segments: [
-                  ButtonSegment(
-                    value: RideMode.ride,
-                    icon: const Icon(Icons.two_wheeler_rounded),
-                    label: Text(l.modeRider),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ModeChip(
+                    icon: Icons.two_wheeler_rounded,
+                    label: l.modeRider,
+                    selected: mode == RideMode.ride,
+                    onTap: () => onMode(RideMode.ride),
                   ),
-                  ButtonSegment(
-                    value: RideMode.delivery,
-                    icon: const Icon(Icons.inventory_2_rounded),
-                    label: Text(l.parcelTitle),
+                  const SizedBox(width: 8),
+                  _ModeChip(
+                    icon: Icons.inventory_2_rounded,
+                    label: l.parcelTitle,
+                    selected: mode == RideMode.delivery,
+                    onTap: () => onMode(RideMode.delivery),
                   ),
                 ],
-                selected: {mode},
-                onSelectionChanged: (s) => onMode(s.first),
               ),
-              const SizedBox(height: 12),
-              Container(
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  children: [
-                    _LocationRow(
-                      label: l.pickup,
-                      dotColor: scheme.primary,
-                      icon: Icons.emoji_people_rounded,
-                      text: pickupText,
-                      isPlaceholder: false,
-                      loading: resolvingPickup,
-                      onTap: onPickupTap,
-                    ),
-                    for (var i = 0; i < stops.length; i++) ...[
-                      Divider(
-                          height: 1, indent: 48, color: scheme.outlineVariant),
-                      _LocationRow(
-                        label: l.stopLabel,
-                        dotColor: scheme.tertiary,
-                        icon: Icons.adjust_rounded,
-                        text: stops[i],
-                        isPlaceholder: false,
-                        onTap: onAddStop ?? () {},
-                        trailing: IconButton(
-                          icon: const Icon(Icons.close_rounded),
-                          onPressed: () => onRemoveStop(i),
-                        ),
-                      ),
-                    ],
-                    Divider(
-                        height: 1, indent: 48, color: scheme.outlineVariant),
-                    _LocationRow(
-                      label: l.destination,
-                      dotColor: scheme.secondary,
-                      icon: Icons.sports_score_rounded,
-                      text: destText ?? l.searchAddressHint,
-                      isPlaceholder: destText == null,
-                      loading: resolvingDest,
-                      onTap: onDestTap,
-                      trailing: onSave == null && onClearDest == null
-                          ? null
-                          : Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (onClearDest != null)
-                                  IconButton(
-                                    icon: const Icon(Icons.close_rounded),
-                                    tooltip: l.clearDestination,
-                                    onPressed: onClearDest,
-                                  ),
-                                if (onSave != null)
-                                  IconButton(
-                                    icon:
-                                        const Icon(Icons.bookmark_add_outlined),
-                                    onPressed: onSave,
-                                  ),
-                              ],
-                            ),
-                    ),
-                  ],
-                ),
+              const SizedBox(height: 10),
+              _CompactAddressCard(
+                pickupText: pickupText,
+                resolvingPickup: resolvingPickup,
+                destText: destText,
+                resolvingDest: resolvingDest,
+                stops: stops,
+                onPickupTap: onPickupTap,
+                onDestTap: onDestTap,
+                onAddStop: mode == RideMode.ride ? onAddStop : null,
+                onRemoveStop: onRemoveStop,
+                onSave: onSave,
+                onClearDest: onClearDest,
               ),
-              if (mode == RideMode.ride && onAddStop != null)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: onAddStop,
-                    icon: const Icon(Icons.add_location_alt_outlined, size: 20),
-                    label: Text(l.addStop),
-                  ),
-                ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               if (mode == RideMode.ride) ...[
                 Row(
                   children: [
@@ -800,12 +768,12 @@ class _Sheet extends StatelessWidget {
                           padding: EdgeInsets.only(
                             right: v == VehicleClass.values.last ? 0 : 8,
                           ),
-                          child: _VehicleCard(
+                          child: _VehicleChip(
                             selected: vehicle == v,
                             icon: _vehicleIcon(v),
                             label: _vehicleLabel(l, v),
-                            // Only the selected card shows a price — tapping
-                            // another card selects it and reveals its price
+                            // Only the selected chip shows a price — tapping
+                            // another chip selects it and reveals its price
                             // (already fetched, all classes are watched
                             // concurrently above; this only changes what's
                             // displayed, not what's fetched).
@@ -817,7 +785,7 @@ class _Sheet extends StatelessWidget {
                   ],
                 ),
                 if (selected != null) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 10),
                   selected.when(
                     // Shaped like the FareStepper it's about to become —
                     // two round step-button placeholders either side of a
@@ -849,44 +817,58 @@ class _Sheet extends StatelessWidget {
                             fare.durationMins,
                           ),
                         ),
-                        const SizedBox(height: 14),
-                        SegmentedButton<String>(
-                          segments: [
-                            ButtonSegment(
-                              value: 'cash',
-                              icon: const Icon(Icons.payments_rounded),
-                              label: Text(l.paymentCash),
-                            ),
-                            ButtonSegment(
-                              value: 'wallet',
-                              icon: const Icon(
-                                  Icons.account_balance_wallet_rounded),
-                              label: Text(l.paymentWallet),
-                            ),
-                          ],
-                          selected: {payment},
-                          onSelectionChanged: (s) => onPayment(s.first),
-                        ),
-                        if (payment == 'wallet')
+                        if (payment == 'wallet') ...[
+                          const SizedBox(height: 8),
                           WalletBalanceHint(amount: fare.finalFare),
+                        ],
                       ],
                     ),
                   ),
                 ],
-                const SizedBox(height: 14),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
-                  onPressed: onBook,
-                  child: booking
-                      ? const SizedBox(
-                          height: 22,
-                          width: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.4),
-                        )
-                      : Text(
-                          estimates.isEmpty ? l.actionContinue : l.confirmRide),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _CtaIconButton(
+                      icon: payment == 'wallet'
+                          ? Icons.account_balance_wallet_rounded
+                          : Icons.payments_rounded,
+                      tooltip: l.paymentMethodTitle,
+                      onTap: () => _showPaymentMethodSheet(
+                        context,
+                        payment: payment,
+                        onPayment: onPayment,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                        ),
+                        onPressed: onBook,
+                        child: booking
+                            ? const SizedBox(
+                                height: 22,
+                                width: 22,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2.4),
+                              )
+                            : Text(
+                                estimates.isEmpty
+                                    ? l.actionContinue
+                                    : '${l.confirmRide} · $currencySymbol '
+                                        '${(ask ?? selected?.valueOrNull?.finalFare)?.toStringAsFixed(0) ?? ''}',
+                              ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _CtaIconButton(
+                      icon: Icons.tune_rounded,
+                      tooltip: l.requestSpecificDriver,
+                      onTap: () =>
+                          _showRequestDriverSheet(context, onPreferredDriverPhone),
+                    ),
+                  ],
                 ),
               ] else ...[
                 SegmentedButton<delivery.ParcelSize>(
@@ -994,6 +976,243 @@ String _vehicleLabel(AppL10n l, VehicleClass v) => switch (v) {
       VehicleClass.fourWheeler => l.vehicleFourWheeler,
     };
 
+/// A compact circular icon button flanking the Request button — payment
+/// method on the left, driver-request options on the right, Yango-style.
+class _CtaIconButton extends StatelessWidget {
+  const _CtaIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: scheme.surfaceContainerHighest,
+        shape: const CircleBorder(),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: SizedBox(
+            width: 52,
+            height: 52,
+            child: Icon(icon, color: scheme.onSurfaceVariant, size: 22),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Payment method picker — cash or wallet, with the live wallet balance
+/// shown right on the wallet row instead of a separate hint line.
+void _showPaymentMethodSheet(
+  BuildContext context, {
+  required String payment,
+  required ValueChanged<String> onPayment,
+}) {
+  final l = AppL10n.of(context);
+  showModalBottomSheet<void>(
+    context: context,
+    builder: (sheetContext) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: Theme.of(sheetContext).colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Text(
+              l.paymentMethodTitle,
+              style: Theme.of(sheetContext)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 12),
+            _PaymentMethodTile(
+              icon: Icons.payments_rounded,
+              label: l.paymentCash,
+              selected: payment == 'cash',
+              onTap: () {
+                onPayment('cash');
+                Navigator.pop(sheetContext);
+              },
+            ),
+            Consumer(
+              builder: (context, ref, _) {
+                final wallet = ref.watch(walletBalanceProvider);
+                return _PaymentMethodTile(
+                  icon: Icons.account_balance_wallet_rounded,
+                  label: l.paymentWallet,
+                  trailing: wallet.when(
+                    loading: () => const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    error: (_, __) => null,
+                    data: (w) => Text(
+                      '$currencySymbol ${w.balance.toStringAsFixed(0)}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 13),
+                    ),
+                  ),
+                  selected: payment == 'wallet',
+                  onTap: () {
+                    onPayment('wallet');
+                    Navigator.pop(sheetContext);
+                  },
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _PaymentMethodTile extends StatelessWidget {
+  const _PaymentMethodTile({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.trailing,
+  });
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(icon, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(label,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 15)),
+            ),
+            if (trailing != null) ...[trailing!, const SizedBox(width: 10)],
+            Icon(
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_off_rounded,
+              color: selected ? scheme.primary : scheme.outline,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Request a specific driver by phone number — sends them the trip first,
+/// ahead of normal matching. UI shell only for now: wiring this to a real
+/// backend "priority offer" endpoint is a separate, explicitly-scoped
+/// backend change (driver lookup + a priority-offer dispatch path), not yet
+/// built — this dialog is where that submission will hook in.
+void _showRequestDriverSheet(
+  BuildContext context,
+  ValueChanged<String> onSubmit,
+) {
+  final l = AppL10n.of(context);
+  final controller = TextEditingController();
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    builder: (sheetContext) => Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 8,
+        bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+      ),
+      child: SafeArea(
+        child: StatefulBuilder(
+          builder: (sheetContext, setSheetState) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: Theme.of(sheetContext).colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Text(
+                l.requestSpecificDriver,
+                style: Theme.of(sheetContext)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                l.requestSpecificDriverBody,
+                style: Theme.of(sheetContext).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                keyboardType: TextInputType.phone,
+                autofocus: true,
+                decoration: InputDecoration(labelText: l.driverPhoneLabel),
+                onChanged: (_) => setSheetState(() {}),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                onPressed: controller.text.trim().isEmpty
+                    ? null
+                    : () {
+                        onSubmit(controller.text.trim());
+                        Navigator.of(sheetContext).pop();
+                      },
+                child: Text(l.requestSpecificDriver),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 class _FareStepperSkeleton extends StatelessWidget {
   const _FareStepperSkeleton();
 
@@ -1030,9 +1249,12 @@ class _StepButtonSkeleton extends StatelessWidget {
   }
 }
 
-/// A selectable vehicle-class card (icon + label), inDrive/Yango style.
-class _VehicleCard extends StatelessWidget {
-  const _VehicleCard({
+/// A compact selectable vehicle-class chip (icon + label + price in one tight
+/// column), Yango/Pathao/inDrive style — replaces the old taller card so a
+/// row of these takes noticeably less vertical space and leaves more of the
+/// sheet's height to the map.
+class _VehicleChip extends StatelessWidget {
+  const _VehicleChip({
     required this.selected,
     required this.icon,
     required this.label,
@@ -1051,66 +1273,44 @@ class _VehicleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // Selected = solid inverse fill (reads as "chosen" at a glance, like the
+    // reference apps); unselected = a quiet neutral chip.
+    final fg = selected ? scheme.onInverseSurface : scheme.onSurfaceVariant;
     return Material(
-      color:
-          selected ? scheme.primaryContainer : scheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(16),
+      color: selected ? scheme.inverseSurface : scheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: selected ? scheme.primary : Colors.transparent,
-              width: 1.5,
-            ),
-          ),
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 9),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                icon,
-                size: 28,
-                color: selected
-                    ? scheme.onPrimaryContainer
-                    : scheme.onSurfaceVariant,
-              ),
-              const SizedBox(height: 6),
+              Icon(icon, size: 20, color: fg),
+              const SizedBox(height: 3),
               Text(
                 label,
                 style: TextStyle(
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  fontSize: 12.5,
-                  color:
-                      selected ? scheme.onPrimaryContainer : scheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                  color: fg,
                 ),
               ),
               if (price != null) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: 1),
                 price!.when(
                   // A shimmer the size of the eventual price text, not a
                   // spinner — the number then lands in the space already
                   // held for it instead of popping the layout.
-                  loading: () => const SkeletonBox(width: 46, height: 12),
-                  error: (_, __) => Text(
-                    '—',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: selected
-                          ? scheme.onPrimaryContainer
-                          : scheme.onSurfaceVariant,
-                    ),
-                  ),
+                  loading: () => const SkeletonBox(width: 40, height: 12),
+                  error: (_, __) => Text('—', style: TextStyle(fontSize: 11.5, color: fg)),
                   data: (fare) => Text(
                     '$currencySymbol ${fare.finalFare.toStringAsFixed(0)}',
                     style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: selected
-                          ? scheme.onPrimaryContainer
-                          : scheme.onSurfaceVariant,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: fg,
                     ),
                   ),
                 ),
@@ -1123,73 +1323,313 @@ class _VehicleCard extends StatelessWidget {
   }
 }
 
-/// One tappable pickup/destination row inside the ride sheet.
-class _LocationRow extends StatelessWidget {
-  const _LocationRow({
-    required this.label,
-    required this.dotColor,
-    required this.icon,
-    required this.text,
-    required this.isPlaceholder,
-    required this.onTap,
-    this.trailing,
-    this.loading = false,
+/// Pickup/destination collapsed onto one connected block: a dot-and-flag
+/// rail on the left, one compact line per point on the right, and a swap
+/// button — the single biggest space saving over the old two-full-row
+/// layout. Tapping a line still opens the same search screen as before;
+/// stops (uncommon) render as extra rail segments rather than a separate
+/// section.
+class _CompactAddressCard extends StatelessWidget {
+  const _CompactAddressCard({
+    required this.pickupText,
+    required this.resolvingPickup,
+    required this.destText,
+    required this.resolvingDest,
+    required this.stops,
+    required this.onPickupTap,
+    required this.onDestTap,
+    required this.onAddStop,
+    required this.onRemoveStop,
+    required this.onSave,
+    required this.onClearDest,
   });
 
-  final String label;
-  final Color dotColor;
-  final IconData icon;
-  final String text;
-  final bool isPlaceholder;
-  final VoidCallback onTap;
-  final Widget? trailing;
-
-  /// True while a coordinate dropped in from a Maps link is still being
-  /// reverse-geocoded to a human label — shows a shimmer in its place
-  /// instead of the raw "27.700, 85.300" the row would otherwise flash.
-  final bool loading;
+  final String pickupText;
+  final bool resolvingPickup;
+  final String? destText;
+  final bool resolvingDest;
+  final List<String> stops;
+  final VoidCallback onPickupTap;
+  final VoidCallback onDestTap;
+  final VoidCallback? onAddStop;
+  final ValueChanged<int> onRemoveStop;
+  final VoidCallback? onSave;
+  final VoidCallback? onClearDest;
 
   @override
   Widget build(BuildContext context) {
+    final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: dotColor),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _AddressRail(scheme: scheme, stopCount: stops.length),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _AddressLine(
+                      text: pickupText,
+                      isPlaceholder: false,
+                      loading: resolvingPickup,
+                      onTap: onPickupTap,
+                    ),
+                    for (var i = 0; i < stops.length; i++)
+                      _AddressLine(
+                        text: stops[i],
+                        isPlaceholder: false,
+                        onTap: onAddStop ?? () {},
+                        dim: true,
+                        trailing: GestureDetector(
+                          onTap: () => onRemoveStop(i),
+                          child: Icon(Icons.close_rounded,
+                              size: 16, color: scheme.outline),
+                        ),
+                      ),
+                    _AddressLine(
+                      text: destText ?? l.searchAddressHint,
+                      isPlaceholder: destText == null,
+                      loading: resolvingDest,
+                      onTap: onDestTap,
+                      last: true,
+                    ),
+                  ],
+                ),
+              ),
+              if (onSave != null || onClearDest != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (onClearDest != null)
+                        _RailButton(
+                          icon: Icons.close_rounded,
+                          tooltip: l.clearDestination,
+                          onTap: onClearDest!,
+                        ),
+                      if (onSave != null)
+                        _RailButton(
+                          icon: Icons.bookmark_add_outlined,
+                          tooltip: l.saveAction,
+                          onTap: onSave!,
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          // A labeled row, not another bare icon — "stops is missing" was the
+          // exact feedback the icon-only version got, so this one spells
+          // itself out even at compact height.
+          if (onAddStop != null) ...[
+            Divider(height: 14, color: scheme.outlineVariant),
+            InkWell(
+              onTap: onAddStop,
+              borderRadius: BorderRadius.circular(8),
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Icon(Icons.add_location_alt_outlined,
+                      size: 17, color: scheme.primary),
+                  const SizedBox(width: 6),
                   Text(
-                    label.toUpperCase(),
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: scheme.outline,
-                          letterSpacing: 0.6,
-                        ),
+                    l.addStop,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: scheme.primary,
+                    ),
                   ),
-                  const SizedBox(height: 2),
-                  if (loading)
-                    const SkeletonBox(width: 160, height: 14)
-                  else
-                    Text(
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The dot → (stop dots) → flag rail beside the address lines, sized to
+/// match however many lines [_CompactAddressCard] is currently rendering.
+class _AddressRail extends StatelessWidget {
+  const _AddressRail({required this.scheme, required this.stopCount});
+  final ColorScheme scheme;
+  final int stopCount;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget dot(Color color, {bool square = false}) => Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: color,
+            shape: square ? BoxShape.rectangle : BoxShape.circle,
+            borderRadius: square ? BorderRadius.circular(2) : null,
+          ),
+        );
+    Widget line() => Container(
+          width: 1.5,
+          height: 16,
+          margin: const EdgeInsets.symmetric(vertical: 3),
+          color: scheme.outlineVariant,
+        );
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          dot(scheme.primary),
+          for (var i = 0; i < stopCount; i++) ...[
+            line(),
+            dot(scheme.tertiary),
+          ],
+          line(),
+          dot(scheme.secondary, square: true),
+        ],
+      ),
+    );
+  }
+}
+
+/// One line of text inside [_CompactAddressCard] — a pickup, a stop, or the
+/// destination.
+class _AddressLine extends StatelessWidget {
+  const _AddressLine({
+    required this.text,
+    required this.isPlaceholder,
+    required this.onTap,
+    this.loading = false,
+    this.dim = false,
+    this.last = false,
+    this.trailing,
+  });
+
+  final String text;
+  final bool isPlaceholder;
+  final VoidCallback onTap;
+
+  /// True while a coordinate dropped in from a Maps link is still being
+  /// reverse-geocoded to a human label — shows a shimmer instead of the raw
+  /// "27.700, 85.300" the line would otherwise flash.
+  final bool loading;
+
+  /// Stop lines render a touch lighter than pickup/destination.
+  final bool dim;
+  final bool last;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: EdgeInsets.only(bottom: last ? 0 : 8, top: 1),
+        child: Row(
+          children: [
+            Expanded(
+              child: loading
+                  ? const SkeletonBox(width: 150, height: 14)
+                  : Text(
                       text,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: isPlaceholder
                           ? TextStyle(color: Theme.of(context).hintColor)
-                          : const TextStyle(fontWeight: FontWeight.w600),
+                          : TextStyle(
+                              fontWeight: dim ? FontWeight.w500 : FontWeight.w700,
+                              fontSize: 13.5,
+                            ),
                     ),
-                ],
-              ),
             ),
             if (trailing != null) trailing!,
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RailButton extends StatelessWidget {
+  const _RailButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(icon, size: 18, color: Theme.of(context).colorScheme.outline),
+        ),
+      ),
+    );
+  }
+}
+
+/// The Ride/Delivery mode switch — a pair of compact chips instead of the
+/// old full-width [SegmentedButton], so the header takes less vertical space.
+class _ModeChip extends StatelessWidget {
+  const _ModeChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fg = selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant;
+    return Material(
+      color: selected ? scheme.secondaryContainer : scheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: fg),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: fg,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -45,6 +45,7 @@ class RideDraft {
     this.pricingMode = 'instant',
     this.askFare,
     this.radiusKm,
+    this.preferredDriverPhone,
   });
 
   final Place pickup;
@@ -66,6 +67,12 @@ class RideDraft {
   /// set on a "search wider" re-request after a no-driver cancellation.
   final double? radiusKm;
 
+  /// Request this driver by phone first, before normal matching — only
+  /// takes effect if they're a driver this rider has ridden with before
+  /// (see the backend's `resolve_preferred_driver`); otherwise it's just
+  /// ignored and the trip books normally.
+  final String? preferredDriverPhone;
+
   /// Ordered path pickup → stops → destination (for maps and routing).
   List<LatLng> get path =>
       [pickup.point, for (final s in stops) s.point, destination.point];
@@ -76,6 +83,7 @@ class RideDraft {
     String? pricingMode,
     double? askFare,
     double? radiusKm,
+    String? preferredDriverPhone,
   }) =>
       RideDraft(
         pickup: pickup,
@@ -86,6 +94,7 @@ class RideDraft {
         pricingMode: pricingMode ?? this.pricingMode,
         askFare: askFare ?? this.askFare,
         radiusKm: radiusKm ?? this.radiusKm,
+        preferredDriverPhone: preferredDriverPhone ?? this.preferredDriverPhone,
       );
 
   // Value equality so `fareEstimateProvider(draft)` — a Riverpod `.family`,

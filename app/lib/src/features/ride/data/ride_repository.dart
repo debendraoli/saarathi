@@ -46,6 +46,9 @@ class RideRepository {
         'pricing_mode': draft.pricingMode,
         if (draft.askFare != null) 'offered_fare': draft.askFare,
         if (draft.radiusKm != null) 'radius_km': draft.radiusKm,
+        if (draft.preferredDriverPhone != null &&
+            draft.preferredDriverPhone!.trim().isNotEmpty)
+          'preferred_driver_phone': draft.preferredDriverPhone,
       },
       headers: {
         'x-idempotency-key': idempotencyKey ?? newIdempotencyKey(),

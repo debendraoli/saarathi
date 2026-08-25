@@ -73,6 +73,50 @@ struct RideRequest {
     /// Set on a "search wider" re-request after a no-driver cancellation.
     #[serde(default)]
     radius_km: Option<f64>,
+    /// Request a specific driver by phone (someone this rider has ridden
+    /// with before) — `dispatch_trip` tries them first, then falls back to
+    /// normal matching. See `resolve_preferred_driver`.
+    #[serde(default)]
+    preferred_driver_phone: Option<String>,
+}
+
+/// Resolves a "request this driver" phone number to a driver id — only if
+/// it belongs to an active driver *this rider has completed a trip with
+/// before*. Deliberately not open to any phone number: without that check,
+/// this endpoint would let anyone page a driver repeatedly just by knowing
+/// their number, which is a real harassment vector. Silently returns `Ok(None)`
+/// for anything else (unknown number, not a driver, no shared trip history)
+/// rather than leaking *which* of those it was — the rider doesn't need to
+/// know if a number belongs to a driver they've simply never ridden with, vs.
+/// a driver at all, vs. a typo; the trip books normally either way, minus
+/// the priority-offer step.
+async fn resolve_preferred_driver(
+    pool: &sqlx::PgPool,
+    rider_id: Uuid,
+    phone: &str,
+) -> AppResult<Option<Uuid>> {
+    let phone = phone.trim();
+    if phone.is_empty() {
+        return Ok(None);
+    }
+    let driver_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM users WHERE phone = $1 AND role = 'driver'",
+    )
+    .bind(phone)
+    .fetch_optional(pool)
+    .await?;
+    let Some(driver_id) = driver_id else {
+        return Ok(None);
+    };
+    let rode_together: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM trips \
+         WHERE rider_id = $1 AND driver_id = $2 AND status = 'completed')",
+    )
+    .bind(rider_id)
+    .bind(driver_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(rode_together.then_some(driver_id))
 }
 
 async fn estimate(
@@ -256,6 +300,14 @@ async fn create(
             )
         };
 
+    // Resolved before opening the transaction — read-only, and a bad/unknown
+    // number should never fail the booking, just silently skip the
+    // priority-offer step (see `resolve_preferred_driver`'s doc comment).
+    let preferred_driver_id = match body.preferred_driver_phone.as_deref() {
+        Some(phone) => resolve_preferred_driver(&st.db, claims.sub, phone).await?,
+        None => None,
+    };
+
     let mut tx = st.db.begin().await?;
 
     // Prepaid: a wallet-paid trip requires enough rider credits up front.
@@ -300,8 +352,8 @@ async fn create(
         "INSERT INTO trips (rider_id, vehicle_class, origin_lat, origin_lng, dest_lat, dest_lng, \
             distance_km, duration_secs, gross_fare, discount_code, discount_amount, final_fare, \
             commission, accident_fund, driver_payout, payment_method, stops, pricing_mode, ask_fare, \
-            search_radius_km) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING {TRIP_COLS}"
+            search_radius_km, preferred_driver_id) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING {TRIP_COLS}"
     )))
     .bind(claims.sub)
     .bind(&body.vehicle_class)
@@ -323,6 +375,7 @@ async fn create(
     .bind(pricing_mode)
     .bind(ask_fare)
     .bind(body.radius_km)
+    .bind(preferred_driver_id)
     .fetch_one(&mut *tx)
     .await?;
 

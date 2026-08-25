@@ -9,10 +9,12 @@ use crate::models::{Trip, TRIP_COLS};
 use crate::routing::{LatLng, RouteProfile};
 use crate::state::AppState;
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::{routing::post, Json, Router};
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
 use saarathi_core::domain::roles;
+use saarathi_core::idempotency::{self, Reservation};
 use saarathi_core::money::Money;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -109,8 +111,32 @@ struct BookReq {
 async fn book(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
+    headers: HeaderMap,
     Json(b): Json<BookReq>,
 ) -> AppResult<Json<Value>> {
+    let idem_key = headers
+        .get("x-idempotency-key")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            AppError::bad(
+                ErrorCode::Validation,
+                "X-Idempotency-Key header is required",
+            )
+        })?
+        .to_string();
+
+    // Claim the key up front, before any of the booking work below, so a
+    // double-tap/retry replays the first parcel instead of creating a second
+    // (same pattern as rides.rs::create).
+    let mut reserve_tx = st.db.begin().await?;
+    let reservation =
+        idempotency::reserve(&mut reserve_tx, &idem_key, claims.sub, "delivery.book").await?;
+    reserve_tx.commit().await?;
+    if let Reservation::Replay { status: _, body } = reservation {
+        return Ok(Json(body));
+    }
+
     if !valid_tier(&b.size_tier) {
         return Err(AppError::BadRequest(
             "size_tier must be 'envelope', 'small', or 'medium'".into(),
@@ -194,6 +220,15 @@ async fn book(
     .bind(&otp)
     .execute(&mut *tx)
     .await?;
+
+    let response = json!({
+        "trip": trip,
+        "delivery_fee": fee,
+        "cod_amount": b.cod_amount,
+        "delivery_otp": otp,
+    });
+    idempotency::store(&mut tx, &idem_key, claims.sub, "delivery.book", 200, &response).await?;
+
     tx.commit().await?;
 
     // Kick dispatch; drivers who opted into 'delivery' jobs get the offer.
@@ -201,16 +236,13 @@ async fn book(
         let st = st.clone();
         let trip_id = trip.id;
         async move {
-            let _ = crate::dispatch::dispatch_trip(&st, trip_id).await;
+            if let Err(e) = crate::dispatch::dispatch_trip(&st, trip_id).await {
+                tracing::warn!(trip = %trip_id, error = %e, "initial dispatch_trip kick failed");
+            }
         }
     });
 
-    Ok(Json(json!({
-        "trip": trip,
-        "delivery_fee": fee,
-        "cod_amount": b.cod_amount,
-        "delivery_otp": otp,
-    })))
+    Ok(Json(response))
 }
 
 #[derive(sqlx::FromRow)]
