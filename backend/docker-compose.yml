@@ -9,6 +9,17 @@ name: saarathi
 # dependencies by compose DNS name (postgres/redis/nats), not localhost.
 x-svc-base: &svc-base
   restart: unless-stopped
+  # Local dev only — a generous ceiling so a leak/runaway loop in one service
+  # can't starve the others or the host, not a tuned production budget.
+  # Third-party infra (postgres/redis/nats/valhalla/pelias/coturn) is
+  # deliberately left unbounded here: their real footprints vary too much to
+  # guess safely, and OOM-killing e.g. OpenSearch locally is worse than the
+  # problem this is meant to catch.
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 512M
 
 x-svc-env: &svc-env
   DATABASE_URL: postgres://saarathi:saarathi_dev@postgres:5432/saarathi
@@ -382,8 +393,22 @@ services:
   valhalla:
     image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
     profiles: ["routing"]
+    # Unlike the Rust services (restart: unless-stopped via svc-base), this
+    # was previously unrestarted — a crash or OOM left it dead until someone
+    # noticed and ran `docker compose up -d` by hand. `routing`'s per-request
+    # fallback to haversine masks this from users, but silently, so it can go
+    # unnoticed for a long time.
+    restart: unless-stopped
     ports:
       - "8002:8002"
+    # Local dev ceiling, not a tuned production budget (current steady-state
+    # usage on the Nepal/Lumbini extract is ~230MB; this leaves headroom for
+    # a bigger extract or load spike while still turning a runaway into a
+    # contained, auto-restarted container instead of a host-wide OOM risk).
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     environment:
       # Nepal (Lumbini) OSM extract — swap for a wider region as coverage grows.
       tile_urls: "https://download.geofabrik.de/asia/nepal-latest.osm.pbf"

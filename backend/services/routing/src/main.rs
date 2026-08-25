@@ -188,6 +188,45 @@ fn cache_key(points: &[LatLng], profile: RouteProfile) -> String {
     s
 }
 
+#[cfg(test)]
+mod cache_key_tests {
+    use super::*;
+
+    #[test]
+    fn identical_points_and_profile_produce_the_same_key() {
+        let a = [LatLng { lat: 27.7172, lng: 85.3240 }, LatLng { lat: 27.7, lng: 85.3 }];
+        let b = [LatLng { lat: 27.7172, lng: 85.3240 }, LatLng { lat: 27.7, lng: 85.3 }];
+        assert_eq!(cache_key(&a, RouteProfile::Motorcycle), cache_key(&b, RouteProfile::Motorcycle));
+    }
+
+    #[test]
+    fn different_profiles_produce_different_keys() {
+        let pts = [LatLng { lat: 27.7172, lng: 85.3240 }, LatLng { lat: 27.7, lng: 85.3 }];
+        assert_ne!(
+            cache_key(&pts, RouteProfile::Motorcycle),
+            cache_key(&pts, RouteProfile::Auto)
+        );
+    }
+
+    #[test]
+    fn coordinates_within_a_meter_collapse_to_the_same_key() {
+        // Rounded to 5dp (~1.1m at the equator) so near-identical requests
+        // (GPS jitter) still hit the same cache entry.
+        let a = [LatLng { lat: 27.71720, lng: 85.32400 }];
+        let b = [LatLng { lat: 27.717201, lng: 85.324001 }];
+        assert_eq!(cache_key(&a, RouteProfile::Motorcycle), cache_key(&b, RouteProfile::Motorcycle));
+    }
+
+    #[test]
+    fn point_order_changes_the_key() {
+        // Origin/dest reversed is a materially different route, not a
+        // cache-equivalent request.
+        let a = [LatLng { lat: 27.7172, lng: 85.3240 }, LatLng { lat: 27.7, lng: 85.3 }];
+        let b = [LatLng { lat: 27.7, lng: 85.3 }, LatLng { lat: 27.7172, lng: 85.3240 }];
+        assert_ne!(cache_key(&a, RouteProfile::Motorcycle), cache_key(&b, RouteProfile::Motorcycle));
+    }
+}
+
 // ── Valhalla wire types (only the fields we need) ────────────────────────────
 #[derive(Serialize)]
 struct ValhallaLoc {
@@ -308,6 +347,54 @@ fn decode_polyline(encoded: &str, precision: f64) -> Vec<LatLng> {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod polyline_tests {
+    use super::*;
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-4
+    }
+
+    #[test]
+    fn decodes_googles_canonical_example_at_1e5_precision() {
+        // https://developers.google.com/maps/documentation/utilities/polylinealgorithm
+        let points = decode_polyline("_p~iF~ps|U_ulLnnqC_mqNvxq`@", 1e5);
+        let expected = [(38.5, -120.2), (40.7, -120.95), (43.252, -126.453)];
+        assert_eq!(points.len(), expected.len());
+        for (got, (lat, lng)) in points.iter().zip(expected) {
+            assert!(close(got.lat, lat), "lat: got {} want {lat}", got.lat);
+            assert!(close(got.lng, lng), "lng: got {} want {lng}", got.lng);
+        }
+    }
+
+    #[test]
+    fn empty_string_decodes_to_no_points() {
+        assert!(decode_polyline("", 1e5).is_empty());
+    }
+
+    #[test]
+    fn truncated_input_returns_whatever_decoded_so_far_not_a_panic() {
+        // A cut-off byte stream (e.g. a truncated Valhalla response) must
+        // degrade gracefully, never index-panic mid-decode.
+        let full = "_p~iF~ps|U_ulLnnqC_mqNvxq`@";
+        let points = decode_polyline(&full[..full.len() - 1], 1e5);
+        assert!(points.len() <= 3);
+    }
+
+    #[test]
+    fn precision_1e6_scales_differently_than_1e5() {
+        // Same raw varint stream, different scale factor -> different decoded
+        // magnitude — this is the actual Valhalla-vs-OSRM distinction the
+        // function exists to handle.
+        let encoded = "_p~iF~ps|U";
+        let p5 = decode_polyline(encoded, 1e5);
+        let p6 = decode_polyline(encoded, 1e6);
+        assert_eq!(p5.len(), 1);
+        assert_eq!(p6.len(), 1);
+        assert!((p5[0].lat - p6[0].lat * 10.0).abs() < 1e-3);
+    }
 }
 
 impl Inner {

@@ -7,7 +7,7 @@
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LatLng {
     pub lat: f64,
     pub lng: f64,
@@ -166,5 +166,101 @@ impl RoutingClient {
             .json()
             .await?;
         Ok(resp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pt(lat: f64, lng: f64) -> LatLng {
+        LatLng { lat, lng }
+    }
+
+    #[test]
+    fn haversine_km_is_zero_for_the_same_point() {
+        let p = pt(27.7172, 85.3240);
+        assert!(haversine_km(p, p) < 1e-9);
+    }
+
+    #[test]
+    fn haversine_km_matches_a_known_distance() {
+        // One degree of latitude along a meridian is exactly (2*pi*R)/360 —
+        // an analytically checkable distance, unlike an eyeballed city pair.
+        let a = pt(27.0, 85.0);
+        let b = pt(28.0, 85.0);
+        let expected = 2.0 * std::f64::consts::PI * 6371.0 / 360.0;
+        let d = haversine_km(a, b);
+        assert!((d - expected).abs() < 0.5, "got {d}km, expected ~{expected}km");
+    }
+
+    #[test]
+    fn haversine_km_is_symmetric() {
+        let a = pt(27.7172, 85.3240);
+        let b = pt(27.7000, 85.3000);
+        assert!((haversine_km(a, b) - haversine_km(b, a)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn haversine_path_with_fewer_than_two_points_is_a_zero_none_result() {
+        let r = haversine_path(&[pt(27.7, 85.3)], 1.3, 22.0);
+        assert_eq!(r.distance_km, Decimal::ZERO);
+        assert_eq!(r.duration_secs, 0);
+        assert_eq!(r.source, "none");
+        assert!(r.geometry.is_empty());
+    }
+
+    #[test]
+    fn haversine_path_applies_the_road_factor_and_sums_legs() {
+        let a = pt(27.70, 85.30);
+        let b = pt(27.71, 85.30);
+        let c = pt(27.72, 85.30);
+        let direct = haversine_km(a, c);
+        let via_b = haversine_km(a, b) + haversine_km(b, c);
+        // Sanity: routing through a waypoint on the same line is ~the direct
+        // distance, not the direct distance again per leg.
+        assert!((direct - via_b).abs() < 1e-6);
+
+        let r = haversine_path(&[a, b, c], 1.3, 22.0);
+        let expected = Decimal::from_f64(via_b * 1.3).unwrap().round_dp(3);
+        assert_eq!(r.distance_km, expected);
+        assert_eq!(r.source, "haversine");
+        assert_eq!(r.geometry, vec![a, b, c]); // offline fallback: straight-line shape
+    }
+
+    #[test]
+    fn haversine_path_duration_scales_inversely_with_speed() {
+        let a = pt(27.70, 85.30);
+        let b = pt(27.80, 85.30);
+        let slow = haversine_path(&[a, b], 1.0, 10.0);
+        let fast = haversine_path(&[a, b], 1.0, 40.0);
+        assert!(slow.duration_secs > fast.duration_secs);
+    }
+
+    #[test]
+    fn haversine_path_zero_speed_yields_zero_duration_not_a_div_by_zero_panic() {
+        let r = haversine_path(&[pt(27.7, 85.3), pt(27.8, 85.3)], 1.0, 0.0);
+        assert_eq!(r.duration_secs, 0);
+    }
+
+    #[test]
+    fn route_profile_from_wire_maps_four_and_three_wheeler_to_auto() {
+        assert_eq!(RouteProfile::from_wire("four_wheeler"), RouteProfile::Auto);
+        assert_eq!(RouteProfile::from_wire("three_wheeler"), RouteProfile::Auto);
+        assert_eq!(RouteProfile::from_wire("car"), RouteProfile::Auto);
+        assert_eq!(RouteProfile::from_wire("auto"), RouteProfile::Auto);
+    }
+
+    #[test]
+    fn route_profile_from_wire_defaults_unknown_values_to_motorcycle() {
+        assert_eq!(RouteProfile::from_wire("two_wheeler"), RouteProfile::Motorcycle);
+        assert_eq!(RouteProfile::from_wire("bogus"), RouteProfile::Motorcycle);
+        assert_eq!(RouteProfile::from_wire(""), RouteProfile::Motorcycle);
+    }
+
+    #[test]
+    fn route_profile_wire_round_trips() {
+        assert_eq!(RouteProfile::from_wire(RouteProfile::Auto.as_wire()), RouteProfile::Auto);
+        assert_eq!(RouteProfile::from_wire(RouteProfile::Motorcycle.as_wire()), RouteProfile::Motorcycle);
     }
 }

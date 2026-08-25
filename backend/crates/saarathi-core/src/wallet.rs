@@ -15,6 +15,8 @@ use uuid::Uuid;
 pub enum WalletError {
     #[error("insufficient credits")]
     InsufficientRiderCredits,
+    #[error("insufficient partner balance")]
+    InsufficientPartnerBalance,
     #[error(transparent)]
     Db(#[from] sqlx::Error),
 }
@@ -24,6 +26,7 @@ impl WalletError {
     pub fn code(&self) -> Option<ErrorCode> {
         match self {
             WalletError::InsufficientRiderCredits => Some(ErrorCode::InsufficientCredits),
+            WalletError::InsufficientPartnerBalance => Some(ErrorCode::CorporateTabUnavailable),
             WalletError::Db(_) => None,
         }
     }

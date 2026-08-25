@@ -63,10 +63,10 @@ async fn queue(
     Query(q): Query<QueueQuery>,
 ) -> AppResult<Json<Value>> {
     let status = q.status.unwrap_or_else(|| "pending".into());
-    let items: Vec<AdminContribution> = sqlx::query_as(&format!(
+    let items: Vec<AdminContribution> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {ADMIN_COLS} FROM place_contributions \
          WHERE status = $1 ORDER BY created_at ASC LIMIT 200"
-    ))
+    )))
     .bind(&status)
     .fetch_all(&st.db)
     .await?;
@@ -79,7 +79,7 @@ async fn detail(
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<AdminContribution>> {
     let row: AdminContribution =
-        sqlx::query_as(&format!("SELECT {ADMIN_COLS} FROM place_contributions WHERE id = $1"))
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {ADMIN_COLS} FROM place_contributions WHERE id = $1")))
             .bind(id)
             .fetch_optional(&st.db)
             .await?

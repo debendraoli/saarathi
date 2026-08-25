@@ -75,11 +75,11 @@ async fn list_mine(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> AppResult<Json<Vec<Dispute>>> {
-    let rows: Vec<Dispute> = sqlx::query_as(&format!(
+    let rows: Vec<Dispute> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {DISPUTE_COLS} FROM reports \
          WHERE reporter_id = $1 AND reference IS NOT NULL \
          ORDER BY created_at DESC LIMIT 100"
-    ))
+    )))
     .bind(claims.sub)
     .fetch_all(&st.db)
     .await?;
@@ -87,11 +87,11 @@ async fn list_mine(
 }
 
 async fn list_all(State(st): State<AppState>, _staff: StaffUser) -> AppResult<Json<Vec<Dispute>>> {
-    let rows: Vec<Dispute> = sqlx::query_as(&format!(
+    let rows: Vec<Dispute> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {DISPUTE_COLS} FROM reports \
          WHERE reference IS NOT NULL \
          ORDER BY (status = 'open') DESC, created_at DESC LIMIT 200"
-    ))
+    )))
     .fetch_all(&st.db)
     .await?;
     Ok(Json(rows))

@@ -354,9 +354,9 @@ async fn list_campaigns(
     Path(pid): Path<Uuid>,
 ) -> AppResult<Json<Vec<FleetCampaign>>> {
     require_member(&st.db, claims.sub, pid).await?;
-    let rows: Vec<FleetCampaign> = sqlx::query_as(&format!(
+    let rows: Vec<FleetCampaign> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {FLEET_CAMPAIGN_COLS} FROM campaigns WHERE partner_id = $1 ORDER BY created_at DESC"
-    ))
+    )))
     .bind(pid)
     .fetch_all(&st.db)
     .await?;
@@ -394,12 +394,12 @@ async fn create_campaign(
     if body.code.trim().is_empty() {
         return Err(AppError::BadRequest("code is required".into()));
     }
-    let campaign: FleetCampaign = sqlx::query_as(&format!(
+    let campaign: FleetCampaign = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO campaigns (code, title, audience, kind, value, min_fare, max_discount, \
             partner_id, funded_by, created_by) \
          VALUES ($1,$2,'driver',$3::discount_kind,$4,$5,$6,$7,'partner',$8) \
          RETURNING {FLEET_CAMPAIGN_COLS}"
-    ))
+    )))
     .bind(body.code.trim())
     .bind(body.title)
     .bind(body.kind)

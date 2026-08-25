@@ -35,12 +35,12 @@ pub async fn rides_today(pool: &PgPool, user_id: Uuid, audience: &str) -> i64 {
     } else {
         "rider_id"
     };
-    sqlx::query_scalar(&format!(
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT count(*) FROM trips \
          WHERE {col} = $1 AND status = 'completed' \
            AND (completed_at AT TIME ZONE 'Asia/Kathmandu')::date \
              = (now() AT TIME ZONE 'Asia/Kathmandu')::date"
-    ))
+    )))
     .bind(user_id)
     .fetch_one(pool)
     .await
@@ -63,10 +63,10 @@ pub async fn load_context(
     } else {
         "rider_id"
     };
-    let prior: i64 = sqlx::query_scalar(&format!(
+    let prior: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT count(*) FROM trips \
          WHERE status = 'completed' AND {col} = $1 AND ($2::uuid IS NULL OR id <> $2)"
-    ))
+    )))
     .bind(user_id)
     .bind(exclude_trip)
     .fetch_one(pool)

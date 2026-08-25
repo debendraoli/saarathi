@@ -71,15 +71,15 @@ async fn rides(
 
     let rows: Vec<RideRow> = match q.status.as_deref() {
         Some(s) if !s.is_empty() => {
-            sqlx::query_as(&format!(
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "{base} WHERE t.status::text = $1 ORDER BY t.created_at DESC LIMIT 200"
-            ))
+            )))
             .bind(s)
             .fetch_all(&st.db)
             .await?
         }
         _ => {
-            sqlx::query_as(&format!("{base} ORDER BY t.created_at DESC LIMIT 200"))
+            sqlx::query_as(sqlx::AssertSqlSafe(format!("{base} ORDER BY t.created_at DESC LIMIT 200")))
                 .fetch_all(&st.db)
                 .await?
         }

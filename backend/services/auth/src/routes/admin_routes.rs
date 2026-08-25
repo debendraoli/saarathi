@@ -77,15 +77,15 @@ async fn list_drivers(
                 FROM drivers d JOIN users u ON u.id = d.user_id ";
 
     let items: Vec<DriverListItem> = if status_filter == "queue" {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "{base} WHERE d.kyc_status = 'under_review' ORDER BY d.created_at",
-        ))
+        )))
         .fetch_all(&st.db)
         .await?
     } else {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "{base} WHERE d.kyc_status::text = $1 ORDER BY d.created_at DESC"
-        ))
+        )))
         .bind(&status_filter)
         .fetch_all(&st.db)
         .await?

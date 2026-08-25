@@ -29,7 +29,12 @@ class RideRepository {
     return FareEstimate.fromJson(res as Map<String, dynamic>);
   }
 
-  Future<Trip> book(RideDraft draft) async {
+  /// [idempotencyKey], when given, should be generated once per booking
+  /// attempt (via [newIdempotencyKey]) and reused across retries of that same
+  /// tap — a dropped response then replays the original trip instead of
+  /// creating a duplicate. Callers that don't pass one get a fresh key per
+  /// call, i.e. no retry protection.
+  Future<Trip> book(RideDraft draft, {String? idempotencyKey}) async {
     final res = await _api.post(
       '/v1/rides',
       body: {
@@ -41,6 +46,9 @@ class RideRepository {
         'pricing_mode': draft.pricingMode,
         if (draft.askFare != null) 'offered_fare': draft.askFare,
         if (draft.radiusKm != null) 'radius_km': draft.radiusKm,
+      },
+      headers: {
+        'x-idempotency-key': idempotencyKey ?? newIdempotencyKey(),
       },
     );
     return Trip.fromJson(res as Map<String, dynamic>);

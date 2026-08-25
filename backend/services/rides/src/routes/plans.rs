@@ -69,10 +69,10 @@ async fn create(
     Json(body): Json<NewPlan>,
 ) -> AppResult<Json<Plan>> {
     validate(&body.name, body.min_amount, body.max_amount)?;
-    let plan: Plan = sqlx::query_as(&format!(
+    let plan: Plan = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO credit_plans (name, min_amount, max_amount, bonus_percent, created_by) \
          VALUES ($1, $2, $3, $4, $5) RETURNING {PLAN_COLS}"
-    ))
+    )))
     .bind(body.name)
     .bind(body.min_amount)
     .bind(body.max_amount)
@@ -98,7 +98,7 @@ async fn update(
     Json(body): Json<EditPlan>,
 ) -> AppResult<Json<Plan>> {
     // Any edit sends the plan back through approval.
-    let plan: Plan = sqlx::query_as(&format!(
+    let plan: Plan = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE credit_plans SET \
             name = COALESCE($2, name), \
             min_amount = COALESCE($3, min_amount), \
@@ -106,7 +106,7 @@ async fn update(
             bonus_percent = COALESCE($5, bonus_percent), \
             status = 'pending', approved_by = NULL, approved_at = NULL, updated_at = now() \
          WHERE id = $1 RETURNING {PLAN_COLS}"
-    ))
+    )))
     .bind(id)
     .bind(body.name)
     .bind(body.min_amount)
@@ -171,9 +171,9 @@ async fn reject(
 }
 
 async fn list(State(st): State<AppState>, _staff: StaffUser) -> AppResult<Json<Vec<Plan>>> {
-    let rows: Vec<Plan> = sqlx::query_as(&format!(
+    let rows: Vec<Plan> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {PLAN_COLS} FROM credit_plans ORDER BY (status = 'pending') DESC, created_at DESC"
-    ))
+    )))
     .fetch_all(&st.db)
     .await?;
     Ok(Json(rows))
@@ -181,9 +181,9 @@ async fn list(State(st): State<AppState>, _staff: StaffUser) -> AppResult<Json<V
 
 /// Active plans only — what riders may top up against.
 async fn active(State(st): State<AppState>, _auth: AuthUser) -> AppResult<Json<Vec<Plan>>> {
-    let rows: Vec<Plan> = sqlx::query_as(&format!(
+    let rows: Vec<Plan> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {PLAN_COLS} FROM credit_plans WHERE status = 'active' ORDER BY min_amount"
-    ))
+    )))
     .fetch_all(&st.db)
     .await?;
     Ok(Json(rows))

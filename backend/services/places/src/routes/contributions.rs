@@ -138,13 +138,13 @@ async fn submit(
         .map_err(AppError::Other)?;
     let _ = content_type; // stored bytes are self-describing enough for v1; not persisted separately
 
-    let contribution: Contribution = sqlx::query_as(&format!(
+    let contribution: Contribution = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO place_contributions \
             (contributor_id, category, name, description, lat, lng, photo_storage_key, \
              capture_lat, capture_lng, capture_distance_m) \
          VALUES ($1, $2::place_category, $3, $4, $5, $6, $7, $8, $9, $10) \
          RETURNING {CONTRIBUTION_COLS}"
-    ))
+    )))
     .bind(claims.sub)
     .bind(&category)
     .bind(&name)
@@ -172,11 +172,30 @@ fn parse_f64(s: &str) -> AppResult<f64> {
     s.parse().map_err(|_| AppError::BadRequest(format!("invalid number: {s}")))
 }
 
+#[cfg(test)]
+mod parse_f64_tests {
+    use super::*;
+
+    #[test]
+    fn parses_plain_and_negative_and_decimal_numbers() {
+        assert_eq!(parse_f64("27.7172").unwrap(), 27.7172);
+        assert_eq!(parse_f64("-85.324").unwrap(), -85.324);
+        assert_eq!(parse_f64("0").unwrap(), 0.0);
+    }
+
+    #[test]
+    fn rejects_garbage_with_a_bad_request_not_a_panic() {
+        assert!(parse_f64("not a number").is_err());
+        assert!(parse_f64("").is_err());
+        assert!(parse_f64("27.7,85.3").is_err()); // a lat/lng pair pasted whole, not split
+    }
+}
+
 async fn mine(State(st): State<AppState>, AuthUser(claims): AuthUser) -> AppResult<Json<Value>> {
-    let items: Vec<Contribution> = sqlx::query_as(&format!(
+    let items: Vec<Contribution> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {CONTRIBUTION_COLS} FROM place_contributions \
          WHERE contributor_id = $1 ORDER BY created_at DESC LIMIT 100"
-    ))
+    )))
     .bind(claims.sub)
     .fetch_all(&st.db)
     .await?;

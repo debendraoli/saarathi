@@ -63,7 +63,10 @@ pub async fn verify_chain(pool: &PgPool) -> Result<bool, WalletError> {
 }
 
 /// Append one signed movement to the partner chain and move the wallet, atomically.
-/// `amount` is signed (+ owed to partner, − spent/withdrawn). Returns the new balance.
+/// `amount` is signed (+ owed to partner, − spent/withdrawn). A negative amount
+/// that would take the wallet below zero is rejected — the lock below is held
+/// across the check-then-write so two concurrent debits can't both pass it.
+/// Returns the new balance.
 pub async fn append(
     tx: &mut Transaction<'_, Postgres>,
     partner_id: Uuid,
@@ -71,10 +74,23 @@ pub async fn append(
     kind: &str,
     amount: Decimal,
 ) -> Result<Decimal, WalletError> {
-    // Serialize appends so the single global chain stays strictly linear.
+    // Serialize appends so the single global chain stays strictly linear, and
+    // so the floor check below can't race a concurrent debit on this partner.
     sqlx::query("SELECT pg_advisory_xact_lock(770002)")
         .execute(&mut **tx)
         .await?;
+
+    if amount < Decimal::ZERO {
+        let current: Option<(Decimal,)> =
+            sqlx::query_as("SELECT balance FROM partner_wallets WHERE partner_id = $1")
+                .bind(partner_id)
+                .fetch_optional(&mut **tx)
+                .await?;
+        let current = current.map(|b| b.0).unwrap_or(Decimal::ZERO);
+        if current + amount < Decimal::ZERO {
+            return Err(WalletError::InsufficientPartnerBalance);
+        }
+    }
 
     let (balance,): (Decimal,) = sqlx::query_as(
         "INSERT INTO partner_wallets (partner_id, balance, updated_at) VALUES ($1, $2, now()) \

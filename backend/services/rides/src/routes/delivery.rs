@@ -157,12 +157,12 @@ async fn book(
     let otp = format!("{:04}", (Uuid::new_v4().as_u128() % 10000) as u32);
 
     let mut tx = st.db.begin().await?;
-    let trip: Trip = sqlx::query_as(&format!(
+    let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO trips (rider_id, trip_type, vehicle_class, origin_lat, origin_lng, dest_lat, dest_lng, \
             distance_km, duration_secs, gross_fare, discount_amount, final_fare, commission, \
             accident_fund, driver_payout, payment_method) \
          VALUES ($1,'delivery','two_wheeler',$2,$3,$4,$5,$6,$7,$8,0,$8,$9,$10,$11,$12) RETURNING {TRIP_COLS}"
-    ))
+    )))
     .bind(claims.sub)
     .bind(b.origin.lat)
     .bind(b.origin.lng)
@@ -369,10 +369,10 @@ async fn list_mine(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> AppResult<Json<Vec<Trip>>> {
-    let rows: Vec<Trip> = sqlx::query_as(&format!(
+    let rows: Vec<Trip> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {TRIP_COLS} FROM trips WHERE trip_type = 'delivery' AND (rider_id = $1 OR driver_id = $1) \
          ORDER BY created_at DESC LIMIT 100"
-    ))
+    )))
     .bind(claims.sub)
     .fetch_all(&st.db)
     .await?;

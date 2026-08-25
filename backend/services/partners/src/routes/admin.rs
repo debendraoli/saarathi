@@ -79,11 +79,11 @@ async fn create(
         .min(MAX_COMMISSION_RATE);
 
     let mut tx = st.db.begin().await?;
-    let partner: Partner = sqlx::query_as(&format!(
+    let partner: Partner = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO partners (name, legal_name, type, city, contact_phone, contact_email, \
             pan_vat, commission_share, onboarded_by) \
          VALUES ($1,$2,$3::partner_type,$4,$5,$6,$7,$8,$9) RETURNING {PARTNER_COLS}"
-    ))
+    )))
     .bind(body.name.trim())
     .bind(body.legal_name)
     .bind(&ptype)
@@ -139,17 +139,17 @@ async fn list(
 ) -> AppResult<Json<Vec<Partner>>> {
     let rows: Vec<Partner> = match q.status {
         Some(s) => {
-            sqlx::query_as(&format!(
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {PARTNER_COLS} FROM partners WHERE status::text = $1 ORDER BY created_at DESC"
-        ))
+        )))
             .bind(s)
             .fetch_all(&st.db)
             .await?
         }
         None => {
-            sqlx::query_as(&format!(
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "SELECT {PARTNER_COLS} FROM partners ORDER BY created_at DESC"
-            ))
+            )))
             .fetch_all(&st.db)
             .await?
         }
@@ -169,9 +169,9 @@ async fn detail(
     _admin: AdminUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<PartnerDetail>> {
-    let partner: Partner = sqlx::query_as(&format!(
+    let partner: Partner = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {PARTNER_COLS} FROM partners WHERE id = $1"
-    ))
+    )))
     .bind(id)
     .fetch_optional(&st.db)
     .await?
@@ -220,7 +220,7 @@ async fn update(
         .commission_share
         .map(|s| s.max(Decimal::ZERO).min(MAX_COMMISSION_RATE));
 
-    let partner: Partner = sqlx::query_as(&format!(
+    let partner: Partner = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE partners SET \
             status = COALESCE($2::partner_status, status), \
             commission_share = COALESCE($3, commission_share), \
@@ -228,7 +228,7 @@ async fn update(
             contact_email = COALESCE($5, contact_email), \
             updated_at = now() \
          WHERE id = $1 RETURNING {PARTNER_COLS}"
-    ))
+    )))
     .bind(id)
     .bind(body.status)
     .bind(share)

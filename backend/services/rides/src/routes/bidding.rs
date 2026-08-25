@@ -30,7 +30,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn load_bid_trip(st: &AppState, id: Uuid) -> AppResult<Trip> {
-    let trip: Option<Trip> = sqlx::query_as(&format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1"))
+    let trip: Option<Trip> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1")))
         .bind(id)
         .fetch_optional(&st.db)
         .await?;
@@ -261,12 +261,12 @@ async fn accept_bid(
 
     // `driver_id IS NULL` is the lock: two concurrent accepts on this trip
     // (different bids, or a race with instant-mode assignment) can't both win.
-    let updated: Option<Trip> = sqlx::query_as(&format!(
+    let updated: Option<Trip> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE trips SET driver_id = $2, status = 'accepted', accepted_at = now(), \
             updated_at = now(), gross_fare = $3, commission = $4, accident_fund = $5, \
             driver_payout = $6, final_fare = $7 \
          WHERE id = $1 AND driver_id IS NULL RETURNING {TRIP_COLS}"
-    ))
+    )))
     .bind(id)
     .bind(driver_id)
     .bind(amount)
@@ -275,7 +275,16 @@ async fn accept_bid(
     .bind(driver_payout)
     .bind(final_fare)
     .fetch_optional(&mut *tx)
-    .await?;
+    .await
+    .map_err(|e| match e {
+        // trips_driver_one_active_idx backstop: lost the race against another
+        // accept for this driver that committed first.
+        sqlx::Error::Database(db) if db.is_unique_violation() => AppError::conflict(
+            ErrorCode::TripUnavailable,
+            "that driver just became unavailable — pick another bid",
+        ),
+        other => AppError::Db(other),
+    })?;
     let Some(updated) = updated else {
         return Err(AppError::conflict(
             ErrorCode::TripUnavailable,
@@ -365,9 +374,9 @@ async fn change_ask(
     let floor = (trip.gross_fare * st.config.bargain_floor_ratio).round_dp(2);
     let ask = body.amount.max(floor).min(ceiling);
 
-    let updated: Trip = sqlx::query_as(&format!(
+    let updated: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE trips SET ask_fare = $2, updated_at = now() WHERE id = $1 RETURNING {TRIP_COLS}"
-    ))
+    )))
     .bind(id)
     .bind(ask)
     .fetch_one(&st.db)
@@ -377,6 +386,8 @@ async fn change_ask(
         id,
         json!({ "type": "ask", "trip_id": id, "amount": ask }).to_string(),
     );
-    let _ = dispatch::dispatch_trip(&st, id).await;
+    if let Err(e) = dispatch::dispatch_trip(&st, id).await {
+        tracing::warn!(trip = %id, error = %e, "redispatch after change_ask failed");
+    }
     Ok(Json(updated))
 }

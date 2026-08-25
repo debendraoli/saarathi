@@ -74,13 +74,13 @@ async fn create_delivery_trip(
         st.config.commission_rate,
     );
 
-    let trip: Trip = sqlx::query_as(&format!(
+    let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO trips (rider_id, trip_type, vehicle_class, origin_lat, origin_lng, \
             dest_lat, dest_lng, distance_km, duration_secs, gross_fare, discount_amount, \
             final_fare, commission, accident_fund, driver_payout, payment_method) \
          VALUES ($1,'delivery','two_wheeler',$2,$3,$4,$5,$6,$7,$8,0,$8,$9,$10,$11,$12) \
          RETURNING {TRIP_COLS}"
-    ))
+    )))
     .bind(body.rider_id)
     .bind(body.origin.lat)
     .bind(body.origin.lng)

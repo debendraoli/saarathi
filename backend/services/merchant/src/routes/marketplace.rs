@@ -226,7 +226,7 @@ async fn search_items(
                AND ($4::text IS NULL OR m.vertical = $4) \
          ORDER BY {order} LIMIT 40"
     );
-    let rows: Vec<ItemHit> = sqlx::query_as(&sql)
+    let rows: Vec<ItemHit> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(lat)
         .bind(lng)
         .bind(format!("%{term}%"))
@@ -390,7 +390,7 @@ async fn place_order(
             discount_amount = savings;
         }
     }
-    let total = (subtotal - discount_amount + delivery_fee).max(Decimal::ZERO);
+    let total = order_total(subtotal, discount_amount, delivery_fee);
 
     let mut tx = st.db.begin().await?;
     let order_id: Uuid = sqlx::query_scalar(
@@ -1035,9 +1035,9 @@ async fn list_offers(
     if !owns_or_staff(&st, claims.sub, claims.is_staff(), id).await? {
         return Err(AppError::Forbidden);
     }
-    let rows: Vec<MerchantOffer> = sqlx::query_as(&format!(
+    let rows: Vec<MerchantOffer> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {OFFER_COLS} FROM merchant_offers WHERE merchant_id = $1 ORDER BY created_at DESC"
-    ))
+    )))
     .bind(id)
     .fetch_all(&st.db)
     .await?;
@@ -1051,13 +1051,13 @@ async fn active_offers(
     _auth: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Vec<MerchantOffer>>> {
-    let rows: Vec<MerchantOffer> = sqlx::query_as(&format!(
+    let rows: Vec<MerchantOffer> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {OFFER_COLS} FROM merchant_offers \
          WHERE merchant_id = $1 AND active = true \
            AND (starts_at IS NULL OR starts_at <= now()) \
            AND (ends_at IS NULL OR ends_at >= now()) \
          ORDER BY created_at DESC"
-    ))
+    )))
     .bind(id)
     .fetch_all(&st.db)
     .await?;
@@ -1110,11 +1110,11 @@ async fn create_offer(
         ));
     }
 
-    let offer: MerchantOffer = sqlx::query_as(&format!(
+    let offer: MerchantOffer = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO merchant_offers (merchant_id, kind, value, max_discount, min_order_amount, \
             starts_at, ends_at, daily_start_minute, daily_end_minute) \
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING {OFFER_COLS}"
-    ))
+    )))
     .bind(id)
     .bind(&body.kind)
     .bind(body.value)
@@ -1198,30 +1198,10 @@ async fn best_matching_offer(
 
     let mut best: Option<(Uuid, String, Decimal)> = None;
     for row in rows {
-        if let (Some(start), Some(end)) = (row.daily_start_minute, row.daily_end_minute) {
-            let in_window = if start <= end {
-                now_minute >= start && now_minute < end
-            } else {
-                now_minute >= start || now_minute < end
-            };
-            if !in_window {
-                continue;
-            }
+        if !in_daily_window(now_minute, row.daily_start_minute, row.daily_end_minute) {
+            continue;
         }
-        let savings = match row.kind.as_str() {
-            "free_delivery" => delivery_fee,
-            "percent" => {
-                let mut d = (subtotal * row.value.unwrap_or_default() / Decimal::from(100))
-                    .round_dp(2);
-                if let Some(cap) = row.max_discount {
-                    if d > cap {
-                        d = cap;
-                    }
-                }
-                d
-            }
-            _ => row.value.unwrap_or_default(),
-        };
+        let savings = savings_for_offer(&row.kind, row.value, row.max_discount, subtotal, delivery_fee);
         if savings <= Decimal::ZERO {
             continue;
         }
@@ -1230,6 +1210,133 @@ async fn best_matching_offer(
         }
     }
     best
+}
+
+/// Whether `now_minute` (minutes since midnight, local) falls in
+/// `[start, end)` — wrapping past midnight when `start > end` (e.g. a
+/// 22:00–02:00 happy hour). `None` bounds mean "always in window" (an
+/// offer with no daily schedule).
+fn in_daily_window(now_minute: i32, start: Option<i32>, end: Option<i32>) -> bool {
+    let (Some(start), Some(end)) = (start, end) else {
+        return true;
+    };
+    if start <= end {
+        now_minute >= start && now_minute < end
+    } else {
+        now_minute >= start || now_minute < end
+    }
+}
+
+/// What a single offer would save on this order — `free_delivery` waives the
+/// fee entirely, `percent` is a capped percentage of the subtotal, anything
+/// else (`flat`) is a fixed amount. Never negative.
+fn savings_for_offer(
+    kind: &str,
+    value: Option<Decimal>,
+    max_discount: Option<Decimal>,
+    subtotal: Decimal,
+    delivery_fee: Decimal,
+) -> Decimal {
+    match kind {
+        "free_delivery" => delivery_fee,
+        "percent" => {
+            let mut d = (subtotal * value.unwrap_or_default() / Decimal::from(100)).round_dp(2);
+            if let Some(cap) = max_discount {
+                if d > cap {
+                    d = cap;
+                }
+            }
+            d
+        }
+        _ => value.unwrap_or_default(),
+    }
+}
+
+/// Final charge for an order: subtotal minus whatever discount applied, plus
+/// delivery — clamped so a discount that (somehow) exceeds subtotal+delivery
+/// can never make the order free-and-then-some.
+fn order_total(subtotal: Decimal, discount_amount: Decimal, delivery_fee: Decimal) -> Decimal {
+    (subtotal - discount_amount + delivery_fee).max(Decimal::ZERO)
+}
+
+#[cfg(test)]
+mod checkout_math_tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    #[test]
+    fn in_daily_window_no_schedule_is_always_open() {
+        assert!(in_daily_window(0, None, None));
+        assert!(in_daily_window(1439, None, None));
+    }
+
+    #[test]
+    fn in_daily_window_same_day_range() {
+        // 09:00-17:00
+        assert!(!in_daily_window(8 * 60 + 59, Some(540), Some(1020)));
+        assert!(in_daily_window(9 * 60, Some(540), Some(1020)));
+        assert!(in_daily_window(16 * 60 + 59, Some(540), Some(1020)));
+        assert!(!in_daily_window(17 * 60, Some(540), Some(1020))); // end is exclusive
+    }
+
+    #[test]
+    fn in_daily_window_wraps_past_midnight() {
+        // 22:00-02:00 happy hour
+        let start = 22 * 60;
+        let end = 2 * 60;
+        assert!(in_daily_window(23 * 60, Some(start), Some(end)));
+        assert!(in_daily_window(60, Some(start), Some(end))); // 01:00
+        assert!(!in_daily_window(12 * 60, Some(start), Some(end))); // noon, outside
+        assert!(!in_daily_window(end, Some(start), Some(end))); // 02:00 exact, exclusive
+    }
+
+    #[test]
+    fn savings_free_delivery_waives_exactly_the_fee() {
+        let s = savings_for_offer("free_delivery", None, None, dec!(500), dec!(60));
+        assert_eq!(s, dec!(60));
+    }
+
+    #[test]
+    fn savings_percent_is_capped_by_max_discount() {
+        // 20% of 1000 = 200, but capped at 100.
+        let s = savings_for_offer("percent", Some(dec!(20)), Some(dec!(100)), dec!(1000), dec!(0));
+        assert_eq!(s, dec!(100));
+    }
+
+    #[test]
+    fn savings_percent_uncapped_rounds_to_2dp() {
+        let s = savings_for_offer("percent", Some(dec!(15)), None, dec!(333.33), dec!(0));
+        assert_eq!(s, dec!(50.00)); // 333.33 * 0.15 = 49.9995 -> 50.00
+    }
+
+    #[test]
+    fn savings_flat_kind_returns_the_raw_value() {
+        let s = savings_for_offer("flat", Some(dec!(75)), None, dec!(1000), dec!(60));
+        assert_eq!(s, dec!(75));
+    }
+
+    #[test]
+    fn savings_missing_value_defaults_to_zero_not_a_panic() {
+        assert_eq!(savings_for_offer("percent", None, None, dec!(1000), dec!(0)), dec!(0));
+        assert_eq!(savings_for_offer("flat", None, None, dec!(1000), dec!(0)), dec!(0));
+    }
+
+    #[test]
+    fn order_total_is_subtotal_minus_discount_plus_delivery() {
+        assert_eq!(order_total(dec!(500), dec!(50), dec!(60)), dec!(510));
+    }
+
+    #[test]
+    fn order_total_never_goes_negative() {
+        // A discount that (in principle) exceeds subtotal+delivery must clamp
+        // to zero, not charge a negative amount / pay the customer.
+        assert_eq!(order_total(dec!(100), dec!(9999), dec!(0)), dec!(0));
+    }
+
+    #[test]
+    fn order_total_with_no_discount_is_subtotal_plus_delivery() {
+        assert_eq!(order_total(dec!(200), dec!(0), dec!(30)), dec!(230));
+    }
 }
 
 #[derive(Deserialize)]

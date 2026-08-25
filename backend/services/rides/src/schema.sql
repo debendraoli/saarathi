@@ -48,6 +48,13 @@ CREATE TABLE IF NOT EXISTS trips (
 CREATE INDEX IF NOT EXISTS trips_rider_idx  ON trips (rider_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS trips_driver_idx ON trips (driver_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS trips_status_idx ON trips (status);
+-- A driver may have at most one active trip at a time. `accept_offer` and
+-- `accept_bid` already check this at the application level, but that check
+-- is a plain SELECT with no lock — two concurrent accepts for the same
+-- driver on different trips can both pass it before either commits. This is
+-- the hard backstop (mirrors trip_bids_one_live_idx's pattern above).
+CREATE UNIQUE INDEX IF NOT EXISTS trips_driver_one_active_idx
+    ON trips (driver_id) WHERE status IN ('accepted', 'arriving', 'in_progress');
 
 CREATE TABLE IF NOT EXISTS campaigns (
     id            uuid              PRIMARY KEY DEFAULT gen_random_uuid(),

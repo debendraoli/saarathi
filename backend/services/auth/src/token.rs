@@ -5,7 +5,8 @@
 use crate::models::UserRole;
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
-use rand::RngCore;
+use rand::rand_core::UnwrapErr;
+use rand::Rng;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -47,7 +48,7 @@ pub fn issue_access(
 /// A high-entropy opaque refresh token (returned to the client once).
 pub fn generate_refresh_token() -> String {
     let mut bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    UnwrapErr(rand::rngs::SysRng).fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
 

@@ -9,7 +9,7 @@ use axum::extract::State;
 use axum::{routing::get, Json, Router};
 use base64::Engine;
 use chrono::Utc;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{json, Value};
 use sha1::Sha1;
 

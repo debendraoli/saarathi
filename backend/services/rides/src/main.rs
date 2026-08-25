@@ -3,34 +3,12 @@
 //! Owns the ride lifecycle, the routing-based fare estimate (legal caps enforced
 //! by `saarathi-core`), promo campaigns, and a trip-scoped WebSocket that carries
 //! near-realtime status/location, chat, and WebRTC signaling. See ../../../AGENTS.md.
+//!
+//! Thin entry point — the actual wiring lives in `lib.rs` so integration
+//! tests can reuse it.
 
-mod auth;
-mod bonus;
-mod config;
-mod db;
-mod dispatch;
-mod error;
-mod flags;
-mod hub;
-mod ledger;
-mod models;
-mod notify;
-mod partner_ledger;
-mod payments;
-mod pricing;
-mod routes;
-mod routing;
-mod rules;
-mod settle;
-mod state;
-mod surge;
-mod ws;
-
-use config::Config;
-use hub::Hub;
-use routing::Router;
-use state::AppState;
-use std::sync::Arc;
+use saarathi_rides::config::Config;
+use saarathi_rides::{bootstrap, dispatch, routes};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -42,33 +20,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
-    let pool = db::connect(&config.database_url).await?;
-    db::init_schema(&pool).await?;
-    db::migrate_off_subscriptions(&pool).await?;
-
-    let redis_client = redis::Client::open(config.redis_url.clone())?;
-    let redis = redis::aio::ConnectionManager::new(redis_client).await?;
-
-    // NATS bus for notifications (non-fatal: trips run fine if the bus is down).
-    let nats = match async_nats::connect(&config.nats_url).await {
-        Ok(c) => Some(c),
-        Err(e) => {
-            tracing::warn!(error = %e, "NATS unavailable; notifications will be skipped");
-            None
-        }
-    };
-
-    let router = Arc::new(Router::new(&config));
     let port = config.port;
-    let state = AppState {
-        db: pool,
-        config: Arc::new(config),
-        router,
-        hub: Hub::new(nats.clone()),
-        redis,
-        payments: saarathi_core::payments::provider_from_env(),
-        nats,
-    };
+    let state = bootstrap(config).await?;
 
     tokio::spawn(dispatch::run_dispatcher(state.clone()));
 

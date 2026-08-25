@@ -86,11 +86,11 @@ async fn maybe_auto_complete(st: &AppState, trip_id: Uuid, driver_id: Uuid, lat:
     if dist > ARRIVAL_RADIUS_KM {
         return;
     }
-    if let Err(e) = crate::routes::rides::complete_trip(st, trip_id, driver_id).await {
+    match crate::routes::rides::complete_trip(st, trip_id, driver_id).await { Err(e) => {
         tracing::warn!(trip = %trip_id, error = %e, "auto-complete on arrival failed");
-    } else {
+    } _ => {
         tracing::info!(trip = %trip_id, "auto-completed: driver reached destination");
-    }
+    }}
 }
 
 #[derive(Deserialize)]

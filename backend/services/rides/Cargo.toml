@@ -32,8 +32,8 @@ reqwest = { workspace = true }
 futures-util = { workspace = true }
 redis = { workspace = true }
 async-nats = { workspace = true }
-hmac = "0.12"
-sha1 = "0.10"
+hmac = "0.13"
+sha1 = "0.11"
 base64 = "0.22"
 h3o = { workspace = true }
 rand = { workspace = true }

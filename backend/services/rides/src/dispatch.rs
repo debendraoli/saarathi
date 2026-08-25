@@ -21,7 +21,7 @@
 use crate::state::AppState;
 use saarathi_core::geo_h3::{cell_for, rings_for_radius};
 use h3o::CellIndex;
-use saarathi_core::routing::{haversine_km, LatLng as CoreLatLng};
+use saarathi_core::routing::{haversine_km, LatLng as CoreLatLng, RouteProfile};
 use uuid::Uuid;
 
 fn h3_key(cell: CellIndex) -> String {
@@ -197,6 +197,55 @@ async fn nearby(st: &AppState, lng: f64, lat: f64, radius_km: f64) -> anyhow::Re
     Ok(scored.into_iter().map(|(_, id)| id).collect())
 }
 
+/// How many of the haversine-closest drivers get a real routed-ETA lookup —
+/// bounds the fan-out of routing-service calls per dispatch pass instead of
+/// re-ranking every driver in a wide radius.
+const ETA_RERANK_POOL: usize = 15;
+
+/// Like [`nearby`], but re-ranks the haversine-closest pool by actual routed
+/// travel time instead of straight-line distance — a driver just across a
+/// river, ring-road, or one-way system can be "nearest" as the crow flies yet
+/// slowest to actually arrive. Falls back to the haversine estimate wherever
+/// `route_path` can't reach the routing service (same degrade-gracefully
+/// behavior every other caller of it already relies on), so this never does
+/// worse than plain `nearby` — only better when real road data is available.
+async fn nearby_by_eta(
+    st: &AppState,
+    lng: f64,
+    lat: f64,
+    radius_km: f64,
+    profile: RouteProfile,
+) -> anyhow::Result<Vec<Uuid>> {
+    let origin = CoreLatLng { lat, lng };
+    let mut scored: Vec<(f64, Candidate)> = candidates_in_disk(st, lat, lng, radius_km)
+        .await?
+        .into_iter()
+        .filter_map(|c| {
+            let d = haversine_km(origin, CoreLatLng { lat: c.lat, lng: c.lng });
+            (d <= radius_km).then_some((d, c))
+        })
+        .collect();
+    scored.sort_by(|a, b| a.0.total_cmp(&b.0));
+    scored.truncate(ETA_RERANK_POOL);
+    if scored.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut with_eta: Vec<(i32, Uuid)> = futures_util::future::join_all(scored.into_iter().map(
+        |(_haversine_km, c)| async move {
+            let route = st
+                .router
+                .route_path(&[CoreLatLng { lat: c.lat, lng: c.lng }, origin], profile)
+                .await;
+            (route.duration_secs, c.driver_id)
+        },
+    ))
+    .await;
+    with_eta.sort_by_key(|(secs, _)| *secs);
+    with_eta.truncate(10);
+    Ok(with_eta.into_iter().map(|(_, id)| id).collect())
+}
+
 /// How many drivers are online within `radius_km` of a point. Used by the surge
 /// engine to detect supply scarcity.
 pub async fn nearby_count(
@@ -219,10 +268,10 @@ pub async fn nearby_positions(
     lat: f64,
     radius_km: f64,
 ) -> anyhow::Result<Vec<(f64, f64)>> {
-    use rand::Rng;
+    use rand::RngExt;
     let origin = CoreLatLng { lat, lng };
     let candidates = candidates_in_disk(st, lat, lng, radius_km).await?;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut out: Vec<(f64, f64)> = candidates
         .into_iter()
         .filter_map(|c| {
@@ -232,7 +281,7 @@ pub async fn nearby_positions(
             }
             // ~0.00036 deg ≈ 40m at this latitude range; good enough for a
             // coarse jitter without needing a proper projection.
-            let mut jitter = || rng.gen_range(-0.00036..0.00036);
+            let mut jitter = || rng.random_range(-0.00036..0.00036);
             Some((c.lat + jitter(), c.lng + jitter()))
         })
         .collect();
@@ -267,21 +316,25 @@ async fn eligible(st: &AppState, driver_id: Uuid, job_type: &str) -> anyhow::Res
 /// offered driver, or `None` if none are available yet. Idempotent while an
 /// offer is live.
 pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Option<Uuid>> {
-    let trip: Option<(String, Option<Uuid>, f64, f64, String, String, Option<f64>)> = sqlx::query_as(
-        "SELECT status::text, driver_id, origin_lat, origin_lng, trip_type::text, pricing_mode, \
-                search_radius_km \
-         FROM trips WHERE id = $1",
-    )
-    .bind(trip_id)
-    .fetch_optional(&st.db)
-    .await?;
-    let Some((status, driver, lat, lng, job_type, pricing_mode, radius_override)) = trip else {
+    let trip: Option<(String, Option<Uuid>, f64, f64, String, String, Option<f64>, String)> =
+        sqlx::query_as(
+            "SELECT status::text, driver_id, origin_lat, origin_lng, trip_type::text, pricing_mode, \
+                    search_radius_km, vehicle_class \
+             FROM trips WHERE id = $1",
+        )
+        .bind(trip_id)
+        .fetch_optional(&st.db)
+        .await?;
+    let Some((status, driver, lat, lng, job_type, pricing_mode, radius_override, vehicle_class)) =
+        trip
+    else {
         return Ok(None);
     };
     if status != "requested" || driver.is_some() {
         return Ok(None);
     }
     let bid_mode = pricing_mode == "bid";
+    let profile = RouteProfile::from_wire(&vehicle_class);
 
     // Instant mode wants exactly one committed driver, so a live offer means
     // "leave it be" — nothing more to do until it's accepted or expires. Bid
@@ -323,7 +376,7 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
         .unwrap_or(st.config.dispatch_max_radius_km);
     let mut candidates: Vec<Uuid> = Vec::new();
     while radius <= max_radius {
-        for did in nearby(st, lng, lat, radius).await? {
+        for did in nearby_by_eta(st, lng, lat, radius, profile).await? {
             if already.contains(&did) || candidates.contains(&did) {
                 continue;
             }
@@ -368,13 +421,58 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
     } else {
         "New ride request nearby"
     };
-    for &did in targets {
+
+    // Multiple independent triggers (trip creation, decline_offer, change_ask,
+    // the background tick) can all call dispatch_trip for the same trip close
+    // together. Everything above this point reads without a lock, so two
+    // overlapping calls can both compute a candidate set before either has
+    // inserted an offer. Serialize per-trip right before the actual insert —
+    // re-checking live-offer state fresh under the lock — so they can't both
+    // create one (same pattern as ledger::append's global lock, keyed by trip
+    // instead of a fixed constant).
+    let mut tx = st.db.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(trip_id)
+        .execute(&mut *tx)
+        .await?;
+    if !bid_mode {
+        let live: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT id FROM trip_offers WHERE trip_id = $1 AND status = 'offered' AND expires_at > now()",
+        )
+        .bind(trip_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if live.is_some() {
+            // Another call won the race and already offered this trip.
+            return Ok(None);
+        }
+    }
+    let already_now: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT driver_id FROM trip_offers \
+         WHERE trip_id = $1 AND status = 'offered' AND expires_at > now()",
+    )
+    .bind(trip_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let targets: Vec<Uuid> = targets
+        .iter()
+        .copied()
+        .filter(|d| !already_now.contains(d))
+        .collect();
+    if targets.is_empty() {
+        return Ok(None);
+    }
+    for &did in &targets {
         sqlx::query("INSERT INTO trip_offers (trip_id, driver_id, expires_at) VALUES ($1, $2, $3)")
             .bind(trip_id)
             .bind(did)
             .bind(expires_at)
-            .execute(&st.db)
+            .execute(&mut *tx)
             .await?;
+    }
+    tx.commit().await?;
+
+    for &did in &targets {
         st.hub.publish(
             trip_id,
             serde_json::json!({
@@ -420,21 +518,27 @@ pub async fn run_dispatcher(st: AppState) {
         if !crate::flags::is_enabled(&st, crate::flags::DISPATCH, true).await {
             continue;
         }
-        let _ = sqlx::query(
+        if let Err(e) = sqlx::query(
             "UPDATE trip_offers SET status = 'expired' WHERE status = 'offered' AND expires_at <= now()",
         )
         .execute(&st.db)
-        .await;
+        .await
+        {
+            tracing::warn!(error = %e, "dispatch tick: offer expiry sweep failed");
+        }
         // Same idea for individual bids: `list_bids` already filters on
         // `expires_at`, so this doesn't change what the rider sees, but a
         // driver's expired bid should read as 'expired', not sit at 'live'
         // forever — and it frees the one-live-bid-per-driver slot for a
         // fresh bid without relying on the upsert's ON CONFLICT alone.
-        let _ = sqlx::query(
+        if let Err(e) = sqlx::query(
             "UPDATE trip_bids SET status = 'expired' WHERE status = 'live' AND expires_at <= now()",
         )
         .execute(&st.db)
-        .await;
+        .await
+        {
+            tracing::warn!(error = %e, "dispatch tick: bid expiry sweep failed");
+        }
 
         let timed_out: Vec<(Uuid, Uuid)> = sqlx::query_as(
             "UPDATE trips SET status = 'cancelled', cancel_reason = 'no_driver_available', \
@@ -446,7 +550,10 @@ pub async fn run_dispatcher(st: AppState) {
         .bind(SEARCH_TIMEOUT_MINUTES as i32)
         .fetch_all(&st.db)
         .await
-        .unwrap_or_default();
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "dispatch tick: search-timeout sweep failed");
+            Vec::new()
+        });
         for (tid, rider_id) in timed_out {
             crate::notify::send(
                 &st.nats,
@@ -472,7 +579,10 @@ pub async fn run_dispatcher(st: AppState) {
         .bind(SEARCH_TIMEOUT_MINUTES as i32)
         .fetch_all(&st.db)
         .await
-        .unwrap_or_default();
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "dispatch tick: waiting-trips query failed");
+            Vec::new()
+        });
 
         for tid in waiting {
             if let Err(e) = dispatch_trip(&st, tid).await {

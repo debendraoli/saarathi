@@ -64,12 +64,15 @@ async fn go_online(
         .map_err(AppError::Other)?;
     // Persist the availability toggle so the dashboard sees who is online and it
     // survives a Redis flush.
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "UPDATE drivers SET is_online = true, last_online_at = now() WHERE user_id = $1",
     )
     .bind(claims.sub)
     .execute(&st.db)
-    .await;
+    .await
+    {
+        tracing::warn!(driver = %claims.sub, error = %e, "is_online=true persistence failed");
+    }
     Ok(Json(json!({ "online": true, "job_types": job_types })))
 }
 
@@ -107,10 +110,13 @@ async fn go_offline(
     dispatch::set_offline(&st, claims.sub)
         .await
         .map_err(AppError::Other)?;
-    let _ = sqlx::query("UPDATE drivers SET is_online = false WHERE user_id = $1")
+    if let Err(e) = sqlx::query("UPDATE drivers SET is_online = false WHERE user_id = $1")
         .bind(claims.sub)
         .execute(&st.db)
-        .await;
+        .await
+    {
+        tracing::warn!(driver = %claims.sub, error = %e, "is_online=false persistence failed");
+    }
     Ok(Json(json!({ "online": false })))
 }
 
@@ -260,14 +266,23 @@ async fn accept_offer(
         ));
     };
 
-    let trip: Option<Trip> = sqlx::query_as(&format!(
+    let trip: Option<Trip> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE trips SET driver_id = $2, status = 'accepted', accepted_at = now(), updated_at = now() \
          WHERE id = $1 AND status = 'requested' RETURNING {TRIP_COLS}"
-    ))
+    )))
     .bind(id)
     .bind(claims.sub)
     .fetch_optional(&mut *tx)
-    .await?;
+    .await
+    .map_err(|e| match e {
+        // trips_driver_one_active_idx backstop: lost the race against another
+        // accept for this driver that committed first.
+        sqlx::Error::Database(db) if db.is_unique_violation() => AppError::conflict(
+            ErrorCode::Conflict,
+            "you already have an active trip — complete it first",
+        ),
+        other => AppError::Db(other),
+    })?;
     let Some(trip) = trip else {
         return Err(AppError::conflict(
             ErrorCode::TripUnavailable,
@@ -318,7 +333,9 @@ async fn decline_offer(
     .execute(&st.db)
     .await?;
     // Immediately try the next-nearest driver.
-    let _ = dispatch::dispatch_trip(&st, id).await;
+    if let Err(e) = dispatch::dispatch_trip(&st, id).await {
+        tracing::warn!(trip = %id, error = %e, "redispatch after decline_offer failed");
+    }
     Ok(Json(json!({ "declined": true })))
 }
 
@@ -333,10 +350,10 @@ async fn ops_assign(
     Path(id): Path<Uuid>,
     Json(body): Json<AssignRequest>,
 ) -> AppResult<Json<Trip>> {
-    let trip: Option<Trip> = sqlx::query_as(&format!(
+    let trip: Option<Trip> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE trips SET driver_id = $2, status = 'accepted', accepted_at = now(), updated_at = now() \
          WHERE id = $1 AND status = 'requested' RETURNING {TRIP_COLS}"
-    ))
+    )))
     .bind(id)
     .bind(body.driver_id)
     .fetch_optional(&st.db)

@@ -21,6 +21,14 @@ pub struct NewEntry {
 
 /// Append one entry to the chain and settle the driver wallet, atomically.
 /// Idempotent per trip. Must run inside the caller's transaction.
+///
+/// Scalability note (not a bug, just a known chokepoint): this lock
+/// serializes *every* trip completion service-wide onto one advisory lock,
+/// same as `partner_ledger::append`'s `770002` does for all partner-money
+/// movement. Fine at today's volume; if trip throughput ever grows enough
+/// for this to matter, the fix is sharding the lock key (e.g. by driver or
+/// by a hash bucket) rather than one global serialization point — flagging
+/// for awareness, not urgent.
 pub async fn append(tx: &mut Transaction<'_, Postgres>, e: NewEntry) -> AppResult<String> {
     // Serialize ledger appends so the chain stays strictly linear.
     sqlx::query("SELECT pg_advisory_xact_lock(770001)")

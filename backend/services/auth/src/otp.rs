@@ -2,11 +2,12 @@
 
 use argon2::password_hash::{rand_core::OsRng, PasswordHash, SaltString};
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
-use rand::Rng;
+use rand::rand_core::UnwrapErr;
+use rand::RngExt;
 
 /// A fresh 6-digit numeric code (zero-padded).
 pub fn generate_code() -> String {
-    let n: u32 = rand::rngs::OsRng.gen_range(0..1_000_000);
+    let n: u32 = UnwrapErr(rand::rngs::SysRng).random_range(0..1_000_000);
     format!("{n:06}")
 }
 

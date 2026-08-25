@@ -7,13 +7,14 @@ use crate::pricing::{self, Estimate};
 use crate::routing::{LatLng, RouteProfile};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use axum::{
     routing::{get, post},
     Json, Router,
 };
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
-use saarathi_core::domain::roles;
+use saarathi_core::idempotency::{self, Reservation};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -43,7 +44,6 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/rides/driver/earnings", get(driver_earnings))
         .route("/v1/rides/{id}", get(get_trip))
         .route("/v1/rides/{id}/participants", get(get_participants))
-        .route("/v1/rides/{id}/accept", post(accept))
         .route("/v1/rides/{id}/status", post(update_status))
 }
 
@@ -137,6 +137,7 @@ async fn route_geometry(
 async fn create(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
+    headers: HeaderMap,
     Json(body): Json<RideRequest>,
 ) -> AppResult<Json<Trip>> {
     // Circuit breaker: ops can freeze new ride intake from the dashboard.
@@ -144,6 +145,29 @@ async fn create(
         return Err(AppError::disabled(
             "ride requests are temporarily paused; please try again shortly",
         ));
+    }
+
+    let idem_key = headers
+        .get("x-idempotency-key")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            AppError::bad(
+                ErrorCode::Validation,
+                "X-Idempotency-Key header is required",
+            )
+        })?
+        .to_string();
+
+    // Claim the key up front, before any of the booking work below, so a
+    // double-tap/retry replays the first trip instead of creating a second.
+    let mut reserve_tx = st.db.begin().await?;
+    let reservation =
+        idempotency::reserve(&mut reserve_tx, &idem_key, claims.sub, "rides.create").await?;
+    reserve_tx.commit().await?;
+    if let Reservation::Replay { status: _, body } = reservation {
+        let trip: Trip = serde_json::from_value(body).map_err(anyhow::Error::from)?;
+        return Ok(Json(trip));
     }
 
     // One active personal ride at a time — a rider can't stack requests.
@@ -272,13 +296,13 @@ async fn create(
         }
     }
 
-    let trip: Trip = sqlx::query_as(&format!(
+    let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO trips (rider_id, vehicle_class, origin_lat, origin_lng, dest_lat, dest_lng, \
             distance_km, duration_secs, gross_fare, discount_code, discount_amount, final_fare, \
             commission, accident_fund, driver_payout, payment_method, stops, pricing_mode, ask_fare, \
             search_radius_km) \
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING {TRIP_COLS}"
-    ))
+    )))
     .bind(claims.sub)
     .bind(&body.vehicle_class)
     .bind(body.origin.lat)
@@ -302,11 +326,14 @@ async fn create(
     .fetch_one(&mut *tx)
     .await?;
 
+    let trip_json = serde_json::to_value(&trip).map_err(anyhow::Error::from)?;
+    idempotency::store(&mut tx, &idem_key, claims.sub, "rides.create", 200, &trip_json).await?;
+
     tx.commit().await?;
 
     // Record the bargaining outcome (anchor + bounded agreed fare).
     if let Some(agreed) = agreed {
-        let _ = sqlx::query(
+        if let Err(e) = sqlx::query(
             "INSERT INTO fare_negotiations (trip_id, algo_fare, floor, ceiling, offered_fare, agreed_fare) \
              VALUES ($1, $2, $3, $4, $5, $6)",
         )
@@ -317,7 +344,10 @@ async fn create(
         .bind(body.offered_fare.unwrap_or(agreed))
         .bind(agreed)
         .execute(&st.db)
-        .await;
+        .await
+        {
+            tracing::warn!(trip = %trip.id, error = %e, "fare_negotiations audit insert failed");
+        }
     }
 
     // Kick dispatch immediately (the background loop is the safety net).
@@ -325,7 +355,9 @@ async fn create(
         let st = st.clone();
         let trip_id = trip.id;
         async move {
-            let _ = crate::dispatch::dispatch_trip(&st, trip_id).await;
+            if let Err(e) = crate::dispatch::dispatch_trip(&st, trip_id).await {
+                tracing::warn!(trip = %trip_id, error = %e, "initial dispatch_trip kick failed");
+            }
         }
     });
 
@@ -339,31 +371,6 @@ async fn create(
     )
     .await;
 
-    Ok(Json(trip))
-}
-
-async fn accept(
-    State(st): State<AppState>,
-    AuthUser(claims): AuthUser,
-    Path(id): Path<Uuid>,
-) -> AppResult<Json<Trip>> {
-    if claims.role != roles::DRIVER {
-        return Err(AppError::Forbidden);
-    }
-    let trip: Trip = sqlx::query_as(&format!(
-        "UPDATE trips SET driver_id = $2, status = 'accepted', accepted_at = now(), updated_at = now() \
-         WHERE id = $1 AND status = 'requested' RETURNING {TRIP_COLS}"
-    ))
-    .bind(id)
-    .bind(claims.sub)
-    .fetch_optional(&st.db)
-    .await?
-    .ok_or_else(|| AppError::conflict(ErrorCode::TripUnavailable, "trip is no longer available"))?;
-
-    st.hub.publish(
-        id,
-        json!({ "type": "status", "status": "accepted", "driver_id": claims.sub }).to_string(),
-    );
     Ok(Json(trip))
 }
 
@@ -454,13 +461,13 @@ async fn update_status(
     } else {
         "driver"
     };
-    let trip: Trip = sqlx::query_as(&format!(
+    let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE trips SET status = $2::trip_status, updated_at = now(){ts_col}, \
             cancel_reason = CASE WHEN $2 = 'cancelled' THEN $3 ELSE cancel_reason END, \
             cancelled_by = CASE WHEN $2 = 'cancelled' THEN $4 ELSE cancelled_by END, \
             cancelled_by_role = CASE WHEN $2 = 'cancelled' THEN $5 ELSE cancelled_by_role END \
          WHERE id = $1 RETURNING {TRIP_COLS}"
-    ))
+    )))
     .bind(id)
     .bind(&body.status)
     .bind(&body.reason)
@@ -534,17 +541,17 @@ pub(crate) async fn complete_trip(st: &AppState, id: Uuid, actor: Uuid) -> AppRe
     let m = row.ok_or(AppError::NotFound)?;
     if m.status == "completed" {
         drop(tx);
-        let trip: Trip = sqlx::query_as(&format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1"))
+        let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1")))
             .bind(id)
             .fetch_one(&st.db)
             .await?;
         return Ok(trip);
     }
 
-    let trip: Trip = sqlx::query_as(&format!(
+    let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE trips SET status = 'completed', updated_at = now(), completed_at = now() \
          WHERE id = $1 RETURNING {TRIP_COLS}"
-    ))
+    )))
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
@@ -687,7 +694,7 @@ async fn get_trip(
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Value>> {
-    let trip: Trip = sqlx::query_as(&format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1"))
+    let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1")))
         .bind(id)
         .fetch_optional(&st.db)
         .await?
@@ -776,7 +783,7 @@ async fn get_participants(
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Participants>> {
-    let trip: Trip = sqlx::query_as(&format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1"))
+    let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1")))
         .bind(id)
         .fetch_optional(&st.db)
         .await?
@@ -883,9 +890,9 @@ async fn list_mine(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> AppResult<Json<Vec<Value>>> {
-    let trips: Vec<Trip> = sqlx::query_as(&format!(
+    let trips: Vec<Trip> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {TRIP_COLS} FROM trips WHERE rider_id = $1 OR driver_id = $1 ORDER BY created_at DESC LIMIT 100"
-    ))
+    )))
     .bind(claims.sub)
     .fetch_all(&st.db)
     .await?;

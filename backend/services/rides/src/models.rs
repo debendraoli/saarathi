@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
@@ -15,7 +15,7 @@ pub const TRIP_COLS: &str = "id, rider_id, driver_id, trip_type::text AS trip_ty
     pricing_mode, ask_fare, search_radius_km, payment_method, \
     created_at, accepted_at, completed_at, cancelled_at";
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct Trip {
     pub id: Uuid,
     pub rider_id: Uuid,

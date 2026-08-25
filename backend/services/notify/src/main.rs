@@ -194,7 +194,7 @@ async fn deliver(
     // is fine. Silent signals never escalate to SMS — there's no user-
     // facing content to send, and a device-to-device signal that can't
     // reach the device isn't something to text about.
-    if !req.silent && notif::CRITICAL.contains(&req.class.as_str()) && !any_push_sent {
+    if should_escalate_to_sms(req.silent, &req.class, any_push_sent) {
         if let Some(sender) = sms {
             let phone: Option<String> =
                 sqlx::query_scalar("SELECT phone FROM users WHERE id = $1")
@@ -204,16 +204,59 @@ async fn deliver(
                     .ok()
                     .flatten();
             if let Some(phone) = phone {
-                if let Err(e) = sender.send(&phone, &req.title, &req.body).await {
+                match sender.send(&phone, &req.title, &req.body).await { Err(e) => {
                     tracing::warn!(error = %e, "notify: SMS fallback failed");
-                } else {
+                } _ => {
                     tracing::info!(user_id = %req.user_id, class = %req.class,
                         "notify: critical notification escalated to SMS (push unreachable)");
-                }
+                }}
             }
         }
     }
     Ok(())
+}
+
+/// Whether a notification should fall back to SMS: only non-silent,
+/// safety/transactional/compliance-class notifications that push couldn't
+/// deliver. A silent device-to-device signal never escalates (no user-facing
+/// content to text), and a class outside `CRITICAL` (e.g. marketing) with no
+/// push is just not delivered, which is fine.
+fn should_escalate_to_sms(silent: bool, class: &str, any_push_sent: bool) -> bool {
+    !silent && notif::CRITICAL.contains(&class) && !any_push_sent
+}
+
+#[cfg(test)]
+mod sms_escalation_tests {
+    use super::*;
+
+    #[test]
+    fn escalates_critical_classes_when_push_failed() {
+        for class in notif::CRITICAL {
+            assert!(
+                should_escalate_to_sms(false, class, false),
+                "class={class} should escalate when push didn't land"
+            );
+        }
+    }
+
+    #[test]
+    fn does_not_escalate_when_push_already_landed() {
+        for class in notif::CRITICAL {
+            assert!(!should_escalate_to_sms(false, class, true), "class={class}");
+        }
+    }
+
+    #[test]
+    fn does_not_escalate_non_critical_classes() {
+        assert!(!should_escalate_to_sms(false, notif::MARKETING, false));
+    }
+
+    #[test]
+    fn silent_signals_never_escalate_even_if_critical_and_push_failed() {
+        for class in notif::CRITICAL {
+            assert!(!should_escalate_to_sms(true, class, false), "class={class}");
+        }
+    }
 }
 
 async fn health() -> Json<Value> {
