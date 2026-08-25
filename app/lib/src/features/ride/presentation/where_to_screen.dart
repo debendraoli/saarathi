@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -1189,7 +1190,20 @@ void _showRequestDriverSheet(
                 controller: controller,
                 keyboardType: TextInputType.phone,
                 autofocus: true,
-                decoration: InputDecoration(labelText: l.driverPhoneLabel),
+                decoration: InputDecoration(
+                  labelText: l.driverPhoneLabel,
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.contacts_rounded),
+                    tooltip: l.pickFromContacts,
+                    onPressed: () async {
+                      final phone = await _pickContactPhone();
+                      if (phone != null) {
+                        controller.text = phone;
+                        setSheetState(() {});
+                      }
+                    },
+                  ),
+                ),
                 onChanged: (_) => setSheetState(() {}),
               ),
               const SizedBox(height: 16),
@@ -1211,6 +1225,26 @@ void _showRequestDriverSheet(
       ),
     ),
   );
+}
+
+/// Opens the system contact picker and returns the first phone number found,
+/// digits-and-leading-plus only. Null if permission is denied, the user
+/// backs out, or the picked contact has no phone number.
+Future<String?> _pickContactPhone() async {
+  if (!await FlutterContacts.permissions.has(PermissionType.read)) {
+    final status = await FlutterContacts.permissions.request(
+      PermissionType.read,
+    );
+    if (status != PermissionStatus.granted &&
+        status != PermissionStatus.limited) {
+      return null;
+    }
+  }
+  final contact = await FlutterContacts.native.showPicker(
+    properties: {ContactProperty.phone},
+  );
+  if (contact == null || contact.phones.isEmpty) return null;
+  return contact.phones.first.number.replaceAll(RegExp(r'[^\d+]'), '');
 }
 
 class _FareStepperSkeleton extends StatelessWidget {

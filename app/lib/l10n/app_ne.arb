@@ -115,6 +115,7 @@
   "requestSpecificDriver": "चालक अनुरोध गर्नुहोस्",
   "requestSpecificDriverBody": "सामान्य म्याचिङमा जानुअघि यो यात्रा पहिले पठाउन चालकको फोन नम्बर हाल्नुहोस्।",
   "driverPhoneLabel": "चालकको फोन नम्बर",
+  "pickFromContacts": "सम्पर्कबाट छान्नुहोस्",
   "walletTitle": "वालेट",
   "walletBalanceShort": "ब्यालेन्स: रु. {amount}",
   "@walletBalanceShort": { "placeholders": { "amount": {} } },

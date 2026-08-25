@@ -115,6 +115,7 @@
   "requestSpecificDriver": "Request a driver",
   "requestSpecificDriverBody": "Enter a driver's phone number to send them this trip first, before it goes to the usual matching.",
   "driverPhoneLabel": "Driver's phone number",
+  "pickFromContacts": "Pick from contacts",
   "walletTitle": "Wallet",
   "walletBalanceShort": "Balance: NPR {amount}",
   "@walletBalanceShort": { "placeholders": { "amount": {} } },
