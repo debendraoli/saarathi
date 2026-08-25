@@ -504,7 +504,7 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
             ),
             const SizedBox(height: 12),
             _RoutePoint(
-              icon: Icons.emoji_people_rounded,
+              icon: Icons.waving_hand_rounded,
               label: _pickupLabel ?? '…',
               color: Theme.of(context).colorScheme.primary,
             ),

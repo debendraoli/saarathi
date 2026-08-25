@@ -2,6 +2,12 @@
 <resources>
     <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is off -->
     <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:windowSplashScreenBackground">#FFFFFF</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/android12splash</item>
         <!-- Manually added (flutter_native_splash doesn't generate this for
              Android 12+) — the "SAARATHI" wordmark, via the dedicated
              branding-image slot rather than the safe-zone-constrained icon
@@ -11,12 +17,6 @@
              renders as "A ADATI") — this two-slot split is the only way to
              show both the icon and legible text on Android 12+.
         -->
-        <item name="android:forceDarkAllowed">false</item>
-        <item name="android:windowFullscreen">false</item>
-        <item name="android:windowDrawsSystemBarBackgrounds">false</item>
-        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
-        <item name="android:windowSplashScreenBackground">#FFFFFF</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/android12splash</item>
         <item name="android:windowSplashScreenBrandingImage">@drawable/splash_wordmark</item>
     </style>
     <!-- Theme applied to the Android Window as soon as the process has started.

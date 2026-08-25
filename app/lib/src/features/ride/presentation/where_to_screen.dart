@@ -497,7 +497,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
               if (_pickup != null)
                 MapPin(
                   _pickup!,
-                  Icons.emoji_people_rounded,
+                  Icons.waving_hand_rounded,
                   Theme.of(context).colorScheme.primary,
                 ),
               for (final s in _stops)
@@ -726,7 +726,7 @@ class _Sheet extends StatelessWidget {
                     _LocationRow(
                       label: l.pickup,
                       dotColor: scheme.primary,
-                      icon: Icons.emoji_people_rounded,
+                      icon: Icons.waving_hand_rounded,
                       text: pickupText,
                       isPlaceholder: false,
                       loading: resolvingPickup,

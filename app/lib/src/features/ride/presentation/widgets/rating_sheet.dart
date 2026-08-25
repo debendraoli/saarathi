@@ -159,7 +159,7 @@ class _TripSummaryCard extends StatelessWidget {
         children: [
           if (summary.pickupLabel != null)
             _SummaryRow(
-              icon: Icons.emoji_people_rounded,
+              icon: Icons.waving_hand_rounded,
               iconColor: scheme.primary,
               label: l.pickup,
               value: summary.pickupLabel!,
