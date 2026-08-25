@@ -135,6 +135,57 @@ class SkeletonList extends StatelessWidget {
   }
 }
 
+/// A skeleton standing in for a "big number" stat card — `Card > Padding >
+/// Column(label, value)`, the shared visual language across the stats,
+/// wallet, and store-analytics screens (see e.g. `_StatCard` in
+/// `rider_stats_screen.dart`).
+class SkeletonStatCard extends StatelessWidget {
+  const SkeletonStatCard({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SkeletonBox(width: 70, height: 11),
+            SizedBox(height: 8),
+            SkeletonBox(width: 90, height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A 2-column grid of [SkeletonStatCard]s, [rows] deep — the loading state
+/// for any screen built from paired stat cards (rider stats, store
+/// analytics).
+class SkeletonStatGrid extends StatelessWidget {
+  const SkeletonStatGrid({super.key, this.rows = 2});
+  final int rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        for (var i = 0; i < rows; i++) ...[
+          if (i > 0) const SizedBox(height: 12),
+          const Row(
+            children: [
+              Expanded(child: SkeletonStatCard()),
+              SizedBox(width: 12),
+              Expanded(child: SkeletonStatCard()),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 /// A skeleton standing in for a card-shaped grid item (image + two lines) —
 /// the merchant/item card shape used in marketplace grids.
 class SkeletonCard extends StatelessWidget {

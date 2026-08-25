@@ -116,6 +116,58 @@ class RiderHome extends ConsumerWidget {
   }
 }
 
+/// Matches [RiderHome]'s actual shape — a search-bar card, a 3-across
+/// service row, and a carousel placeholder — shown while `HomeShell` is
+/// still working out whether this account gets Rider/Driver/Merchant home
+/// (previously a generic list-tile skeleton, which looked nothing like any
+/// of the three).
+class RiderHomeSkeleton extends StatelessWidget {
+  const RiderHomeSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      physics: const NeverScrollableScrollPhysics(),
+      children: [
+        Container(
+          height: 76,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            for (var i = 0; i < 3; i++) ...[
+              if (i > 0) const SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  height: 108,
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 20),
+        Container(
+          height: 104,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(18),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Recent drop-offs under the search bar (Yango/Pathao style); tap to re-book.
 class _RecentDropoffs extends ConsumerWidget {
   const _RecentDropoffs();

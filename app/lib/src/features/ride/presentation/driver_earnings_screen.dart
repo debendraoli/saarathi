@@ -47,7 +47,7 @@ class _DriverEarningsScreenState extends ConsumerState<DriverEarningsScreen> {
             const SizedBox(height: 16),
             Expanded(
               child: async.when(
-                loading: () => const SkeletonList(),
+                loading: () => const _EarningsSkeleton(),
                 error: (_, __) => ErrorRetry(
                   message: l.errorNetwork,
                   onRetry: () =>
@@ -63,6 +63,51 @@ class _DriverEarningsScreenState extends ConsumerState<DriverEarningsScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Matches [_EarningsBody]'s shape: one big hero total card, then a short
+/// bar-history list — not the plain row-list [SkeletonList] would show.
+class _EarningsSkeleton extends StatelessWidget {
+  const _EarningsSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      children: [
+        const Card(
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonBox(width: 100, height: 13),
+                SizedBox(height: 8),
+                SkeletonBox(width: 140, height: 28),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        for (final w in const [0.9, 0.6, 0.75, 0.4, 0.5])
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                const SkeletonBox(width: 60, height: 12),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FractionallySizedBox(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: w,
+                    child: const SkeletonBox(height: 14),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

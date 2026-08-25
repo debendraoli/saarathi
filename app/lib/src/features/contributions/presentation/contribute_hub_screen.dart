@@ -100,7 +100,7 @@ class _ContributeHubScreenState extends ConsumerState<ContributeHubScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(l.placesHubTitle)),
       body: summaryAsync.when(
-        loading: () => const SkeletonList(),
+        loading: () => const _HubSkeleton(),
         error: (_, __) => ErrorRetry(
           message: l.errorNetwork,
           onRetry: () => ref.invalidate(pointsSummaryProvider),
@@ -427,6 +427,59 @@ class _RecentTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Matches the loaded screen's shape — a big gradient hero card, then the
+/// "how it works" steps and badges rows — instead of generic list-tile rows.
+class _HubSkeleton extends StatelessWidget {
+  const _HubSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      physics: const NeverScrollableScrollPhysics(),
+      children: [
+        Container(
+          height: 176,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+        const SizedBox(height: 22),
+        for (var i = 0; i < 3; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: SkeletonBox(width: double.infinity, height: 13),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 12),
+        Container(
+          height: 52,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ],
     );
   }
 }

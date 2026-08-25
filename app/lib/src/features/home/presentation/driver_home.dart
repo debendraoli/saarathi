@@ -37,7 +37,13 @@ class DriverHome extends ConsumerWidget {
     final kyc = ref.watch(driverKycProvider);
 
     return kyc.when(
-      loading: () => const LoadingView(),
+      // An approved, already-riding driver is the overwhelmingly common case
+      // once this screen is actually being watched day to day, so the
+      // online-board shape is the better bet here than a spinner — the
+      // (rarer, effectively one-time) pending-KYC case briefly gets the
+      // wrong skeleton shape instead, which is the cheaper mismatch to
+      // accept of the two.
+      loading: () => const DriverHomeSkeleton(),
       error: (_, __) => ErrorRetry(
         message: l.errorNetwork,
         onRetry: () => ref.invalidate(driverKycProvider),
@@ -48,6 +54,38 @@ class DriverHome extends ConsumerWidget {
         }
         return const _OnlineBoard();
       },
+    );
+  }
+}
+
+/// Matches [_OnlineBoard]'s shape — the tall online/offline toggle card,
+/// then the goal card — instead of a plain spinner or list-tile rows.
+class DriverHomeSkeleton extends StatelessWidget {
+  const DriverHomeSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      physics: const NeverScrollableScrollPhysics(),
+      children: [
+        Container(
+          height: 208,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          height: 84,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(18),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -26,7 +26,21 @@ class RiderStatsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: Text(l.myStatsAction)),
       body: loading
-          ? const SkeletonList()
+          ? const Padding(
+              padding: EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonBox(width: 90, height: 13),
+                  SizedBox(height: 8),
+                  SkeletonStatGrid(),
+                  SizedBox(height: 20),
+                  SkeletonBox(width: 90, height: 13),
+                  SizedBox(height: 8),
+                  SkeletonStatGrid(),
+                ],
+              ),
+            )
           : hasError
               ? ErrorRetry(
                   message: l.errorNetwork,

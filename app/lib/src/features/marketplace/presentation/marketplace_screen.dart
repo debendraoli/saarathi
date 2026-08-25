@@ -74,7 +74,7 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
         title: Text(_kind == MarketplaceKind.food ? l.food : l.grocery),
       ),
       body: merchants.when(
-        loading: () => const SkeletonList(padding: EdgeInsets.all(12)),
+        loading: () => const _MarketplaceSkeleton(),
         error: (_, __) => ErrorRetry(
           message: l.errorNetwork,
           onRetry: () => ref.invalidate(merchantsProvider(merchantsKey)),
@@ -893,6 +893,163 @@ class _EmptyMerchants extends StatelessWidget {
           const SizedBox(height: 8),
           Text(l.comingSoonBody, textAlign: TextAlign.center),
         ],
+      ),
+    );
+  }
+}
+
+/// Matches the loaded screen's actual shape — toggle, search bar, category
+/// rail, and filter chips are static (they don't depend on the merchant
+/// fetch at all, but previously vanished behind a plain [SkeletonList] until
+/// it resolved) — followed by a few [_MerchantCard]-shaped placeholders
+/// instead of generic list-tile rows.
+class _MarketplaceSkeleton extends StatelessWidget {
+  const _MarketplaceSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                height: 42,
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                height: 48,
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          height: 84,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: 5,
+            separatorBuilder: (_, __) => const SizedBox(width: 16),
+            itemBuilder: (_, __) => Column(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const SkeletonBox(width: 40, height: 10),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 36,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: 4,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (_, __) => Container(
+              width: 84,
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          child: SkeletonBox(width: 130, height: 15),
+        ),
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            children: [
+              for (var i = 0; i < 4; i++) ...[
+                const _MerchantCardSkeleton(),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Placeholder matching [_MerchantCard]'s exact shape (bordered/shadowed
+/// container, 88px photo, name + rating row, meta row) instead of a generic
+/// avatar-and-two-lines row.
+class _MerchantCardSkeleton extends StatelessWidget {
+  const _MerchantCardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      padding: const EdgeInsets.all(9),
+      child: SizedBox(
+        height: 88,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(13),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SkeletonBox(width: double.infinity, height: 15),
+                  const SizedBox(height: 8),
+                  const SkeletonBox(width: 100, height: 12),
+                  const Spacer(),
+                  Row(
+                    children: const [
+                      SkeletonBox(width: 40, height: 11),
+                      SizedBox(width: 10),
+                      SkeletonBox(width: 50, height: 11),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

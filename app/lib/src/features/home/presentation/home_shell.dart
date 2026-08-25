@@ -16,7 +16,6 @@ import '../../merchant/presentation/merchant_dashboard_screen.dart';
 import '../../notifications/data/notifications_repository.dart';
 import '../../places/data/places_repository.dart';
 import '../../ride/application/ride_controller.dart';
-import '../../../shared/widgets/skeleton.dart';
 import 'driver_home.dart';
 import 'rider_home.dart';
 
@@ -99,7 +98,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
     final Widget home;
     if (identityLoading) {
-      home = const _HomeLoading();
+      home = _HomeLoading(isDriverMode: isDriverMode);
     } else if (hasApprovedMerchant) {
       home = const MerchantHomeBody();
     } else if (driverKycApproved) {
@@ -108,9 +107,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       home = isDriverMode ? const DriverHome() : const RiderHome();
     }
     // The rider/driver switch only makes sense while both sides are still
-    // reachable — gone once either lock (merchant or approved-driver) kicks in.
-    final showModeSwitch =
-        isDriverAccount && !driverKycApproved && !hasApprovedMerchant;
+    // reachable — gone once either lock (merchant or approved-driver) kicks
+    // in. `driverKycApproved`/`hasApprovedMerchant` both default to false
+    // while their providers are still loading, so without the
+    // `!identityLoading` guard an approved driver/merchant would see the
+    // switch flash into view for a moment right after login before these
+    // resolve and hide it again.
+    final showModeSwitch = !identityLoading &&
+        isDriverAccount &&
+        !driverKycApproved &&
+        !hasApprovedMerchant;
 
     return Scaffold(
       appBar: AppBar(
@@ -247,11 +253,17 @@ class _MenuDrawer extends ConsumerWidget {
 /// actually gets — never the rider/driver toggle home itself, so there's
 /// nothing to visibly swap away from a moment later.
 class _HomeLoading extends StatelessWidget {
-  const _HomeLoading();
+  const _HomeLoading({required this.isDriverMode});
+  final bool isDriverMode;
 
   @override
   Widget build(BuildContext context) {
-    return const SkeletonList();
+    // The account could still turn out to be merchant-locked once identity
+    // resolves (see the comment above this widget's call site) — but that's
+    // rarer than a plain rider/driver account, and the current mode toggle
+    // (known synchronously, unlike the merchant/KYC lookups this is standing
+    // in for) is otherwise a reliable guess at which shape is coming.
+    return isDriverMode ? const DriverHomeSkeleton() : const RiderHomeSkeleton();
   }
 }
 

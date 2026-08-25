@@ -52,7 +52,11 @@ class MerchantHomeBody extends ConsumerWidget {
     final async = ref.watch(myMerchantsProvider);
 
     return async.when(
-      loading: () => const SkeletonList(),
+      // The real content is one big store card, not a list of rows.
+      loading: () => const Padding(
+        padding: EdgeInsets.all(16),
+        child: _StoreCardSkeleton(),
+      ),
       error: (_, __) => ErrorRetry(
         message: l.errorNetwork,
         onRetry: () => ref.invalidate(myMerchantsProvider),
@@ -74,6 +78,51 @@ class MerchantHomeBody extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Matches [_StoreCard]'s shape — one tall card (icon/name header, then the
+/// status/orders content beneath) instead of several list-tile rows.
+class _StoreCardSkeleton extends StatelessWidget {
+  const _StoreCardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(child: SkeletonBox(width: double.infinity, height: 16)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const SkeletonBox(width: 140, height: 12),
+            const SizedBox(height: 20),
+            Container(
+              height: 120,
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
