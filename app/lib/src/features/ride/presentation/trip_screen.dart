@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
@@ -11,7 +12,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/location.dart';
-import '../../../core/network/api_client.dart';
+import '../../../core/offline/connectivity.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../../shared/image_url.dart';
@@ -26,25 +27,77 @@ import '../application/trip_ws.dart';
 import '../data/ride_repository.dart';
 import '../domain/models.dart';
 import '../domain/rating_tags.dart';
+import 'navigation_screen.dart';
 import 'widgets/bidding_sheet.dart';
 import 'widgets/map_view.dart';
 import 'widgets/rating_sheet.dart';
 import 'widgets/search_radar.dart';
 
+/// Fraction of screen height the bottom status/bidding sheet occupies at
+/// rest (its `DraggableScrollableSheet.minChildSize`, see `_StatusSheet`) —
+/// map controls that need to sit just above it (locate button, fullscreen
+/// nav, back) share this so they dock right at the sheet's collapsed top
+/// edge instead of floating with a large, arbitrary gap above it.
+const _sheetClearance = 0.32;
+
+/// The map-pin icon for a driver of the given vehicle class — same mapping
+/// [_VehicleClassChip] uses for the trip-details chip, so the live driver
+/// marker reads as "a two-wheeler/rickshaw/car", not a generic arrow.
+IconData vehicleIconFor(String? vehicleClass) => switch (vehicleClass) {
+      'three_wheeler' => Icons.electric_rickshaw_rounded,
+      'four_wheeler' => Icons.directions_car_rounded,
+      _ => Icons.two_wheeler_rounded,
+    };
+
 /// One screen for the whole live ride: searching → driver on the way → on trip →
 /// completed. Status comes from polling; the driver pin from the trip WS.
-class TripScreen extends ConsumerWidget {
+class TripScreen extends ConsumerStatefulWidget {
   const TripScreen({super.key, required this.tripId});
 
   final String tripId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TripScreen> createState() => _TripScreenState();
+}
+
+class _TripScreenState extends ConsumerState<TripScreen> {
+  // `routeGeometryProvider` is keyed by a `RouteQuery` embedding the live
+  // driver `LatLng` while `liveRouting` is on, so practically every ~5s GPS
+  // ping is a fresh `.autoDispose.family` instance with nothing cached from
+  // the last one — `route.valueOrNull` goes null for that loading window on
+  // every ping. Without this, the fallback below silently swaps to the
+  // static straight pickup→destination line each time, which reads as the
+  // live route "disappearing" (see `NavigationScreen`'s identical fix, same
+  // root cause). Stashing the last successfully-fetched geometry here means
+  // the map keeps showing the last-known road route while a fresher one is
+  // still in flight.
+  List<LatLng>? _lastRouteGeometry;
+
+  // Same churn concern as `NavigationScreen`'s identical field: re-querying
+  // on literally every raw GPS ping means a fresh `.autoDispose.family`
+  // provider instance every ~5s for as long as `liveRouting` is on — this
+  // throttles the query point so the family key stays stable across most
+  // pings instead.
+  static const _routeRequeryMeters = 25.0;
+  LatLng? _routeQueryPoint;
+
+  LatLng _throttledRoutePoint(LatLng liveLoc) {
+    final last = _routeQueryPoint;
+    if (last == null ||
+        const Distance().as(LengthUnit.Meter, last, liveLoc) >
+            _routeRequeryMeters) {
+      _routeQueryPoint = liveLoc;
+    }
+    return _routeQueryPoint!;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tripId = widget.tripId;
     final l = AppL10n.of(context);
-    final tripAsync = ref.watch(tripStreamProvider(tripId));
+    final tripAsync = ref.watch(effectiveTripProvider(tripId));
     final stale = ref.watch(tripStaleProvider(tripId));
-    final driverPos = ref.watch(tripDriverPositionProvider(tripId)).valueOrNull;
-    final driverLoc = driverPos?.point;
+    final online = ref.watch(connectivityProvider).valueOrNull ?? true;
 
     // This screen is reached via context.go (replacing the stack, so a
     // stale confirm/checkout form can't be re-submitted from history), which
@@ -58,7 +111,10 @@ class TripScreen extends ConsumerWidget {
       child: Scaffold(
         body: Column(
           children: [
-            if (stale) const StaleBanner(),
+            if (!online)
+              const OfflineBanner()
+            else if (stale)
+              const StaleBanner(),
             Expanded(
               child: tripAsync.when(
                 loading: () => const LoadingView(),
@@ -69,6 +125,20 @@ class TripScreen extends ConsumerWidget {
                 data: (trip) {
                   final myId = ref.watch(authControllerProvider).user?.id;
                   final iAmDriver = myId != null && myId == trip.driverId;
+                  // The driver's own device always prefers its own local GPS
+                  // fix (see `localDriverPositionProvider`) over the one
+                  // that's round-tripped through `POST location` → backend →
+                  // this trip's WebSocket — that keeps the driver's own
+                  // marker/camera moving even when offline or on a bad
+                  // connection. A rider has no local GPS of the *driver* and
+                  // always falls back to the WS-fed position.
+                  final remoteDriverPos =
+                      ref.watch(tripDriverPositionProvider(tripId)).valueOrNull;
+                  final localDriverPos = ref.watch(localDriverPositionProvider);
+                  final driverPos = iAmDriver
+                      ? (localDriverPos ?? remoteDriverPos)
+                      : remoteDriverPos;
+                  final driverLoc = driverPos?.point;
                   // While the driver's en route (either leg), the polyline
                   // should be the live remaining path from their current
                   // position, not the static original pickup→destination
@@ -78,14 +148,19 @@ class TripScreen extends ConsumerWidget {
                   final routeTarget = trip.status == TripStatus.inProgress
                       ? trip.dest
                       : trip.origin;
-                  final route = ref.watch(routeGeometryProvider(
-                    RouteQuery(
-                      liveRouting
-                          ? [driverLoc, routeTarget]
-                          : [trip.origin, trip.dest],
-                      trip.vehicleClass ?? 'two_wheeler',
-                    ),
-                  ));
+                  final freshRoute = ref
+                      .watch(routeGeometryProvider(
+                        RouteQuery(
+                          liveRouting
+                              ? [_throttledRoutePoint(driverLoc), routeTarget]
+                              : [trip.origin, trip.dest],
+                          trip.vehicleClass ?? 'two_wheeler',
+                        ),
+                      ))
+                      .valueOrNull;
+                  if (freshRoute != null) _lastRouteGeometry = freshRoute;
+                  final routeGeometry =
+                      _lastRouteGeometry ?? [trip.origin, trip.dest];
                   final searching = trip.status == TripStatus.searching ||
                       trip.status == TripStatus.requested;
                   final fixedPins = [
@@ -102,9 +177,10 @@ class TripScreen extends ConsumerWidget {
                     if (driverLoc != null)
                       MapPin(
                         driverLoc,
-                        Icons.navigation_rounded,
+                        vehicleIconFor(trip.vehicleClass),
                         Theme.of(context).colorScheme.tertiary,
                         rotate: true,
+                        id: 'driver',
                       ),
                   ];
                   // Navigation-mode camera (zoom in, follow, heading-up
@@ -119,12 +195,12 @@ class TripScreen extends ConsumerWidget {
                               builder: (context, driverPins, circles) =>
                                   MapView(
                                 center: trip.origin,
-                                route: route.valueOrNull ??
-                                    [trip.origin, trip.dest],
+                                route: routeGeometry,
                                 circles: circles,
                                 showLocateButton: true,
                                 locateButtonBottomOffset:
-                                    MediaQuery.of(context).size.height * 0.44,
+                                    MediaQuery.of(context).size.height *
+                                        _sheetClearance,
                                 pins: [
                                   ...fixedPins,
                                   for (final p in driverPins)
@@ -140,12 +216,12 @@ class TripScreen extends ConsumerWidget {
                             )
                           : MapView(
                               center: driverLoc ?? trip.origin,
-                              route:
-                                  route.valueOrNull ?? [trip.origin, trip.dest],
+                              route: routeGeometry,
                               pins: fixedPins,
-                              showLocateButton: true,
+                              showRecenterButton: true,
                               locateButtonBottomOffset:
-                                  MediaQuery.of(context).size.height * 0.44,
+                                  MediaQuery.of(context).size.height *
+                                      _sheetClearance,
                               navigationTarget: navTarget,
                             ),
                       // Invisible: routes incoming calls to the call screen.
@@ -153,32 +229,64 @@ class TripScreen extends ConsumerWidget {
                       // Invisible: the driver streams position during an active trip.
                       if (iAmDriver && trip.isActive)
                         _DriverLocationPublisher(tripId: tripId),
-                      SafeArea(
-                        child: Align(
-                          alignment: Alignment.topLeft,
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: _MapCircleButton(
-                              icon: Icons.arrow_back_rounded,
-                              onTap: () => _leaveTrip(context, ref, tripId),
-                            ),
-                          ),
-                        ),
-                      ),
                       // Hands the driver off to their own Google Maps app for
-                      // turn-by-turn — driving to the current leg's target
-                      // (pickup, then destination once picked up), the same
-                      // point `routeTarget` already draws the polyline to.
+                      // real turn-by-turn (driving instructions, live
+                      // traffic) — colored in Google's own blue so it reads
+                      // at a glance as "leaves the app", distinct from the
+                      // in-app fullscreen button. Stays up top: it's a rare,
+                      // deliberate action, unlike back/fullscreen below which
+                      // benefit from being thumb-reachable.
                       if (iAmDriver && trip.isActive)
                         SafeArea(
                           child: Align(
                             alignment: Alignment.topRight,
                             child: Padding(
                               padding: const EdgeInsets.all(12),
-                              child: _MapCircleButton(
+                              child: MapCircleButton(
                                 icon: Icons.navigation_rounded,
-                                onTap: () => _launchExternalNavigation(
-                                    routeTarget),
+                                iconColor: const Color(0xFF4285F4),
+                                onTap: () =>
+                                    _launchExternalNavigation(routeTarget),
+                              ),
+                            ),
+                          ),
+                        ),
+                      // Back (leave trip) and fullscreen nav both dock just
+                      // above the status/bidding sheet's collapsed top edge
+                      // (`_sheetClearance`) instead of the top corners — one-
+                      // handed, thumb-reachable, same reasoning the map's own
+                      // locate button already uses this offset for.
+                      Positioned(
+                        left: 12,
+                        bottom: MediaQuery.of(context).size.height *
+                                _sheetClearance +
+                            12,
+                        child: SafeArea(
+                          top: false,
+                          child: MapCircleButton(
+                            icon: Icons.arrow_back_rounded,
+                            onTap: () => _leaveTrip(context, ref, tripId),
+                          ),
+                        ),
+                      ),
+                      if (iAmDriver && trip.isActive)
+                        Positioned(
+                          right: 12,
+                          bottom: MediaQuery.of(context).size.height *
+                                  _sheetClearance +
+                              76,
+                          child: SafeArea(
+                            top: false,
+                            child: MapCircleButton(
+                              icon: Icons.fullscreen_rounded,
+                              tooltip: l.navFullscreen,
+                              onTap: () => context.push(
+                                '${Routes.tripNavigate}/$tripId/navigate',
+                                extra: NavigationScreenArgs(
+                                  target: routeTarget,
+                                  vehicleClass:
+                                      trip.vehicleClass ?? 'two_wheeler',
+                                ),
                               ),
                             ),
                           ),
@@ -522,6 +630,11 @@ class _StatusSheet extends ConsumerWidget {
                   onPressed: () => showCancelReasonSheet(
                       context, ref, trip.id, iAmDriver,
                       searching: searching),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                    side:
+                        BorderSide(color: Theme.of(context).colorScheme.error),
+                  ),
                   child: Text(l.cancelRide),
                 ),
               ],
@@ -609,25 +722,24 @@ class RouteSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _RoutePoint(
           icon: Icons.emoji_people_rounded,
-          color: scheme.primary,
+          color: routeLineColor,
           value: pickup,
         ),
-        Padding(
-          padding: const EdgeInsets.only(left: 7),
+        const Padding(
+          padding: EdgeInsets.only(left: 7),
           child: SizedBox(
             height: 14,
-            child: VerticalDivider(width: 14, color: scheme.outlineVariant),
+            child: VerticalDivider(width: 14, color: routeLineColor),
           ),
         ),
         _RoutePoint(
           icon: Icons.sports_score_rounded,
-          color: scheme.secondary,
+          color: routeLineColor,
           value: dest,
         ),
       ],
@@ -1011,29 +1123,23 @@ class _DriverNextSwipe extends ConsumerStatefulWidget {
 class _DriverNextSwipeState extends ConsumerState<_DriverNextSwipe> {
   bool _busy = false;
 
+  /// Applies the status change optimistically and hands the actual `POST`
+  /// off to [DriverStatusUpdater], which keeps retrying independently of
+  /// this widget's own lifetime — this swipe control is very likely to be
+  /// unmounted the instant the optimistic status takes effect (advancing
+  /// past `inProgress` means there's no more "next" swipe to show at all),
+  /// so nothing here can afford to own the retry itself. The brief
+  /// `busy: true → false` flip isn't gating on the network at all anymore —
+  /// it purely exists to replay `SwipeToConfirm`'s own confirmed→ready reset
+  /// (see its `didUpdateWidget`) across two real frames, so the thumb is
+  /// clean and ready in case this exact widget somehow gets a *different*
+  /// `next` transition to show before the trip poll catches up.
   Future<void> _confirm() async {
+    ref.read(driverStatusUpdaterProvider(widget.tripId)).update(widget.next.$1);
+    Haptics.success();
     setState(() => _busy = true);
-    try {
-      await ref
-          .read(rideRepositoryProvider)
-          .updateStatus(widget.tripId, widget.next.$1);
-      ref.invalidate(tripStreamProvider(widget.tripId));
-    } on ApiException catch (e) {
-      Haptics.error();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                e.isNetwork ? AppL10n.of(context).errorNetwork : e.message)));
-      }
-    } catch (_) {
-      Haptics.error();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(AppL10n.of(context).errorGeneric)));
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    await Future<void>.delayed(Duration.zero);
+    if (mounted) setState(() => _busy = false);
   }
 
   @override
@@ -1042,6 +1148,9 @@ class _DriverNextSwipeState extends ConsumerState<_DriverNextSwipe> {
       label: widget.next.$2,
       busy: _busy,
       onConfirmed: _confirm,
+      // Green — reads as "go/forward" opposite the cancel button's red,
+      // instead of both actions sharing the same brand-amber look.
+      color: Colors.green.shade600,
     );
   }
 }
@@ -1129,19 +1238,19 @@ class _CounterpartRow extends StatelessWidget {
           ),
         ),
         Material(
-          color: scheme.surfaceContainerHighest,
+          color: Colors.blue.shade600,
           shape: const CircleBorder(),
           child: IconButton(
-            icon: const Icon(Icons.chat_rounded),
+            icon: const Icon(Icons.chat_rounded, color: Colors.white),
             onPressed: () => context.push(Routes.chat, extra: tripId),
           ),
         ),
         const SizedBox(width: 8),
         Material(
-          color: scheme.primaryContainer,
+          color: Colors.green.shade600,
           shape: const CircleBorder(),
           child: IconButton(
-            icon: Icon(Icons.call_rounded, color: scheme.onPrimaryContainer),
+            icon: const Icon(Icons.call_rounded, color: Colors.white),
             onPressed: () => _showCallOptions(context, tripId, person.phone),
             tooltip: AppL10n.of(context).callDriver,
           ),
@@ -1207,9 +1316,12 @@ class _VehicleClassChip extends StatelessWidget {
   final String vehicleClass;
 
   (IconData, String) _display(AppL10n l) => switch (vehicleClass) {
-        'three_wheeler' => (Icons.electric_rickshaw_rounded, l.vehicleThreeWheeler),
-        'four_wheeler' => (Icons.directions_car_rounded, l.vehicleFourWheeler),
-        _ => (Icons.two_wheeler_rounded, l.vehicleTwoWheeler),
+        'three_wheeler' => (
+            vehicleIconFor(vehicleClass),
+            l.vehicleThreeWheeler
+          ),
+        'four_wheeler' => (vehicleIconFor(vehicleClass), l.vehicleFourWheeler),
+        _ => (vehicleIconFor(vehicleClass), l.vehicleTwoWheeler),
       };
 
   @override
@@ -1240,10 +1352,22 @@ class _DetailRow extends StatelessWidget {
 }
 
 /// A round, elevated map overlay button (back, etc.).
-class _MapCircleButton extends StatelessWidget {
-  const _MapCircleButton({required this.icon, required this.onTap});
+class MapCircleButton extends StatelessWidget {
+  const MapCircleButton({
+    super.key,
+    required this.icon,
+    required this.onTap,
+    this.tooltip,
+    this.iconColor,
+  });
   final IconData icon;
   final VoidCallback onTap;
+  final String? tooltip;
+
+  /// Overrides the icon's default color — e.g. Google's own blue for the
+  /// external-navigation handoff button, so it reads at a glance as "leaves
+  /// the app" rather than blending in with every other map control.
+  final Color? iconColor;
 
   @override
   Widget build(BuildContext context) {
@@ -1251,7 +1375,11 @@ class _MapCircleButton extends StatelessWidget {
       color: Theme.of(context).colorScheme.surface,
       shape: const CircleBorder(),
       elevation: 2,
-      child: IconButton(icon: Icon(icon), onPressed: onTap),
+      child: IconButton(
+        icon: Icon(icon, color: iconColor),
+        tooltip: tooltip,
+        onPressed: onTap,
+      ),
     );
   }
 }
@@ -1352,7 +1480,10 @@ class _CallWatcherState extends ConsumerState<_CallWatcher> {
   }
 }
 
-/// While a driver is on an active trip, publish live position every few seconds.
+/// While a driver is on an active trip, tracks local GPS continuously (for
+/// the driver's own map/nav camera) and posts to the backend roughly every
+/// 100m of movement (or every 30s if stationary), rather than on a fixed
+/// timer regardless of distance.
 class _DriverLocationPublisher extends ConsumerStatefulWidget {
   const _DriverLocationPublisher({required this.tripId});
   final String tripId;
@@ -1364,41 +1495,175 @@ class _DriverLocationPublisher extends ConsumerStatefulWidget {
 
 class _DriverLocationPublisherState
     extends ConsumerState<_DriverLocationPublisher> {
-  Timer? _timer;
+  // Matches `tripDriverPositionProvider`'s own threshold (trip_ws.dart) — a
+  // stopped/crawling driver's GPS heading is noise, not a real turn, and
+  // would jitter the nav camera exactly where it most needs to hold steady
+  // (waiting at a light).
+  static const _minHeadingSpeedMs = 1.0;
+
+  // Other parties (the rider, dispatch) don't need every raw fix — a post
+  // roughly every 100m of actual movement is plenty, and cuts backend/
+  // battery load compared to posting on a fixed timer regardless of whether
+  // the driver has gone anywhere.
+  static const _postDistanceMeters = 100.0;
+  // A stationary driver (parked, waiting at a light for a while) would
+  // otherwise never post again once they stop moving 100m at a time — this
+  // keeps the rider's/dispatch's view of the driver from going stale for
+  // good while genuinely stopped.
+  static const _postKeepAlive = Duration(seconds: 30);
+  static const _distance = Distance();
+
+  StreamSubscription<Position>? _sub;
+  StreamSubscription<CompassEvent>? _compassSub;
+  Timer? _keepAliveTimer;
+  Timer? _retryTimer;
+  ProviderSubscription<AsyncValue<bool>>? _connSub;
+  Position? _latest;
+  Position? _lastPosted;
+  double? _lastHeading;
+
+  /// The device's own magnetometer heading — unlike GPS course-over-ground
+  /// (`Position.heading`), this is meaningful even standing still, so it's
+  /// what backs [_lastHeading] below [_minHeadingSpeedMs] instead of just
+  /// freezing on whatever the last fast-enough GPS fix reported. Google
+  /// Maps does the same blend (GPS course while moving, compass while
+  /// stopped/crawling) for exactly this reason.
+  double? _compassHeading;
+
+  // The most recent position that failed to reach the backend — retried
+  // with backoff below, and immediately on reconnect, until it (or a
+  // fresher point superseding it) actually lands. Without this a failed
+  // ping was just gone for good; the rider/dispatch view of this driver
+  // would stay frozen at whatever the last *successful* post was for the
+  // entire offline stretch, even after connectivity came back.
+  Position? _pendingRetry;
+  int _retryAttempt = 0;
 
   @override
   void initState() {
     super.initState();
-    _ping();
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _ping());
+    _start();
+    _keepAliveTimer = Timer.periodic(_postKeepAlive, (_) {
+      final pos = _latest;
+      if (pos != null) _post(pos, previous: _lastPosted);
+    });
+    _connSub = ref.listenManual(connectivityProvider, (prev, next) {
+      final backOnline = next.valueOrNull ?? false;
+      final pending = _pendingRetry;
+      if (backOnline && pending != null) {
+        _retryTimer?.cancel();
+        _retryAttempt = 0;
+        _post(pending, previous: _lastPosted);
+      }
+    });
   }
 
-  Future<void> _ping() async {
+  Future<void> _start() async {
+    // Not `currentLatLng()` here — it discards everything but lat/lng, and
+    // the navigation camera (heading-up rotation) needs `heading`/`speed`
+    // too. Same permission/service gating as `currentLatLng()`, just
+    // keeping the full `Position`.
+    if (!await ensureLocationPermission() ||
+        !await Geolocator.isLocationServiceEnabled()) {
+      return;
+    }
+    if (!mounted) return;
+    // A continuous local stream, not a poll: `localDriverPositionProvider`
+    // (read directly by this driver's own map/nav camera) updates the
+    // instant a new fix lands — this is what keeps the driver's own vehicle
+    // marker moving offline or on a bad connection, since it no longer
+    // depends on `POST location` reaching the backend at all.
+    _sub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+      ),
+    ).listen(_onPosition);
+    _compassSub = FlutterCompass.events?.listen((event) {
+      _compassHeading = event.heading;
+    });
+  }
+
+  void _onPosition(Position pos) {
+    _latest = pos;
+    if (pos.speed > _minHeadingSpeedMs) {
+      // Moving fast enough that GPS course-over-ground is trustworthy —
+      // preferred over compass here since a moving vehicle's actual heading
+      // can differ from wherever the phone itself happens to be pointed
+      // (mount angle, being held at an angle, etc.).
+      _lastHeading = pos.heading;
+    } else if (_compassHeading != null) {
+      // Stopped/crawling — GPS course is noise here, but the compass still
+      // reads a real heading, so use it instead of freezing on whatever the
+      // last fast-enough GPS fix reported.
+      _lastHeading = _compassHeading;
+    }
+    ref.read(localDriverPositionProvider.notifier).state = DriverPosition(
+      point: LatLng(pos.latitude, pos.longitude),
+      heading: _lastHeading,
+      speed: pos.speed,
+    );
+    final last = _lastPosted;
+    final moved = last == null ||
+        _distance.as(LengthUnit.Meter, LatLng(last.latitude, last.longitude),
+                LatLng(pos.latitude, pos.longitude)) >=
+            _postDistanceMeters;
+    if (moved) _post(pos, previous: last);
+  }
+
+  Future<void> _post(Position pos, {required Position? previous}) async {
+    _lastPosted = pos;
     try {
-      // Not `currentLatLng()` here — it discards everything but lat/lng, and
-      // the navigation camera (heading-up rotation) needs `heading`/`speed`
-      // too. Same permission/service gating as `currentLatLng()`, just
-      // keeping the full `Position`.
-      if (!await ensureLocationPermission() ||
-          !await Geolocator.isLocationServiceEnabled()) {
-        return;
-      }
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      );
+      // `_lastHeading` (GPS course while moving, compass while stopped/
+      // crawling) instead of raw `pos.heading` — otherwise this blend would
+      // only ever benefit the driver's own screen, and the rider (who only
+      // ever sees whatever heading gets posted here) would still get a
+      // heading that freezes every time the driver stops.
       await ref.read(rideRepositoryProvider).postLocation(
             widget.tripId,
             pos.latitude,
             pos.longitude,
-            heading: pos.heading,
+            heading: _lastHeading,
             speed: pos.speed,
           );
-    } catch (_) {/* skip a beat */}
+      // A successful post means the backend is caught up — any earlier
+      // failed attempt is now moot, since this point is at least as fresh.
+      _pendingRetry = null;
+      _retryAttempt = 0;
+      _retryTimer?.cancel();
+    } catch (_) {
+      // Offline or a transient failure — the driver's own nav already keeps
+      // moving via `localDriverPositionProvider` regardless. Roll back so
+      // the next 100m is measured from the last position that actually made
+      // it to the backend, not this failed attempt, and keep retrying this
+      // point (with backoff, and immediately on reconnect) until it lands.
+      _lastPosted = previous;
+      _pendingRetry = pos;
+      _scheduleRetry();
+    }
+  }
+
+  void _scheduleRetry() {
+    _retryTimer?.cancel();
+    final attempt = _retryAttempt++;
+    final delaySecs = attempt >= 4 ? 30 : (1 << (attempt + 1)); // 2,4,8,16,30…
+    _retryTimer = Timer(Duration(seconds: delaySecs), () {
+      final pos = _pendingRetry;
+      if (pos != null) _post(pos, previous: _lastPosted);
+    });
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _sub?.cancel();
+    _compassSub?.cancel();
+    _keepAliveTimer?.cancel();
+    _retryTimer?.cancel();
+    _connSub?.close();
+    // Don't leak this trip's last fix into whatever comes next (a new trip,
+    // or the driver going idle) — the local nav camera should show nothing
+    // until a fresh trip actually starts reporting again.
+    ref.read(localDriverPositionProvider.notifier).state = null;
     super.dispose();
   }
 

@@ -548,5 +548,8 @@
   "supportTitle": "सहयोग",
   "supportChatHint": "सहयोगलाई सन्देश पठाउनुहोस्…",
   "supportEmptyState": "यात्रा वा अर्डरबारे प्रश्न छ? हामीलाई सन्देश पठाउनुहोस्, हाम्रो टोलीले जवाफ दिनेछ।",
-  "supportSend": "पठाउनुहोस्"
+  "supportSend": "पठाउनुहोस्",
+  "navFullscreen": "पूर्ण स्क्रिन नेभिगेसन",
+  "navExit": "नेभिगेसनबाट बाहिरिनुहोस्",
+  "navMinutesLeft": "{min} मिनेट"
 }

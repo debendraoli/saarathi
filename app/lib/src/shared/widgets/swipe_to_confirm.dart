@@ -15,12 +15,19 @@ class SwipeToConfirm extends StatefulWidget {
     required this.onConfirmed,
     this.busy = false,
     this.icon = Icons.chevron_right_rounded,
+    this.color,
   });
 
   final String label;
   final VoidCallback onConfirmed;
   final bool busy;
   final IconData icon;
+
+  /// Track fill / thumb color — defaults to the theme's primary (brand
+  /// amber). Callers whose action reads as "the positive/forward one" next
+  /// to a red cancel button (e.g. the driver's arrived/start/complete swipe)
+  /// pass a green here so the two read as a pair at a glance.
+  final Color? color;
 
   @override
   State<SwipeToConfirm> createState() => _SwipeToConfirmState();
@@ -35,6 +42,24 @@ class _SwipeToConfirmState extends State<SwipeToConfirm>
   bool _dragging = false;
   bool _crossedThreshold = false;
   bool _confirmed = false;
+
+  /// A gentle, repeating nudge-right-and-back on the thumb — the swipe
+  /// affordance (a plain circle sitting at the left edge) otherwise reads as
+  /// a static button, not something draggable. Runs continuously while
+  /// idle; stops the moment a real drag starts or the action confirms, so
+  /// it never fights the actual gesture-driven position.
+  late final AnimationController _hintAnim = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+  late final Animation<double> _hintCurve =
+      CurvedAnimation(parent: _hintAnim, curve: Curves.easeInOut);
+
+  @override
+  void dispose() {
+    _hintAnim.dispose();
+    super.dispose();
+  }
 
   void _onDragUpdate(double delta, double travel) {
     if (widget.busy || _confirmed || travel <= 0) return;
@@ -81,6 +106,9 @@ class _SwipeToConfirmState extends State<SwipeToConfirm>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final color = widget.color ?? scheme.primary;
+    final onColor = widget.color != null ? Colors.white : scheme.onPrimary;
+    final hintActive = !_dragging && !_confirmed && !widget.busy;
     return LayoutBuilder(
       builder: (context, constraints) {
         final trackWidth = constraints.maxWidth;
@@ -109,8 +137,7 @@ class _SwipeToConfirmState extends State<SwipeToConfirm>
                 curve: Curves.easeOut,
                 width: fillWidth.clamp(_thumbSize, trackWidth),
                 decoration: BoxDecoration(
-                  color:
-                      scheme.primary.withValues(alpha: _confirmed ? 1 : 0.85),
+                  color: color.withValues(alpha: _confirmed ? 1 : 0.85),
                   borderRadius: BorderRadius.circular(28),
                 ),
               ),
@@ -142,34 +169,46 @@ class _SwipeToConfirmState extends State<SwipeToConfirm>
                       ? null
                       : (d) => _onDragUpdate(d.delta.dx, travel),
                   onHorizontalDragEnd: widget.busy ? null : (_) => _onDragEnd(),
-                  child: Container(
-                    width: _thumbSize,
-                    height: _thumbSize,
-                    decoration: BoxDecoration(
-                      color: scheme.primary,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.2),
-                          blurRadius: 4,
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
+                  child: AnimatedBuilder(
+                    animation: _hintCurve,
+                    // Additive to the drag-driven `left` above, not a
+                    // replacement for it — a plain Positioned/Transform
+                    // layered on top so the two never fight: the moment a
+                    // real drag starts, `hintActive` goes false and this
+                    // collapses back to zero offset.
+                    builder: (context, child) => Transform.translate(
+                      offset: Offset(hintActive ? _hintCurve.value * 12 : 0, 0),
+                      child: child,
                     ),
-                    child: Center(
-                      child: widget.busy
-                          ? SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.2,
-                                color: scheme.onPrimary,
+                    child: Container(
+                      width: _thumbSize,
+                      height: _thumbSize,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.2),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: widget.busy
+                            ? SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  color: onColor,
+                                ),
+                              )
+                            : Icon(
+                                _confirmed ? Icons.check_rounded : widget.icon,
+                                color: onColor,
                               ),
-                            )
-                          : Icon(
-                              _confirmed ? Icons.check_rounded : widget.icon,
-                              color: scheme.onPrimary,
-                            ),
+                      ),
                     ),
                   ),
                 ),

@@ -28,6 +28,10 @@ dependencies:
   latlong2: ^0.10.1
   geolocator: ^14.0.3
   location: ^10.0.2
+  # Device compass (magnetometer) — GPS course-over-ground is unreliable
+  # below walking speed, so the nav camera/vehicle icon blends in compass
+  # heading while stopped/crawling instead of freezing on stale GPS heading.
+  flutter_compass: ^0.8.1
 
   # Platform integration
   app_links: ^7.2.1

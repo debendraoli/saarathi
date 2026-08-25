@@ -21,7 +21,7 @@ import '../../driver/domain/models.dart';
 import '../../../shared/geocode_cache.dart';
 import '../../places/data/places_repository.dart';
 import '../../ride/application/ride_controller.dart';
-import '../../ride/domain/models.dart' show DriverGoal;
+import '../../ride/domain/models.dart' show DriverGoal, Trip, TripStatus;
 import '../../ride/presentation/widgets/map_view.dart';
 import '../../ride/presentation/widgets/search_radar.dart';
 
@@ -136,10 +136,48 @@ class _OnlineBoard extends ConsumerWidget {
     final l = AppL10n.of(context);
     final status = ref.watch(driverControllerProvider);
     final offers = ref.watch(driverOffersProvider).valueOrNull ?? const [];
+    final activeTrip = ref.watch(driverActiveTripProvider).valueOrNull;
+
+    // A trip won by bid has no local "I just tapped accept" moment to
+    // navigate on (the rider accepted the driver's bid, not the other way
+    // round) — this is what catches it and sends the driver straight to the
+    // trip screen instead of leaving them stranded on the idle board until
+    // they notice the notification. An instant-accept offer already
+    // navigates itself (see `_OfferCard`), so this only ever fires for the
+    // bid case in practice, but it's a harmless no-op either way.
+    ref.listen(driverActiveTripProvider, (prev, next) {
+      final trip = next.valueOrNull;
+      if (trip == null) return;
+      // Keyed off `lastAutoNavigatedTripProvider`, not the previous poll
+      // value — the latter resets to null every time this widget remounts
+      // (e.g. the driver backs out of the trip screen to home), which would
+      // re-fire the push for the very same, still-accepted trip in a loop.
+      final already = ref.read(lastAutoNavigatedTripProvider);
+      if (trip.id == already) return;
+      ref.read(lastAutoNavigatedTripProvider.notifier).state = trip.id;
+      // `context.go`, not `context.push` — TripScreen's own PopScope assumes
+      // it was reached this way (replacing the stack, nothing underneath
+      // for back to reveal), and the driver should stay locked into it
+      // until the trip actually finishes, not be able to swipe/back their
+      // way to a home screen that still shows a job they haven't dealt with.
+      //
+      // Deferred to the next frame, not called straight from this listener:
+      // `ref.listen` can fire mid-build (e.g. right as `driverControllerProvider`
+      // flips to online, in the same pass that produces this rebuild), and
+      // navigating — which mutates the element tree — while a build is
+      // still in progress is exactly what corrupts it. Reproduced live as a
+      // `_dependents.isEmpty` assertion crash immediately after going online
+      // with a trip already waiting. Post-frame guarantees the current build
+      // has fully settled first.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) context.go('${Routes.trip}/${trip.id}');
+      });
+    });
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (activeTrip != null) _DriverActiveTripCard(trip: activeTrip),
         _OnlineCard(
           online: status.online,
           busy: status.busy,
@@ -154,6 +192,58 @@ class _OnlineBoard extends ConsumerWidget {
           _IdleRadar(center: status.lastLocation, body: l.onlineBody),
         for (final offer in offers) _OfferCard(offer: offer),
       ],
+    );
+  }
+}
+
+/// Resume-into-the-trip card — the driver's counterpart to rider_home's own
+/// `_ActiveTripCard`. Tapping the trip screen's back arrow deliberately just
+/// navigates here (an assigned trip isn't cancelled by backing out of its
+/// screen — see `_leaveTrip`), but that left the driver stranded on the
+/// idle board with no way back to a trip they still need to complete short
+/// of waiting for [driverActiveTripProvider]'s poll to auto-redirect them
+/// again. This gives them an immediate, explicit way back.
+class _DriverActiveTripCard extends ConsumerWidget {
+  const _DriverActiveTripCard({required this.trip});
+  final Trip trip;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppL10n.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final routingToPickup = trip.status == TripStatus.accepted ||
+        trip.status == TripStatus.arriving;
+    final label = routingToPickup
+        ? (ref.watch(tripOriginLabelProvider(trip.id)).valueOrNull)
+        : (ref.watch(tripDestLabelProvider(trip.id)).valueOrNull);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        color: scheme.primaryContainer,
+        child: ListTile(
+          contentPadding: const EdgeInsets.all(12),
+          leading: CircleAvatar(
+            backgroundColor: scheme.primary,
+            child: Icon(Icons.directions_car_rounded, color: scheme.onPrimary),
+          ),
+          title: Text(
+            label ?? l.ongoingRide,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: scheme.onPrimaryContainer,
+            ),
+          ),
+          subtitle: Text(
+            routingToPickup ? l.statusArriving : l.statusOnTrip,
+            style: TextStyle(color: scheme.onPrimaryContainer),
+          ),
+          trailing:
+              Icon(Icons.chevron_right_rounded, color: scheme.onPrimaryContainer),
+          onTap: () => context.go('${Routes.trip}/${trip.id}'),
+        ),
+      ),
     );
   }
 }

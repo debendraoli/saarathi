@@ -10,9 +10,16 @@ import '../../../../core/config/app_config.dart';
 import '../../../../core/location.dart';
 import '../../application/trip_ws.dart' show DriverPosition;
 
+/// The route line's own blue — the brand saffron collides with OSM road/POI
+/// colors on the tile layer. Pickup/destination pins share it too, so a
+/// trip's whole path (pins + line) reads as one consistent visual, not
+/// mismatched brand-color pins against a blue line.
+const routeLineColor = Color(0xFF1A73E8);
+
 /// A pin to render on the map.
 class MapPin {
-  const MapPin(this.point, this.icon, this.color, {this.rotate = false, this.id, this.label});
+  const MapPin(this.point, this.icon, this.color,
+      {this.rotate = false, this.id, this.label});
   final LatLng point;
   final IconData icon;
   final Color color;
@@ -35,7 +42,6 @@ class MapPin {
   /// instead of [icon] — how the rider tells stops apart on the map.
   final String? label;
 }
-
 
 /// A floating "arrive at HH:MM" (or similar) label anchored above a point —
 /// e.g. the destination pin, showing the ETA the fare estimate already
@@ -148,6 +154,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   AnimationController? _fitAnim;
   List<LatLng>? _lastFitPoints;
   Timer? _resizeFitDebounce;
+  Timer? _resizeNavDebounce;
 
   /// True once the rider has panned/zoomed far enough from the fitted route
   /// that the combined nav button should offer "back to route" instead of
@@ -158,6 +165,41 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   List<LatLng> _revealedRoute = const [];
   List<LatLng>? _lastRoute;
 
+  /// How long a moving pin (the live driver marker) takes to glide from its
+  /// last displayed position to a newly-arrived one — a touch under the
+  /// ~5s GPS ping cadence so it settles before the next ping lands, instead
+  /// of perpetually chasing a moving target.
+  static const _pinMoveDuration = Duration(milliseconds: 4200);
+
+  /// How far ahead of the driver's live position the nav camera centers,
+  /// in the direction of travel — the same "look-ahead" Google Maps uses so
+  /// the vehicle sits toward the bottom of the screen with more upcoming
+  /// road visible, instead of dead-centered. Only applied when a heading is
+  /// available (nothing to look "ahead" of otherwise).
+  static const _lookAheadMeters = 45.0;
+
+  static const _distance = Distance();
+
+  /// A newly-reported point further than this from where a pin/camera was
+  /// last displayed is treated as "this screen was away for a while" (the
+  /// classic case: `TripScreen`'s own `MapView` sits covered underneath the
+  /// fullscreen `NavigationScreen`, which keeps polling/gliding independently
+  /// while covered — by the time you pop back, the covered map's last
+  /// displayed position can be many pings stale) rather than a normal single
+  /// GPS ping's worth of movement. Animating that whole accumulated gap at
+  /// the usual glide speed would look like the vehicle slowly crawling to
+  /// catch up over several seconds instead of just being where it actually
+  /// is — confirmed live: "the vehicle arriving to the location takes so
+  /// long when exited from fullscreen".
+  static const _bigJumpMeters = 150.0;
+
+  /// Currently-displayed position for each identified, moving pin — lags
+  /// behind [MapPin.point] while an in-flight glide animation closes the
+  /// gap. Pins without an [MapPin.id] just render at their literal point,
+  /// same as before (only the driver marker opts into this today).
+  final Map<String, LatLng> _pinDisplay = {};
+  final Map<String, AnimationController> _pinAnims = {};
+
   @override
   void initState() {
     super.initState();
@@ -167,7 +209,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _controller.moveAndRotate(
-            target.point,
+            _lookAheadCenter(target),
             widget.navigationZoom,
             _mapRotationFor(target.heading) ?? 0,
           );
@@ -176,9 +218,24 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
     } else if (widget.autoFitPins) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _maybeFitPins());
     }
+    // NOTE: a fullscreen nav route (see NavigationScreen) can leave
+    // flutter_map's own tile viewport stuck small — the outer
+    // Positioned.fill/Stack/Scaffold is genuinely full-screen from frame
+    // one (confirmed with a diagnostic background), but flutter_map only
+    // paints tiles for a small region and never catches up. A delayed
+    // `_controller.moveAndRotate`/`.move()` correction pass was tried here
+    // and reliably made things *worse* — reproduced live, racing against
+    // the concurrent `_animateTo` tween corrupted the map into a mirrored/
+    // rotated state and reintroduced a `_dependents.isEmpty` framework
+    // crash. Left unfixed rather than risk that again; needs a real fix
+    // (e.g. an explicit flutter_map API to force a remeasure, if one
+    // exists) rather than another blind direct-controller workaround.
     _revealedRoute = widget.route;
     _lastRoute = widget.route;
     _lastFitPoints = _fittablePoints();
+    for (final p in widget.pins) {
+      if (p.id != null) _pinDisplay[p.id!] = p.point;
+    }
   }
 
   @override
@@ -195,10 +252,70 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
     } else if (widget.autoFitPins) {
       _maybeFitPins();
     }
+    _syncMovingPins(oldWidget.pins, widget.pins);
     if (!listEquals(widget.route, _lastRoute)) {
+      final prevRoute = _lastRoute;
       _lastRoute = widget.route;
-      _animateRouteReveal(widget.route);
+      _animateRouteReveal(widget.route, prevRoute);
     }
+  }
+
+  /// Glides each identified pin (the live driver marker) from wherever it's
+  /// currently displayed to its newly-reported point, instead of snapping
+  /// there instantly the moment a fresh GPS ping arrives — a ping lands
+  /// roughly every 5s, far too coarse to read as continuous motion without
+  /// this, and made the whole marker look like it was "re-rendering" in
+  /// place rather than driving along the road.
+  void _syncMovingPins(List<MapPin> oldPins, List<MapPin> newPins) {
+    final newIds = <String>{};
+    for (final pin in newPins) {
+      final id = pin.id;
+      if (id == null) continue;
+      newIds.add(id);
+      final from = _pinDisplay[id];
+      if (from == null) {
+        // First time this id has been seen — nothing to glide from, and
+        // the marker's own pop-in animation already covers its arrival.
+        _pinDisplay[id] = pin.point;
+        continue;
+      }
+      if (from == pin.point) continue;
+      if (_distance.as(LengthUnit.Meter, from, pin.point) > _bigJumpMeters) {
+        _pinAnims.remove(id)?.dispose();
+        _pinDisplay[id] = pin.point;
+        continue;
+      }
+      _animatePinTo(id, from, pin.point);
+    }
+    // A pin that's gone (e.g. the driver marker once the trip ends) drops
+    // its remembered position, so if the same id ever reappears later it
+    // starts fresh instead of gliding in from a stale, unrelated spot.
+    _pinDisplay.removeWhere((id, _) => !newIds.contains(id));
+    for (final id in _pinAnims.keys.toList()) {
+      if (!newIds.contains(id)) {
+        _pinAnims.remove(id)?.dispose();
+      }
+    }
+  }
+
+  void _animatePinTo(String id, LatLng from, LatLng to) {
+    _pinAnims.remove(id)?.dispose();
+    final anim = AnimationController(vsync: this, duration: _pinMoveDuration);
+    // Linear, not eased — a vehicle moves at roughly constant speed between
+    // two GPS fixes; an ease-in/out here would read as slowing down to
+    // stop at every single ping, which isn't what's happening.
+    anim.addListener(() {
+      if (!mounted) return;
+      final t = anim.value;
+      setState(() {
+        _pinDisplay[id] = LatLng(
+          from.latitude + (to.latitude - from.latitude) * t,
+          from.longitude + (to.longitude - from.longitude) * t,
+        );
+      });
+    });
+    _pinAnims[id] = anim;
+    anim.forward();
   }
 
   /// flutter_map's `rotation` is how much the map content itself is turned;
@@ -207,15 +324,51 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   /// easy single-line fix if it ever reads backwards on a real device.)
   double? _mapRotationFor(double? heading) => heading == null ? null : -heading;
 
+  /// The point the camera should actually center on for a given driver
+  /// position — offset ahead of the raw GPS point in the direction of
+  /// travel (see [_lookAheadMeters]) so the vehicle sits toward the bottom
+  /// of the screen with more of the upcoming road visible, matching Google
+  /// Maps' turn-by-turn framing instead of dead-centering the marker.
+  LatLng _lookAheadCenter(DriverPosition target) {
+    final heading = target.heading;
+    if (heading == null) return target.point;
+    return _distance.offset(target.point, _lookAheadMeters, heading);
+  }
+
   void _animateTo(DriverPosition target) {
     final toRotationRaw =
         _mapRotationFor(target.heading) ?? _controller.camera.rotation;
+    final toCenter = _lookAheadCenter(target);
     _navAnim?.dispose();
+    final camera = _controller.camera;
+    final currentCenterValid =
+        camera.center.latitude.isFinite && camera.center.longitude.isFinite;
+    if (currentCenterValid &&
+        _distance.as(LengthUnit.Meter, camera.center, toCenter) >
+            _bigJumpMeters) {
+      // Same "this screen was covered/away for a while" case as the pin
+      // glide above — panning the whole accumulated gap at the usual speed
+      // would look like a slow, unrealistic crawl instead of the camera
+      // just being where the driver actually is.
+      _controller.moveAndRotate(toCenter, widget.navigationZoom, toRotationRaw);
+      return;
+    }
     _animateCamera(
-      toCenter: target.point,
+      toCenter: toCenter,
       toZoom: widget.navigationZoom,
       toRotation: toRotationRaw,
       controllerSlot: (c) => _navAnim = c,
+      // Deliberately shorter than `_pinMoveDuration` (the marker's own
+      // glide, which stays linear/full-duration) — raster map tiles blur
+      // while actively panning/rotating (confirmed live: sharpens the
+      // instant a manual drag interrupts it), and matching the camera's
+      // glide to the *entire* ~4.2s inter-ping gap left it almost
+      // permanently mid-motion, so it was blurry nearly all the time.
+      // This still reads as a continuous, eased pan (nowhere near the
+      // original abrupt 600ms hop) while leaving real settled time each
+      // cycle for tiles to render sharp before the next ping moves it again.
+      duration: const Duration(milliseconds: 1800),
+      curve: Curves.easeOutCubic,
     );
   }
 
@@ -242,7 +395,9 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   void _maybeFitPins({bool force = false}) {
     final points = _fittablePoints();
     if (points == null) return;
-    if (!force && _lastFitPoints != null && listEquals(points, _lastFitPoints)) {
+    if (!force &&
+        _lastFitPoints != null &&
+        listEquals(points, _lastFitPoints)) {
       return;
     }
     _lastFitPoints = points;
@@ -301,6 +456,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
     double? toRotation,
     required void Function(AnimationController?) controllerSlot,
     Duration duration = const Duration(milliseconds: 600),
+    Curve curve = Curves.easeOutCubic,
   }) {
     // Never animate toward (or from) a non-finite value — a bad target
     // silently corrupts the map's camera into a permanently blank state
@@ -335,12 +491,14 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
     }
 
     final anim = AnimationController(vsync: this, duration: duration);
-    final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
+    final curved = CurvedAnimation(parent: anim, curve: curve);
     curved.addListener(() {
       if (!mounted) return;
       final t = curved.value;
-      final lat = fromCenter.latitude + (toCenter.latitude - fromCenter.latitude) * t;
-      final lng = fromCenter.longitude + (toCenter.longitude - fromCenter.longitude) * t;
+      final lat =
+          fromCenter.latitude + (toCenter.latitude - fromCenter.latitude) * t;
+      final lng = fromCenter.longitude +
+          (toCenter.longitude - fromCenter.longitude) * t;
       final zoom = fromZoom + (toZoom - fromZoom) * t;
       final rotation = fromRotation + (targetRotation - fromRotation) * t;
       _controller.moveAndRotate(LatLng(lat, lng), zoom, rotation);
@@ -353,9 +511,27 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   /// end to the destination end — instead of popping in fully formed the
   /// instant a route arrives (straight-line guess, then the real routed
   /// geometry once it lands).
-  void _animateRouteReveal(List<LatLng> target) {
+  ///
+  /// [previous] is the route this is replacing, if any. While a trip is
+  /// active the route target tracks the driver's live position (see
+  /// `TripScreen`'s `liveRouting`), so a fresh route recomputes on every
+  /// ~5s GPS ping — same destination-ward end, just trimmed from the front
+  /// as the vehicle advances. Replaying the full growth animation on every
+  /// one of those made the route look like it was constantly re-rendering
+  /// itself rather than the road simply disappearing behind the vehicle, so
+  /// that case snaps the polyline straight to the new geometry instead;
+  /// only a genuinely new route (first arrival, or the destination-ward end
+  /// itself changing — e.g. switching from routing-to-pickup to
+  /// routing-to-destination) gets the growth reveal.
+  void _animateRouteReveal(List<LatLng> target, List<LatLng>? previous) {
     _routeAnim?.dispose();
     if (target.length < 2) {
+      setState(() => _revealedRoute = target);
+      return;
+    }
+    if (previous != null &&
+        previous.isNotEmpty &&
+        _closeEnough(previous.last, target.last)) {
       setState(() => _revealedRoute = target);
       return;
     }
@@ -370,6 +546,11 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
     });
     _routeAnim = anim;
     anim.forward();
+  }
+
+  bool _closeEnough(LatLng a, LatLng b) {
+    const dist = Distance();
+    return dist.as(LengthUnit.Meter, a, b) < 30;
   }
 
   /// The leading portion of [points] covering fraction [t] of the total
@@ -420,27 +601,66 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   /// final size — debounced since a resize animation emits many events in
   /// quick succession.
   void _onMapEvent(MapEvent event) {
-    if (event is MapEventNonRotatedSizeChange && widget.autoFitPins) {
-      _resizeFitDebounce?.cancel();
-      _resizeFitDebounce = Timer(const Duration(milliseconds: 200), () {
-        if (mounted) _maybeFitPins(force: true);
-      });
+    if (event is MapEventNonRotatedSizeChange) {
+      if (widget.autoFitPins) {
+        _resizeFitDebounce?.cancel();
+        _resizeFitDebounce = Timer(const Duration(milliseconds: 200), () {
+          if (mounted) _maybeFitPins(force: true);
+        });
+      }
+      // Same self-heal, for the other camera-driving mode: a fullscreen nav
+      // route push (see NavigationScreen) can report a resize mid-transition
+      // before the page reaches its final size, and `initState`'s one-shot
+      // `moveAndRotate` — which only runs once, before this widget has any
+      // resize event to react to — has no chance to redo itself against the
+      // corrected size. Without this, the map is stuck at whatever (possibly
+      // near-zero-height) box it first measured, rendering only a sliver of
+      // tiles and leaving the rest of the screen blank.
+      final target = widget.navigationTarget;
+      if (target != null) {
+        _resizeNavDebounce?.cancel();
+        _resizeNavDebounce = Timer(const Duration(milliseconds: 200), () {
+          if (mounted) _animateTo(target);
+        });
+      }
     }
     if (widget.showRecenterButton) _updateAwayFromRoute();
   }
 
-  /// Recomputes [_awayFromRoute] from how far the camera's current center
-  /// has drifted from the fitted route's own center, relative to the
-  /// route's own span — a fixed-meter threshold would be too tight for a
-  /// long cross-town route and too loose for two pins a block apart.
+  /// Recomputes [_awayFromRoute]. Two different "what am I away from"
+  /// definitions depending on which camera mode is active:
+  ///
+  /// - Following a live [navigationTarget] (turn-by-turn, driver or rider
+  ///   watching the driver move): "away" is a plain fixed-radius check
+  ///   against that target's current point — the thing being followed is
+  ///   one point, not a span, so there's no route/bounds size to scale
+  ///   against.
+  /// - Fitted to [autoFitPins] pins instead: drifted from the fitted route's
+  ///   own center, relative to the route's own span — a fixed-meter
+  ///   threshold would be too tight for a long cross-town route and too
+  ///   loose for two pins a block apart.
   void _updateAwayFromRoute() {
+    const dist = Distance();
+    final target = widget.navigationTarget;
+    if (target != null) {
+      final offset =
+          dist.as(LengthUnit.Meter, target.point, _controller.camera.center);
+      // The camera itself now intentionally sits ~[_lookAheadMeters] away
+      // from the raw target point (see `_lookAheadCenter`), so that offset
+      // alone must not read as the viewer having panned away.
+      final away = offset > 80 + _lookAheadMeters;
+      if (away != _awayFromRoute && mounted) {
+        setState(() => _awayFromRoute = away);
+      }
+      return;
+    }
     final points = _lastFitPoints;
     if (points == null || points.length < 2) return;
     final bounds = LatLngBounds.fromPoints(points);
-    const dist = Distance();
     final halfDiagonal =
         dist.as(LengthUnit.Meter, bounds.southWest, bounds.northEast) / 2;
-    final offset = dist.as(LengthUnit.Meter, bounds.center, _controller.camera.center);
+    final offset =
+        dist.as(LengthUnit.Meter, bounds.center, _controller.camera.center);
     final away = offset > halfDiagonal * 1.3 + 150;
     if (away != _awayFromRoute && mounted) {
       setState(() => _awayFromRoute = away);
@@ -453,6 +673,10 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
     _fitAnim?.dispose();
     _routeAnim?.dispose();
     _resizeFitDebounce?.cancel();
+    _resizeNavDebounce?.cancel();
+    for (final anim in _pinAnims.values) {
+      anim.dispose();
+    }
     super.dispose();
   }
 
@@ -462,7 +686,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   Marker _markerFor(MapPin pin, int index) {
     return Marker(
       key: ValueKey(pin.id ?? 'pin-$index'),
-      point: pin.point,
+      point: pin.id != null ? (_pinDisplay[pin.id!] ?? pin.point) : pin.point,
       width: 44,
       height: 44,
       alignment: Alignment.topCenter,
@@ -480,7 +704,8 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   /// and centers on its point rather than pointing up from below it.
   Marker _calloutMarker(MapCallout callout) {
     return Marker(
-      key: ValueKey('callout-${callout.point.latitude}-${callout.point.longitude}'),
+      key: ValueKey(
+          'callout-${callout.point.latitude}-${callout.point.longitude}'),
       point: callout.point,
       width: 120,
       height: 34,
@@ -529,60 +754,63 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
         : _osmFallback;
     return Stack(
       children: [
-        FlutterMap(
-          mapController: _controller,
-          options: MapOptions(
-            initialCenter: widget.center,
-            initialZoom: widget.zoom,
-            onTap: widget.onTap == null ? null : (_, p) => widget.onTap!(p),
-            onMapEvent: _onMapEvent,
-            interactionOptions: const InteractionOptions(
-              flags: InteractiveFlag.pinchZoom |
-                  InteractiveFlag.drag |
-                  InteractiveFlag.doubleTapZoom,
+        // Positioned.fill, not a bare Stack child — belt-and-braces so this
+        // Stack's own sizing is never in question regardless of `fit`.
+        Positioned.fill(
+          child: FlutterMap(
+            mapController: _controller,
+            options: MapOptions(
+              initialCenter: widget.center,
+              initialZoom: widget.zoom,
+              onTap: widget.onTap == null ? null : (_, p) => widget.onTap!(p),
+              onMapEvent: _onMapEvent,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.pinchZoom |
+                    InteractiveFlag.drag |
+                    InteractiveFlag.doubleTapZoom,
+              ),
             ),
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: tileUrl,
-              userAgentPackageName: 'com.saarathi.app',
-              maxZoom: 19,
-            ),
-            if (widget.circles.isNotEmpty)
-              CircleLayer(
-                circles: [
-                  for (final c in widget.circles)
-                    CircleMarker(
-                      point: c.center,
-                      radius: c.radiusMeters,
-                      useRadiusInMeter: true,
-                      color: c.color,
-                      borderColor: c.borderColor,
-                      borderStrokeWidth: c.borderStrokeWidth,
+            children: [
+              TileLayer(
+                urlTemplate: tileUrl,
+                userAgentPackageName: 'com.saarathi.app',
+                maxZoom: 19,
+              ),
+              if (widget.circles.isNotEmpty)
+                CircleLayer(
+                  circles: [
+                    for (final c in widget.circles)
+                      CircleMarker(
+                        point: c.center,
+                        radius: c.radiusMeters,
+                        useRadiusInMeter: true,
+                        color: c.color,
+                        borderColor: c.borderColor,
+                        borderStrokeWidth: c.borderStrokeWidth,
+                      ),
+                  ],
+                ),
+              if (_revealedRoute.length >= 2)
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: _revealedRoute,
+                      strokeWidth: 5,
+                      color: routeLineColor,
+                      borderStrokeWidth: 1.5,
+                      borderColor: Colors.white,
                     ),
+                  ],
+                ),
+              MarkerLayer(
+                markers: [
+                  for (var i = 0; i < widget.pins.length; i++)
+                    _markerFor(widget.pins[i], i),
+                  for (final c in widget.callouts) _calloutMarker(c),
                 ],
               ),
-            if (_revealedRoute.length >= 2)
-              PolylineLayer(
-                polylines: [
-                  // Blue route line — the brand saffron collides with OSM road/POI colors.
-                  Polyline(
-                    points: _revealedRoute,
-                    strokeWidth: 5,
-                    color: const Color(0xFF1A73E8),
-                    borderStrokeWidth: 1.5,
-                    borderColor: Colors.white,
-                  ),
-                ],
-              ),
-            MarkerLayer(
-              markers: [
-                for (var i = 0; i < widget.pins.length; i++)
-                  _markerFor(widget.pins[i], i),
-                for (final c in widget.callouts) _calloutMarker(c),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
         if (widget.showLocateButton)
           Positioned(
@@ -610,14 +838,21 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
               ),
             ),
           ),
-        if (widget.showRecenterButton)
-          // One button, bottom-right (same spot showLocateButton would use —
-          // the two are never both on for the same screen today), that does
-          // whichever of "find me" / "back to route" is actually useful
-          // right now: defaults to centering on the rider's live GPS, and
-          // swaps to snapping back to the fitted route once they've panned
-          // far enough away from it that the route itself is no longer the
-          // obviously-useful target.
+        if (widget.showRecenterButton &&
+            (widget.navigationTarget == null || _awayFromRoute))
+          // Bottom-right (same spot showLocateButton would use — the two are
+          // never both on for the same screen). Two different jobs depending
+          // on camera mode:
+          //
+          // - Following a live [navigationTarget] (turn-by-turn): a plain
+          //   "my location" button doesn't make sense here — the camera is
+          //   already auto-following the *driver's* position, not the
+          //   viewer's own GPS, and the next position update would just
+          //   override it anyway. So this only appears once the viewer has
+          //   panned away, and snaps straight back to the live target.
+          // - Otherwise (fitted to [autoFitPins] pins): defaults to centering
+          //   on the viewer's own GPS, and swaps to "back to route" once
+          //   they've panned far enough from the fitted route.
           Positioned(
             bottom: widget.locateButtonBottomOffset,
             right: 12,
@@ -628,10 +863,14 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
                 shape: const CircleBorder(),
                 elevation: 2,
                 child: IconButton(
-                  tooltip: _awayFromRoute ? 'Back to route' : 'My location',
-                  onPressed: _awayFromRoute
-                      ? () => _maybeFitPins(force: true)
-                      : _locateMe,
+                  tooltip: widget.navigationTarget != null
+                      ? 'Recenter'
+                      : (_awayFromRoute ? 'Back to route' : 'My location'),
+                  onPressed: widget.navigationTarget != null
+                      ? () => _animateTo(widget.navigationTarget!)
+                      : (_awayFromRoute
+                          ? () => _maybeFitPins(force: true)
+                          : _locateMe),
                   icon: _locating
                       ? SizedBox(
                           width: 18,
@@ -641,9 +880,11 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
                             color: Theme.of(context).colorScheme.primary,
                           ),
                         )
-                      : Icon(_awayFromRoute
-                          ? Icons.route_rounded
-                          : Icons.my_location_rounded),
+                      : Icon(widget.navigationTarget != null
+                          ? Icons.near_me_rounded
+                          : (_awayFromRoute
+                              ? Icons.route_rounded
+                              : Icons.my_location_rounded)),
                 ),
               ),
             ),
@@ -717,7 +958,8 @@ class _NumberedPin extends StatelessWidget {
             shape: BoxShape.circle,
             border: Border.all(color: Colors.white, width: 2),
             boxShadow: const [
-              BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1)),
+              BoxShadow(
+                  color: Colors.black26, blurRadius: 3, offset: Offset(0, 1)),
             ],
           ),
           child: Text(

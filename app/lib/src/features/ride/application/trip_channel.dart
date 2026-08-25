@@ -21,6 +21,10 @@ class TripChannel {
   WebSocketChannel? _ws;
   final _controller = StreamController<Map<String, dynamic>>.broadcast();
 
+  bool _disposed = false;
+  int _reconnectAttempt = 0;
+  Timer? _reconnectTimer;
+
   /// Every decoded frame (each carries a `type` and a stamped `sender_id`).
   Stream<Map<String, dynamic>> get messages => _controller.stream;
 
@@ -29,11 +33,22 @@ class TripChannel {
 
   Future<void> _connect() async {
     final token = await _tokens.access;
-    if (token == null) return;
+    if (_disposed) return;
+    if (token == null) {
+      // No token yet (e.g. a startup race) rather than a real auth failure
+      // — worth retrying rather than leaving this trip's live tracking/
+      // chat/calls dead for good.
+      _scheduleReconnect();
+      return;
+    }
     final uri =
         Uri.parse('${AppConfig.wsBase}/v1/ws?token=$token&trip=$tripId');
     final ws = WebSocketChannel.connect(uri);
     _ws = ws;
+    // A fresh connection attempt means whatever backoff built up from an
+    // earlier outage no longer applies — the next drop should retry
+    // quickly again, not inherit a stale multi-attempt delay.
+    _reconnectAttempt = 0;
     ws.stream.listen(
       (raw) {
         try {
@@ -41,9 +56,25 @@ class TripChannel {
           _controller.add(m);
         } catch (_) {/* ignore malformed frames */}
       },
-      onError: (_) {},
-      onDone: () {},
+      onError: (_) => _scheduleReconnect(),
+      onDone: _scheduleReconnect,
     );
+  }
+
+  /// Reconnects after a socket drop — an idle timeout from an intermediate
+  /// proxy, a transient network blip, the phone's connectivity flapping —
+  /// none of which should permanently kill live tracking/chat/calls for the
+  /// rest of the trip the way a silent `onDone`/`onError` no-op used to
+  /// (confirmed live: the driver marker would track a handful of GPS pings
+  /// then freeze for good once the socket quietly died). Backoff grows with
+  /// consecutive failures, capped, so a genuinely down backend isn't
+  /// hammered.
+  void _scheduleReconnect() {
+    if (_disposed) return;
+    _reconnectTimer?.cancel();
+    final attempt = _reconnectAttempt++;
+    final delaySecs = attempt >= 4 ? 15 : (1 << attempt); // 1,2,4,8,15,…
+    _reconnectTimer = Timer(Duration(seconds: delaySecs), _connect);
   }
 
   void _send(Map<String, dynamic> m) => _ws?.sink.add(jsonEncode(m));
@@ -55,6 +86,8 @@ class TripChannel {
       _send({'type': 'signal', 'kind': kind, 'data': data});
 
   void dispose() {
+    _disposed = true;
+    _reconnectTimer?.cancel();
     _ws?.sink.close();
     _controller.close();
   }

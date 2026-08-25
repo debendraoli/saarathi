@@ -269,6 +269,31 @@ class Trip {
   /// trip list only (`GET /v1/rides`); not present on a single trip fetch.
   final bool rated;
 
+  /// Only `status` is overridable — the sole use is layering an optimistic
+  /// local status transition over the last-polled `Trip` (see
+  /// `effectiveTripProvider`) while a status-update POST is still in flight
+  /// or retrying; nothing else about a trip changes client-side.
+  Trip copyWith({TripStatus? status}) => Trip(
+        id: id,
+        status: status ?? this.status,
+        origin: origin,
+        dest: dest,
+        finalFare: finalFare,
+        riderId: riderId,
+        driverId: driverId,
+        vehicleClass: vehicleClass,
+        tripType: tripType,
+        distanceKm: distanceKm,
+        createdAt: createdAt,
+        cancelReason: cancelReason,
+        pricingMode: pricingMode,
+        askFare: askFare,
+        searchRadiusKm: searchRadiusKm,
+        paymentMethod: paymentMethod,
+        durationSecs: durationSecs,
+        rated: rated,
+      );
+
   bool get isBidding => pricingMode == 'bid';
 
   bool get noDriverFound =>
@@ -317,6 +342,101 @@ class RouteEta {
   final int durationSecs;
 
   int get durationMins => (durationSecs / 60).ceil();
+}
+
+/// Coarse turn shape for picking a nav-banner icon — mirrors the backend's
+/// `saarathi_core::routing::ManeuverKind` (see that type's own doc for why
+/// this is a small fixed set rather than the routing engine's raw codes).
+enum ManeuverKind {
+  depart,
+  arrive,
+  straight,
+  slightLeft,
+  left,
+  sharpLeft,
+  uturnLeft,
+  slightRight,
+  right,
+  sharpRight,
+  uturnRight,
+  roundabout,
+  merge;
+
+  static ManeuverKind fromWire(String? s) => switch (s) {
+        'depart' => ManeuverKind.depart,
+        'arrive' => ManeuverKind.arrive,
+        'slight_left' => ManeuverKind.slightLeft,
+        'left' => ManeuverKind.left,
+        'sharp_left' => ManeuverKind.sharpLeft,
+        'uturn_left' => ManeuverKind.uturnLeft,
+        'slight_right' => ManeuverKind.slightRight,
+        'right' => ManeuverKind.right,
+        'sharp_right' => ManeuverKind.sharpRight,
+        'uturn_right' => ManeuverKind.uturnRight,
+        'roundabout' => ManeuverKind.roundabout,
+        'merge' => ManeuverKind.merge,
+        _ => ManeuverKind.straight,
+      };
+}
+
+/// One human-readable turn — the backend passes Valhalla's own instruction
+/// text straight through, so this is display-ready as-is.
+class RouteStep {
+  const RouteStep({
+    required this.instruction,
+    this.streetName,
+    required this.distanceKm,
+    required this.durationSecs,
+    required this.maneuver,
+    required this.startIndex,
+  });
+  final String instruction;
+  final String? streetName;
+  final double distanceKm;
+  final int durationSecs;
+  final ManeuverKind maneuver;
+
+  /// Index into the sibling [RoadRoute.geometry] where this step begins.
+  final int startIndex;
+
+  factory RouteStep.fromJson(Map<String, dynamic> j) => RouteStep(
+        instruction: j['instruction'] as String? ?? '',
+        streetName: j['street_name'] as String?,
+        distanceKm: asDouble(j['distance_km']),
+        durationSecs: (j['duration_secs'] as num?)?.toInt() ?? 0,
+        maneuver: ManeuverKind.fromWire(j['maneuver'] as String?),
+        startIndex: (j['start_index'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// Full road route — geometry for the polyline plus turn-by-turn steps for
+/// the fullscreen navigation view. [RouteEta]/the plain geometry list stay
+/// separate, lighter-weight fetches for callers (fare estimate, the regular
+/// trip map) that don't need the maneuver list.
+class RoadRoute {
+  const RoadRoute({
+    required this.geometry,
+    required this.steps,
+    required this.distanceKm,
+    required this.durationSecs,
+  });
+  final List<LatLng> geometry;
+  final List<RouteStep> steps;
+  final double distanceKm;
+  final int durationSecs;
+
+  factory RoadRoute.fromJson(Map<String, dynamic> j) => RoadRoute(
+        geometry: [
+          for (final p in (j['geometry'] as List? ?? const []))
+            LatLng(asDouble((p as Map)['lat']), asDouble(p['lng'])),
+        ],
+        steps: [
+          for (final s in (j['steps'] as List? ?? const []))
+            RouteStep.fromJson(s as Map<String, dynamic>),
+        ],
+        distanceKm: asDouble(j['distance_km']),
+        durationSecs: (j['duration_secs'] as num?)?.toInt() ?? 0,
+      );
 }
 
 /// Self-service lifetime ride stats — `GET /v1/rides/mine/stats`.
@@ -409,7 +529,8 @@ class EarningsBucket {
   final int trips;
 
   factory EarningsBucket.fromJson(Map<String, dynamic> j) => EarningsBucket(
-        start: DateTime.tryParse((j['start'] as String?) ?? '') ?? DateTime.now(),
+        start:
+            DateTime.tryParse((j['start'] as String?) ?? '') ?? DateTime.now(),
         total: asDouble(j['total']),
         trips: (j['trips'] as num?)?.toInt() ?? 0,
       );

@@ -32,8 +32,20 @@ class DriverPosition {
 /// the nav camera to noise.
 const _minHeadingSpeedMs = 1.0;
 
-final tripDriverPositionProvider = StreamProvider.autoDispose
-    .family<DriverPosition, String>((ref, tripId) {
+/// The driver's own live position, sourced directly from local device GPS
+/// (see `_DriverLocationPublisher` in trip_screen.dart) rather than the
+/// round-trip through `POST location` → backend → this trip's WebSocket that
+/// [tripDriverPositionProvider] depends on. A driver navigating their own
+/// trip should see their own marker/camera keep moving from local GPS alone
+/// — offline or not, on a slow connection or not — instead of freezing
+/// whenever that round-trip is disrupted. Only ever set while the driver has
+/// an active trip; `null` otherwise (including for a rider, who has no local
+/// GPS of the *driver* and must always use the WS-fed provider instead).
+final localDriverPositionProvider =
+    StateProvider<DriverPosition?>((ref) => null);
+
+final tripDriverPositionProvider =
+    StreamProvider.autoDispose.family<DriverPosition, String>((ref, tripId) {
   final channel = ref.watch(tripChannelProvider(tripId));
   double? lastHeading;
   return channel.ofType('location').map((m) {

@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/network/api_client.dart';
+import '../../../core/offline/connectivity.dart';
 import '../../../shared/geocode_cache.dart';
 import '../../../shared/resilient_poll.dart';
 import '../../places/data/places_repository.dart';
@@ -56,6 +60,16 @@ final routeGeometryProvider =
       .routeGeometry(q.points, vehicleClass: q.vehicleClass);
 });
 
+/// The full road route (geometry + turn-by-turn steps) for the fullscreen
+/// navigation view — same query shape as [routeGeometryProvider], separate
+/// provider since most callers only need the plain polyline.
+final roadRouteProvider =
+    FutureProvider.autoDispose.family<RoadRoute, RouteQuery>((ref, q) {
+  return ref
+      .watch(rideRepositoryProvider)
+      .roadRoute(q.points, vehicleClass: q.vehicleClass);
+});
+
 /// Two points to route between for a live ETA. Value equality (same shape as
 /// [RouteQuery]) means an unchanged driver position reuses the cached
 /// result instead of re-fetching — no manual throttling needed, the ETA
@@ -107,6 +121,110 @@ final tripStreamProvider =
 final tripStaleProvider = Provider.autoDispose.family<bool, String>((ref, id) {
   return ref.watch(_tripPollProvider(id)).valueOrNull?.stale ?? false;
 });
+
+/// A driver-side status transition (arriving → in_progress → completed)
+/// applied locally the instant the swipe completes, before the `POST status`
+/// that makes it real has even been attempted — see [DriverStatusUpdater].
+/// Cleared automatically once the poll confirms the same status (or a
+/// genuine rejection reverts it), never left to drift from the truth
+/// indefinitely.
+final optimisticTripStatusProvider =
+    StateProvider.family<TripStatus?, String>((ref, tripId) => null);
+
+/// [tripStreamProvider] with any pending [optimisticTripStatusProvider]
+/// layered on top — this, not the bare poll, is what the trip screen should
+/// actually watch, so a driver's own swipe shows up immediately regardless
+/// of how long the real status-update request takes (or whether it's
+/// currently offline and queued in [DriverStatusUpdater]).
+final effectiveTripProvider =
+    Provider.autoDispose.family<AsyncValue<Trip>, String>((ref, tripId) {
+  final base = ref.watch(tripStreamProvider(tripId));
+  final optimistic = ref.watch(optimisticTripStatusProvider(tripId));
+  // The moment the real poll confirms this status, the override has served
+  // its purpose — clearing it here (rather than leaving it to linger until
+  // the *next* optimistic swipe overwrites it) keeps this provider a pure
+  // function of "what's true right now", not "what was ever asserted".
+  ref.listen(tripStreamProvider(tripId), (prev, next) {
+    if (optimistic != null && next.valueOrNull?.status == optimistic) {
+      ref.read(optimisticTripStatusProvider(tripId).notifier).state = null;
+    }
+  });
+  if (optimistic == null) return base;
+  return base.whenData((trip) =>
+      trip.status == optimistic ? trip : trip.copyWith(status: optimistic));
+});
+
+/// Retries a driver's status-update POST (arriving/in_progress/completed)
+/// until it lands — backing [optimisticTripStatusProvider] so "swipe to
+/// start/complete" never blocks on the network. One instance per trip,
+/// created lazily and kept alive for the app's lifetime (a trip's status
+/// only ever advances a handful of times, so there's nothing meaningful to
+/// dispose): unlike a per-swipe-widget retry, this survives the swipe
+/// control itself disappearing the instant the optimistic status takes
+/// effect (e.g. advancing past `inProgress` immediately unmounts the
+/// "complete trip" swipe that triggered the update).
+final driverStatusUpdaterProvider =
+    Provider.family<DriverStatusUpdater, String>((ref, tripId) {
+  return DriverStatusUpdater(ref, tripId);
+});
+
+class DriverStatusUpdater {
+  DriverStatusUpdater(this._ref, this.tripId);
+  final Ref _ref;
+  final String tripId;
+
+  Timer? _retryTimer;
+  ProviderSubscription<AsyncValue<bool>>? _connSub;
+  int _attempt = 0;
+  String? _pending;
+
+  /// Applies [status] optimistically and attempts the real update — call
+  /// this instead of hitting `rideRepositoryProvider.updateStatus` directly
+  /// from a swipe control.
+  void update(String status) {
+    _ref.read(optimisticTripStatusProvider(tripId).notifier).state = TripStatus
+        .values
+        .firstWhere((s) => s.name == status, orElse: () => TripStatus.unknown);
+    _pending = status;
+    _connSub ??= _ref.listen(connectivityProvider, (prev, next) {
+      if ((next.valueOrNull ?? false) && _pending != null) {
+        _retryTimer?.cancel();
+        _attempt = 0;
+        _attemptRun();
+      }
+    });
+    _retryTimer?.cancel();
+    _attempt = 0;
+    _attemptRun();
+  }
+
+  void _scheduleRetry() {
+    _retryTimer?.cancel();
+    final attempt = _attempt++;
+    final delaySecs = attempt >= 4 ? 30 : (1 << (attempt + 1)); // 2,4,8,16,30…
+    _retryTimer = Timer(Duration(seconds: delaySecs), _attemptRun);
+  }
+
+  Future<void> _attemptRun() async {
+    final status = _pending;
+    if (status == null) return;
+    try {
+      await _ref.read(rideRepositoryProvider).updateStatus(tripId, status);
+      _pending = null;
+      _retryTimer?.cancel();
+      _ref.invalidate(_tripPollProvider(tripId));
+    } on ApiException catch (e) {
+      if (e.isNetwork) {
+        _scheduleRetry();
+      } else {
+        _pending = null;
+        _ref.read(optimisticTripStatusProvider(tripId).notifier).state = null;
+      }
+    } catch (_) {
+      _scheduleRetry();
+    }
+  }
+}
 
 /// Restarts the actual poll loop after it's given up (past
 /// `maxInitialFailures` with no value ever fetched) — invalidating
@@ -166,8 +284,8 @@ final driverTodayGoalsProvider = FutureProvider.autoDispose<DriverGoals>((ref) {
 /// Stats, driver mode). Keyed by period string so switching the segmented
 /// control between Day/Week/Month is just watching a different family
 /// member — no manual refetch/loading-state juggling needed.
-final driverEarningsProvider = FutureProvider.autoDispose
-    .family<DriverEarnings, String>((ref, period) {
+final driverEarningsProvider =
+    FutureProvider.autoDispose.family<DriverEarnings, String>((ref, period) {
   return ref.watch(rideRepositoryProvider).driverEarnings(period);
 });
 

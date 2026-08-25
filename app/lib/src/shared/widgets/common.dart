@@ -121,3 +121,69 @@ class StaleBanner extends StatelessWidget {
     );
   }
 }
+
+/// Shown whenever the device has no network at all — distinct from
+/// [StaleBanner]'s "a background poll failed" case, this is for screens
+/// where connectivity itself (not just one poll) affects what's on screen:
+/// the active-trip map's live position/route can silently go stale with no
+/// network to refresh them. A solid, saturated bar (not the pale
+/// `errorContainer` tint the first version used, which read as barely-there
+/// sitting over a busy map) with a pulsing icon — this needs to actually
+/// grab attention, not blend into the background the way a quiet status
+/// line can. Reuses the same generic offline text home_shell already shows
+/// elsewhere, so "offline" reads consistently app-wide.
+class OfflineBanner extends StatefulWidget {
+  const OfflineBanner({super.key});
+
+  @override
+  State<OfflineBanner> createState() => _OfflineBannerState();
+}
+
+class _OfflineBannerState extends State<OfflineBanner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+  late final Animation<double> _scale =
+      Tween<double>(begin: 0.85, end: 1.15).animate(
+    CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
+  );
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: scheme.error,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ScaleTransition(
+            scale: _scale,
+            child:
+                Icon(Icons.wifi_off_rounded, size: 18, color: scheme.onError),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              AppL10n.of(context).offlineBanner,
+              style: TextStyle(
+                color: scheme.onError,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

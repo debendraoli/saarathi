@@ -128,6 +128,28 @@ class RideRepository {
     ];
   }
 
+  /// Full road route (geometry + turn-by-turn steps) for the fullscreen
+  /// navigation view — the richer sibling of [routeGeometry], which discards
+  /// everything but the polyline for callers that don't need maneuvers.
+  Future<RoadRoute> roadRoute(
+    List<LatLng> points, {
+    String vehicleClass = 'two_wheeler',
+  }) async {
+    final res = await _api.post(
+      '/v1/rides/route',
+      body: {
+        'origin': {'lat': points.first.latitude, 'lng': points.first.longitude},
+        'dest': {'lat': points.last.latitude, 'lng': points.last.longitude},
+        'stops': [
+          for (final p in points.sublist(1, points.length - 1))
+            {'lat': p.latitude, 'lng': p.longitude},
+        ],
+        'vehicle_class': vehicleClass,
+      },
+    );
+    return RoadRoute.fromJson(res as Map<String, dynamic>);
+  }
+
   /// Distance + duration between two points — a thin sibling to
   /// [routeGeometry] hitting the same endpoint, for a live ETA rather than
   /// the map polyline (which discards everything but `geometry`).

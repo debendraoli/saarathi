@@ -26,7 +26,9 @@ import '../../features/support/presentation/support_chat_screen.dart';
 import '../../features/home/presentation/home_shell.dart';
 import '../../features/marketplace/domain/models.dart';
 import '../../features/marketplace/presentation/checkout_screen.dart';
+import '../../features/marketplace/presentation/item_search_screen.dart';
 import '../../features/marketplace/presentation/marketplace_screen.dart';
+import '../../features/wallet/presentation/topup_screen.dart';
 import '../../features/marketplace/presentation/merchant_screen.dart';
 import '../../features/marketplace/presentation/order_screen.dart';
 import '../../features/merchant/presentation/merchant_dashboard_screen.dart';
@@ -43,6 +45,7 @@ import '../../features/places/presentation/saved_places_screen.dart';
 import '../../features/wallet/presentation/wallet_screen.dart';
 import '../../features/ride/presentation/driver_earnings_screen.dart';
 import '../../features/ride/presentation/rider_stats_screen.dart';
+import '../../features/ride/presentation/navigation_screen.dart';
 import '../../features/ride/presentation/trip_screen.dart';
 import '../../features/ride/presentation/where_to_screen.dart';
 import '../prefs.dart';
@@ -53,10 +56,12 @@ class Routes {
   static const login = '/login';
   static const otp = '/login/otp';
   static const home = '/home';
+  static const menu = '/menu';
   static const activity = '/activity';
   static const account = '/account';
   static const whereTo = '/ride/where-to';
   static const trip = '/ride/trip'; // /ride/trip/:id
+  static const tripNavigate = '/ride/trip'; // /ride/trip/:id/navigate
   static const becomeDriver = '/driver/register';
   static const kyc = '/driver/kyc';
   static const chat = '/ride/chat';
@@ -84,6 +89,8 @@ class Routes {
   static const placesHub = '/places';
   static const contribute = '/places/contribute';
   static const myContributions = '/places/mine';
+  static const itemSearch = '/marketplace/search';
+  static const topup = '/wallet/topup';
 }
 
 /// One consistent motion language for every screen transition (Material's
@@ -176,13 +183,23 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (_, state) => _page(const HomeShell(), key: state.pageKey),
       ),
       GoRoute(
+        // A proper go_router route (not a raw `Navigator.push`/
+        // `MaterialPageRoute`) — same reasoning as the comment on the
+        // fullscreen nav route below: mixing an imperative push onto
+        // go_router's own Navigator corrupts its route-match bookkeeping
+        // (confirmed live — every screen reached through the hamburger menu
+        // had `context.canPop()` incorrectly report false, so their own
+        // correct "pop if possible, else go home" logic always took the
+        // "go home" branch, no matter how deep the actual back-stack was).
+        path: Routes.menu,
+        pageBuilder: (_, state) =>
+            _page(const MenuScreen(), key: state.pageKey),
+      ),
+      GoRoute(
         path: Routes.activity,
         pageBuilder: (context, state) => _page(
           Scaffold(
-            appBar: AppBar(
-              title: Text(AppL10n.of(context).tabActivity),
-              leading: BackButton(onPressed: () => context.go(Routes.home)),
-            ),
+            appBar: AppBar(title: Text(AppL10n.of(context).tabActivity)),
             body: const ActivityTab(),
           ),
           key: state.pageKey,
@@ -225,6 +242,36 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           TripScreen(tripId: state.pathParameters['id']!),
           key: state.pageKey,
         ),
+      ),
+      GoRoute(
+        // A proper go_router route (not a raw `Navigator.push`/
+        // `MaterialPageRoute`) deliberately — mixing an imperative push onto
+        // go_router's own Navigator with its declarative page-list
+        // reconciliation is exactly what produced a live, reproducible
+        // `_dependents.isEmpty` framework crash on the way back out of this
+        // screen (go_router losing track of an untracked route it didn't
+        // put there itself). Routed the normal way, it's just another page.
+        path: '${Routes.tripNavigate}/:id/navigate',
+        pageBuilder: (_, state) {
+          final args = state.extra as NavigationScreenArgs;
+          // No fade/slide transition here (unlike `_page`) — this route's
+          // fullscreen map means many more simultaneously-compositing tile
+          // layers than any other screen, and layering that under a
+          // FadeTransition/SlideTransition (Impeller's Vulkan backend, per
+          // the "Using the Impeller rendering backend" log line) is exactly
+          // when flutter_map was reproduced leaving most of its viewport
+          // unpainted — only ever the small region it managed to render
+          // before/during the transition. A plain cut avoids the
+          // transition-time compositing entirely.
+          return NoTransitionPage(
+            key: state.pageKey,
+            child: NavigationScreen(
+              tripId: state.pathParameters['id']!,
+              target: args.target,
+              vehicleClass: args.vehicleClass,
+            ),
+          );
+        },
       ),
       GoRoute(
         path: Routes.becomeDriver,
@@ -284,6 +331,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: Routes.wallet,
         pageBuilder: (_, state) =>
             _page(const WalletScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.topup,
+        pageBuilder: (_, state) =>
+            _page(const TopupScreen(), key: state.pageKey),
       ),
       GoRoute(
         path: Routes.myStats,
@@ -380,6 +432,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: Routes.myContributions,
         pageBuilder: (_, state) =>
             _page(const MyContributionsScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.itemSearch,
+        pageBuilder: (_, state) {
+          final args = state.extra as ItemSearchArgs?;
+          return _page(
+            ItemSearchScreen(
+              vertical: args?.vertical,
+              initialQuery: args?.initialQuery,
+            ),
+            key: state.pageKey,
+          );
+        },
       ),
     ],
     // Android's Flutter embedding independently pushes an incoming
