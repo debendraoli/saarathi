@@ -83,15 +83,6 @@ class AccountTab extends ConsumerWidget {
             onTap: () => context.push(Routes.savedPlaces),
           ),
         ),
-        const SizedBox(height: 16),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.settings_rounded),
-            title: Text(l.settingsTitle),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => context.push(Routes.settings),
-          ),
-        ),
         const SizedBox(height: 24),
         OutlinedButton.icon(
           onPressed: () {

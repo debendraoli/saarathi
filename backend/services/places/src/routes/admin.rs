@@ -165,7 +165,7 @@ async fn approve(
     // alerts) become findable via search/reverse-geocode immediately —
     // same best-effort convention as the badge check above.
     if points::is_navigable(&category) {
-        crate::pelias_index::index_place(&st.config.pelias_es_url, id, &category, &name, lat, lng)
+        saarathi_core::pelias_index::index_place(&st.config.pelias_es_url, id, &category, &name, lat, lng)
             .await;
     }
 

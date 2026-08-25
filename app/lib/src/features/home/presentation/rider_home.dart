@@ -7,7 +7,6 @@ import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../campaigns/data/campaigns_repository.dart';
-import '../../marketplace/data/marketplace_repository.dart';
 import '../../merchant/data/merchant_repository.dart';
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
@@ -63,7 +62,6 @@ class RiderHome extends ConsumerWidget {
       padding: const EdgeInsets.all(16),
       children: [
         const _ActiveTripCard(),
-        const _PendingReviewsPrompt(),
         _WhereToCard(onTap: onWhereToTap, locked: hasActiveRide),
         if (!hasActiveRide) const _RecentDropoffs(),
         const SizedBox(height: 20),
@@ -447,74 +445,6 @@ class _ActiveTripCard extends ConsumerWidget {
               color: scheme.onPrimaryContainer),
           onTap: () => context.push('${Routes.trip}/${active.id}'),
         ),
-      ),
-    );
-  }
-}
-
-/// Set once a dialog has been shown so it doesn't reappear on every rebuild
-/// of the home screen — reset naturally on app restart (session-scoped).
-bool _pendingReviewsPromptShown = false;
-
-/// Passive nudge to rate completed rides/deliveries: renders nothing itself,
-/// just pops a one-time dialog (per app session) the first time it notices
-/// something unrated, and links through to Activity to act on it.
-class _PendingReviewsPrompt extends ConsumerStatefulWidget {
-  const _PendingReviewsPrompt();
-
-  @override
-  ConsumerState<_PendingReviewsPrompt> createState() =>
-      _PendingReviewsPromptState();
-}
-
-class _PendingReviewsPromptState extends ConsumerState<_PendingReviewsPrompt> {
-  @override
-  Widget build(BuildContext context) {
-    final trips = ref.watch(myTripsProvider).valueOrNull ?? const [];
-    final orders = ref.watch(myOrdersProvider).valueOrNull ?? const [];
-    // Past this age, treat it as a rating the rider has chosen to skip, not
-    // one they forgot about — re-nagging on every app open for something
-    // from days ago just trains people to dismiss the dialog unread.
-    final cutoff = DateTime.now().subtract(const Duration(hours: 12));
-    bool recent(DateTime? t) => t != null && t.isAfter(cutoff);
-    final pendingTrips = trips.where((t) =>
-        t.status == TripStatus.completed && !t.rated && recent(t.createdAt));
-    final pendingOrders = orders.where((o) =>
-        o.status == 'delivered' &&
-        o.tripId != null &&
-        !o.rated &&
-        recent(o.createdAt));
-    final count = pendingTrips.length + pendingOrders.length;
-
-    if (count > 0 && !_pendingReviewsPromptShown) {
-      _pendingReviewsPromptShown = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _showPrompt(count);
-      });
-    }
-    return const SizedBox.shrink();
-  }
-
-  void _showPrompt(int count) {
-    final l = AppL10n.of(context);
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(l.pendingReviewsBanner(count)),
-        content: Text(l.pendingReviewsPromptBody),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(l.reviewsPromptLater),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              context.push(Routes.activity);
-            },
-            child: Text(l.reviewsPromptGo),
-          ),
-        ],
       ),
     );
   }

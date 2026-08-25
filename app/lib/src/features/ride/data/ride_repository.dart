@@ -1,9 +1,14 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
 import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/notifications/notification_service.dart';
 import '../../../core/offline/json_cache.dart';
 import '../../../core/prefs.dart';
 import '../domain/models.dart';
@@ -164,12 +169,53 @@ class RideRepository {
     return DriverEarnings.fromJson(res);
   }
 
-  Future<List<Trip>> myTrips() => cacheThroughList(
-        prefs: _prefs,
-        key: 'cache.rides.mytrips',
-        fetch: () => _api.get('/v1/rides'),
-        parse: Trip.fromJson,
-      );
+  Future<List<Trip>> myTrips() async {
+    final trips = await cacheThroughList(
+      prefs: _prefs,
+      key: 'cache.rides.mytrips',
+      fetch: () => _api.get('/v1/rides'),
+      parse: Trip.fromJson,
+    );
+    // No dedicated poll loop for rides (unlike delivery orders) — this is
+    // called every time Home/Activity re-fetches, so the schedule call
+    // itself has to be the dedup point instead of a status-transition
+    // check; the persisted per-trip flag inside it does that.
+    for (final t in trips) {
+      unawaited(_maybeScheduleReviewReminder(t));
+    }
+    return trips;
+  }
+
+  static int _reviewReminderId(String tripId) => tripId.hashCode & 0x7fffffff;
+
+  /// Schedules the "how was your ride?" nudge ~20 minutes after a trip is
+  /// first observed as completed — replaces the old in-app popup (which
+  /// interrupted whatever the rider was doing on Home) with a normal
+  /// notification they can act on whenever suits them. Deduped per trip via
+  /// a persisted flag, same pattern as the merchant order review reminder.
+  Future<void> _maybeScheduleReviewReminder(Trip trip) async {
+    if (trip.status != TripStatus.completed || trip.rated) return;
+    final key = 'reminder.ride.${trip.id}';
+    if (_prefs.getBool(key) ?? false) return;
+    await _prefs.setBool(key, true);
+    final localeCode = _prefs.getString('saarathi.locale');
+    final locale = localeCode != null
+        ? ui.Locale(localeCode)
+        : ui.PlatformDispatcher.instance.locale;
+    final l = lookupAppL10n(locale);
+    await NotificationService.instance.scheduleDelayed(
+      id: _reviewReminderId(trip.id),
+      title: l.rideReviewReminderTitle,
+      body: l.rideReviewReminderBody,
+      delay: const Duration(minutes: 20),
+      link: 'saarathi://trip/${trip.id}',
+    );
+  }
+
+  /// Cancels a pending ride-review reminder — called once the rider rates
+  /// the driver before the delay is up, since the nudge is now moot.
+  Future<void> cancelReviewReminder(String tripId) =>
+      NotificationService.instance.cancel(_reviewReminderId(tripId));
 
   Future<void> cancel(String id, {String? reason}) => _api.post(
         '/v1/rides/$id/status',
@@ -198,11 +244,13 @@ class RideRepository {
         if (speed != null) 'speed': speed,
       });
 
-  Future<void> rate(String id, int stars, {List<String> tags = const []}) =>
-      _api.post(
-        '/v1/rides/$id/rate',
-        body: {'stars': stars, 'tags': tags},
-      );
+  Future<void> rate(String id, int stars, {List<String> tags = const []}) async {
+    await _api.post(
+      '/v1/rides/$id/rate',
+      body: {'stars': stars, 'tags': tags},
+    );
+    await cancelReviewReminder(id);
+  }
 
   Future<void> sos(String id, {double? lat, double? lng, String? note}) =>
       _api.post(

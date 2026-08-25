@@ -26,6 +26,11 @@ pub struct Config {
     pub nats_url: String,
     /// Where store/menu-item photos live on disk (dev only — see `store.rs`).
     pub merchant_storage_dir: String,
+    /// Pelias/Elasticsearch base URL — an approved store gets indexed here
+    /// the same way an approved place-contribution does (see
+    /// `saarathi_core::pelias_index`), so it's immediately findable via
+    /// address search.
+    pub pelias_es_url: String,
 }
 
 impl Config {
@@ -49,6 +54,8 @@ impl Config {
             nats_url: opt("NATS_URL").unwrap_or_else(|| "nats://localhost:4222".into()),
             merchant_storage_dir: opt("MERCHANT_STORAGE_DIR")
                 .unwrap_or_else(|| "./.data/merchant".into()),
+            pelias_es_url: opt("PELIAS_ES_URL")
+                .unwrap_or_else(|| "http://pelias-opensearch:9200".into()),
         })
     }
 }

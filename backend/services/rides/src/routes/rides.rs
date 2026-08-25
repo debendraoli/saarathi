@@ -178,6 +178,9 @@ async fn route_geometry(
     }))
 }
 
+const MAX_RIDER_CANCELS_PER_WINDOW: i64 = 3;
+const RIDER_CANCEL_WINDOW_HOURS: i32 = 24;
+
 async fn create(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
@@ -228,6 +231,32 @@ async fn create(
         return Err(AppError::conflict(
             ErrorCode::Conflict,
             format!("you already have an active ride ({trip_id}) — finish or cancel it first"),
+        ));
+    }
+
+    // Rider-side mirror of the driver cancellation-rate limit in
+    // dispatch.rs::accept_offer — a cooldown on booking, not a ban, once a
+    // rider has cancelled too many *matched* rides in a short window. Only
+    // counts cancellations after a driver was already assigned
+    // (driver_id IS NOT NULL): backing out while still searching costs
+    // nobody real time, but cancelling on an en-route driver does, which is
+    // the behaviour this actually needs to discourage.
+    let recent_cancels: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM trips \
+         WHERE rider_id = $1 AND status = 'cancelled' AND cancelled_by_role = 'rider' \
+           AND driver_id IS NOT NULL \
+           AND cancelled_at > now() - make_interval(hours => $2)",
+    )
+    .bind(claims.sub)
+    .bind(RIDER_CANCEL_WINDOW_HOURS)
+    .fetch_one(&st.db)
+    .await?;
+    if recent_cancels >= MAX_RIDER_CANCELS_PER_WINDOW {
+        return Err(AppError::bad(
+            ErrorCode::TooManyCancellations,
+            format!(
+                "too many cancelled rides in the last {RIDER_CANCEL_WINDOW_HOURS}h — try again later"
+            ),
         ));
     }
 

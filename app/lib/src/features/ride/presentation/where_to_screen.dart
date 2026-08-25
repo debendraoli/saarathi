@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,6 +22,7 @@ import '../../delivery/domain/models.dart' as delivery;
 import '../../places/data/maps_url_parser.dart' show coordLabel;
 import '../../places/data/places_repository.dart';
 import '../../places/presentation/address_search_screen.dart';
+import '../../../shared/contact_picker.dart';
 import '../../wallet/data/wallet_repository.dart';
 import '../application/ride_controller.dart';
 import '../data/ride_repository.dart';
@@ -1199,7 +1199,7 @@ void _showRequestDriverSheet(
                     icon: const Icon(Icons.contacts_rounded),
                     tooltip: l.pickFromContacts,
                     onPressed: () async {
-                      final phone = await _pickContactPhone();
+                      final phone = await pickContactPhone();
                       if (phone != null) {
                         controller.text = phone;
                         setSheetState(() {});
@@ -1250,26 +1250,6 @@ void _showRequestDriverSheet(
       ),
     ),
   );
-}
-
-/// Opens the system contact picker and returns the first phone number found,
-/// digits-and-leading-plus only. Null if permission is denied, the user
-/// backs out, or the picked contact has no phone number.
-Future<String?> _pickContactPhone() async {
-  if (!await FlutterContacts.permissions.has(PermissionType.read)) {
-    final status = await FlutterContacts.permissions.request(
-      PermissionType.read,
-    );
-    if (status != PermissionStatus.granted &&
-        status != PermissionStatus.limited) {
-      return null;
-    }
-  }
-  final contact = await FlutterContacts.native.showPicker(
-    properties: {ContactProperty.phone},
-  );
-  if (contact == null || contact.phones.isEmpty) return null;
-  return contact.phones.first.number.replaceAll(RegExp(r'[^\d+]'), '');
 }
 
 class _FareStepperSkeleton extends StatelessWidget {

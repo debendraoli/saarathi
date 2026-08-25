@@ -124,18 +124,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         actions: [
           if (showModeSwitch) _ModeSwitch(mode: auth.mode),
           const _NotificationBell(),
-          Builder(
-            builder: (context) => IconButton(
-              icon: const Icon(Icons.menu_rounded),
-              onPressed: () {
-                Haptics.tap();
-                Scaffold.of(context).openEndDrawer();
-              },
-            ),
+          IconButton(
+            icon: const Icon(Icons.menu_rounded),
+            onPressed: () {
+              Haptics.tap();
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const _MenuScreen()),
+              );
+            },
           ),
         ],
       ),
-      endDrawer: const _MenuDrawer(),
       // Bottom-only: the AppBar already accounts for the top inset. Neither
       // RiderHome nor DriverHome's scrollable content did anything for the
       // bottom system nav bar on its own, so the last card/button in either
@@ -159,10 +158,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 }
 
-/// The top-right hamburger menu: user identity up top, then the screens that
-/// used to be bottom tabs, with room to grow as more sections are added.
-class _MenuDrawer extends ConsumerWidget {
-  const _MenuDrawer();
+/// The hamburger menu, as a full screen (not a partial-width slide-over) —
+/// user identity up top, then the screens that used to be bottom tabs, with
+/// room to grow as more sections are added.
+class _MenuScreen extends ConsumerWidget {
+  const _MenuScreen();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -176,15 +176,20 @@ class _MenuDrawer extends ConsumerWidget {
       context.push(route);
     }
 
-    return Drawer(
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Scaffold(
+      body: SafeArea(
+        child: ListView(
           children: [
-            DrawerHeader(
-              decoration: BoxDecoration(color: scheme.primaryContainer),
+            Container(
+              color: scheme.primaryContainer,
+              padding: const EdgeInsets.fromLTRB(12, 8, 16, 20),
               child: Row(
                 children: [
+                  IconButton(
+                    icon: Icon(Icons.close_rounded, color: scheme.onPrimaryContainer),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  const SizedBox(width: 6),
                   CircleAvatar(
                     radius: 26,
                     backgroundColor: scheme.primary,
@@ -241,6 +246,22 @@ class _MenuDrawer extends ConsumerWidget {
               leading: const Icon(Icons.add_location_alt_rounded),
               title: Text(l.placesHubTitle),
               onTap: () => go(Routes.placesHub),
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_rounded),
+              title: Text(l.settingsTitle),
+              onTap: () => go(Routes.settings),
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.shield_rounded),
+              title: Text(l.safetyTitle),
+              onTap: () => go(Routes.safety),
+            ),
+            ListTile(
+              leading: const Icon(Icons.support_agent_rounded),
+              title: Text(l.supportTitle),
+              onTap: () => go(Routes.support),
             ),
           ],
         ),

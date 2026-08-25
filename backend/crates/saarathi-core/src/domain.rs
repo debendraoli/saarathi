@@ -53,9 +53,10 @@ pub mod notif {
     pub const TRANSACTIONAL: &str = "transactional";
     pub const COMPLIANCE: &str = "compliance";
     pub const MARKETING: &str = "marketing";
+    pub const SUPPORT: &str = "support";
 
     /// Classes that escalate past the inbox to push/SMS.
-    pub const CRITICAL: [&str; 3] = [SAFETY, TRANSACTIONAL, COMPLIANCE];
+    pub const CRITICAL: [&str; 4] = [SAFETY, TRANSACTIONAL, COMPLIANCE, SUPPORT];
 }
 
 /// Partner-ledger movement kinds (`partner_ledger.kind`).

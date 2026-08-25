@@ -1806,22 +1806,30 @@ async fn approve_merchant(
     // Guarded on the current status so two staff acting on the same
     // application at once can't clobber each other — the loser's WHERE
     // matches nothing (same pattern as driver KYC approval).
-    let updated: Option<(Option<Uuid>,)> = sqlx::query_as(
+    let updated: Option<(Option<Uuid>, String, String, f64, f64)> = sqlx::query_as(
         "UPDATE merchants SET status = 'approved', approved_at = now(), reviewed_at = now(), \
          reviewed_by = $2, rejection_reason = NULL \
-         WHERE id = $1 AND status = 'pending' RETURNING owner_user_id",
+         WHERE id = $1 AND status = 'pending' \
+         RETURNING owner_user_id, name, vertical, lat, lng",
     )
     .bind(id)
     .bind(claims.sub)
     .fetch_optional(&st.db)
     .await?;
-    let Some((owner,)) = updated else {
+    let Some((owner, name, vertical, lat, lng)) = updated else {
         return Err(AppError::Coded(
             StatusCode::CONFLICT,
             ErrorCode::Conflict,
             "store has already been reviewed".into(),
         ));
     };
+
+    // Findable via address search immediately, same as an approved
+    // place-contribution — best-effort, never blocks approval on a Pelias
+    // hiccup (see saarathi_core::pelias_index's own doc comment).
+    saarathi_core::pelias_index::index_place(&st.config.pelias_es_url, id, &vertical, &name, lat, lng)
+        .await;
+
     if let Some(owner) = owner {
         crate::notify::send(
             &st.nats,

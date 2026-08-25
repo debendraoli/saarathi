@@ -20,6 +20,9 @@ import '../../features/driver/presentation/kyc_documents_screen.dart';
 import '../../features/home/presentation/account_tab.dart';
 import '../../features/home/presentation/activity_tab.dart';
 import '../../features/home/presentation/settings_screen.dart';
+import '../../features/safety/presentation/safety_info_screen.dart';
+import '../../features/safety/presentation/trusted_contacts_screen.dart';
+import '../../features/support/presentation/support_chat_screen.dart';
 import '../../features/home/presentation/home_shell.dart';
 import '../../features/marketplace/domain/models.dart';
 import '../../features/marketplace/presentation/checkout_screen.dart';
@@ -61,6 +64,9 @@ class Routes {
   static const notifications = '/notifications';
   static const savedPlaces = '/places/saved';
   static const settings = '/settings';
+  static const safety = '/safety';
+  static const trustedContacts = '/safety/trusted-contacts';
+  static const support = '/support';
   static const wallet = '/wallet';
   static const myStats = '/me/stats';
   static const driverEarnings = '/driver/earnings';
@@ -258,6 +264,21 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: Routes.settings,
         pageBuilder: (_, state) =>
             _page(const SettingsScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.safety,
+        pageBuilder: (_, state) =>
+            _page(const SafetyInfoScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.trustedContacts,
+        pageBuilder: (_, state) =>
+            _page(const TrustedContactsScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.support,
+        pageBuilder: (_, state) =>
+            _page(const SupportChatScreen(), key: state.pageKey),
       ),
       GoRoute(
         path: Routes.wallet,

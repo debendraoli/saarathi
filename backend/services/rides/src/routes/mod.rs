@@ -17,6 +17,8 @@ pub mod rates;
 pub mod rides;
 pub mod rtc;
 pub mod safety;
+pub mod self_service;
+pub mod support;
 pub mod surge;
 pub mod tracking;
 
@@ -46,6 +48,8 @@ pub fn router(state: AppState) -> Router {
         .merge(metrics::routes())
         .merge(tracking::routes())
         .merge(safety::routes())
+        .merge(self_service::routes())
+        .merge(support::routes())
         .merge(feedback::routes())
         .merge(analytics::routes())
         .merge(credits::routes())

@@ -11,6 +11,7 @@ import {
     DollarSign,
     Flag,
     HeartPulse,
+    LifeBuoy,
     LogOut,
     MapPinned,
     MessageSquare,
@@ -33,7 +34,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
-type CountKey = "kyc" | "sos" | "reports" | "complaints" | "places";
+type CountKey = "kyc" | "sos" | "reports" | "complaints" | "places" | "support";
 type NavItem = {
   href: string;
   label: string;
@@ -58,6 +59,7 @@ const NAV: NavGroup[] = [
       { href: "/sos", label: "SOS Console", icon: Siren, countKey: "sos" },
       { href: "/reports", label: "Reports", icon: Flag, countKey: "reports" },
       { href: "/complaints", label: "Complaints", icon: MessageSquare, countKey: "complaints" },
+      { href: "/support", label: "Support", icon: LifeBuoy, countKey: "support" },
     ],
   },
   {
@@ -169,20 +171,22 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     if (!ready) return;
     let active = true;
     async function loadCounts() {
-      const [kyc, sos, reports, complaints, placesQueue] = await Promise.all([
+      const [kyc, sos, reports, complaints, placesQueue, supportThreads] = await Promise.all([
         api.listDrivers("queue").catch(() => []),
         rides.listSos().catch(() => []),
         rides.listReports().catch(() => []),
         rides.cancellations().catch(() => []),
         places.queue("pending").catch(() => []),
+        rides.listSupportThreads().catch(() => []),
       ]);
       if (!active) return;
       setCounts({
         kyc: kyc.length,
         sos: sos.length,
         reports: reports.filter((r) => r.status === "open").length,
-        complaints: complaints.length,
+        complaints: complaints.filter((c) => !c.reviewed).length,
         places: placesQueue.length,
+        support: supportThreads.filter((t) => t.unread > 0).length,
       });
     }
     loadCounts();

@@ -302,6 +302,10 @@ services:
       ROUTING_SERVICE_URL: http://routing:8084
       RIDES_SERVICE_URL: http://rides:8082
       MERCHANT_STORAGE_DIR: /data/merchant
+      # Only reachable when the `routing` profile is also up — a best-effort
+      # write, see saarathi_core::pelias_index; harmless if this host doesn't
+      # resolve.
+      PELIAS_ES_URL: http://pelias-opensearch:9200
     ports:
       - "8088:8088"
     volumes:

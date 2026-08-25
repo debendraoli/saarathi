@@ -48,6 +48,8 @@ http:
         || PathPrefix(`/v1/admin/rates`)
         || PathPrefix(`/v1/admin/sos`)
         || PathPrefix(`/v1/admin/surge`) || PathPrefix(`/v1/admin/trips`)
+        || PathPrefix(`/v1/trusted-contacts`) || PathPrefix(`/v1/ride-index`)
+        || PathPrefix(`/v1/support`) || PathPrefix(`/v1/admin/support`)
 
     notify:
       entryPoints: ["web"]

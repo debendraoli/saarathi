@@ -17,6 +17,8 @@ String? routeForDeepLink(Uri uri) {
     uri.host,
     ...uri.pathSegments,
   ].where((s) => s.isNotEmpty).toList();
+  if (segments.isEmpty) return null;
+  if (segments[0] == 'support') return Routes.support;
   if (segments.length < 2) return null;
   final id = segments[1];
   switch (segments[0]) {

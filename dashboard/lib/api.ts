@@ -529,6 +529,16 @@ export const rides = {
       body: JSON.stringify({ note }),
     }),
 
+  // Support chat
+  listSupportThreads: () => ridesRequest<SupportThread[]>("/v1/admin/support/threads"),
+  supportThreadMessages: (userId: string) =>
+    ridesRequest<SupportMessage[]>(`/v1/admin/support/threads/${userId}/messages`),
+  replySupportThread: (userId: string, body: string) =>
+    ridesRequest<SupportMessage>(`/v1/admin/support/threads/${userId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    }),
+
   // Reports
   listReports: () => ridesRequest<Report[]>("/v1/admin/reports"),
   resolveReport: (id: string, status: string, resolution?: string) =>
@@ -918,6 +928,23 @@ export interface SosIncident {
   lng: number | null;
   status: string;
   note: string | null;
+  created_at: string;
+}
+
+export interface SupportThread {
+  user_id: string;
+  user_name: string | null;
+  user_phone: string | null;
+  last_message: string;
+  last_at: string;
+  unread: number;
+}
+
+export interface SupportMessage {
+  id: string;
+  sender_role: "user" | "staff";
+  body: string;
+  trip_id: string | null;
   created_at: string;
 }
 
