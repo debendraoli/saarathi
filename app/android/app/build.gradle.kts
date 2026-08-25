@@ -81,4 +81,9 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // Lets MainActivity customize the splash's exit animation (a real fade
+    // + scale-out on the icon as it dismisses) via the system Splash Screen
+    // API's compat shim — no custom Flutter screen needed, stays within the
+    // existing single-screen splash.
+    implementation("androidx.core:core-splashscreen:1.0.1")
 }

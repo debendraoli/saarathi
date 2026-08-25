@@ -2,13 +2,13 @@
 <resources>
     <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is on -->
     <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <!-- See values-v31/styles.xml — manually added branding-image slot. -->
         <item name="android:forceDarkAllowed">false</item>
         <item name="android:windowFullscreen">false</item>
         <item name="android:windowDrawsSystemBarBackgrounds">false</item>
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
         <item name="android:windowSplashScreenBackground">#FFFFFF</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/android12splash</item>
-        <!-- See values-v31/styles.xml — manually added branding-image slot. -->
         <item name="android:windowSplashScreenBrandingImage">@drawable/splash_wordmark</item>
     </style>
     <!-- Theme applied to the Android Window as soon as the process has started.

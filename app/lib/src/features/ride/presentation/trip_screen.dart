@@ -91,7 +91,7 @@ class TripScreen extends ConsumerWidget {
                   final fixedPins = [
                     MapPin(
                       trip.origin,
-                      Icons.waving_hand_rounded,
+                      Icons.emoji_people_rounded,
                       Theme.of(context).colorScheme.primary,
                     ),
                     MapPin(
@@ -614,7 +614,7 @@ class RouteSummary extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _RoutePoint(
-          icon: Icons.waving_hand_rounded,
+          icon: Icons.emoji_people_rounded,
           color: scheme.primary,
           value: pickup,
         ),
