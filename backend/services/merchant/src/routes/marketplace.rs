@@ -447,19 +447,21 @@ async fn place_order(
     .map_err(AppError::Other)?;
     tx.commit().await?;
 
-    let owner_id: Uuid = sqlx::query_scalar("SELECT owner_user_id FROM merchants WHERE id = $1")
+    let owner_id: Option<Uuid> = sqlx::query_scalar("SELECT owner_user_id FROM merchants WHERE id = $1")
         .bind(body.merchant_id)
         .fetch_one(&st.db)
         .await?;
-    crate::notify::send(
-        &st.nats,
-        owner_id,
-        saarathi_core::domain::notif::TRANSACTIONAL,
-        "New order arrived",
-        &format!("A new order (NPR {}) just came in.", total.round_dp(0)),
-        Some(format!("saarathi://order/{order_id}")),
-    )
-    .await;
+    if let Some(owner_id) = owner_id {
+        crate::notify::send(
+            &st.nats,
+            owner_id,
+            saarathi_core::domain::notif::TRANSACTIONAL,
+            "New order arrived",
+            &format!("A new order (NPR {}) just came in.", total.round_dp(0)),
+            Some(format!("saarathi://order/{order_id}")),
+        )
+        .await;
+    }
 
     order_json(&st, order_id, claims.sub, false).await
 }
@@ -753,8 +755,9 @@ async fn notify_status_change(
     let link = Some(format!("saarathi://order/{order_id}"));
     if !changed_by_merchant {
         // Only reachable for a customer-initiated cancel (see the guard above).
-        let Ok(owner_id) =
-            sqlx::query_scalar::<_, Uuid>("SELECT owner_user_id FROM merchants WHERE id = $1")
+        // An unowned store (no merchant account) has nobody to notify.
+        let Ok(Some(owner_id)) =
+            sqlx::query_scalar::<_, Option<Uuid>>("SELECT owner_user_id FROM merchants WHERE id = $1")
                 .bind(merchant_id)
                 .fetch_one(&st.db)
                 .await
