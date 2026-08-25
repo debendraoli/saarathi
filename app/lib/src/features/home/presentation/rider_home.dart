@@ -40,7 +40,6 @@ class RiderHome extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
-    final isDriver = ref.watch(authControllerProvider).user?.isDriver ?? false;
     // The backend only allows one active *ride* per rider at a time (parcel
     // deliveries are a separate concern and aren't gated) — lock the ride-
     // booking entry points here too instead of letting the request round-trip
@@ -109,13 +108,9 @@ class RiderHome extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 20),
-        if (!isDriver) const _BecomeDriverCard(),
-        const SizedBox(height: 12),
-        const _BecomeMerchantCard(),
-        const SizedBox(height: 20),
-        const _PromoBanner(),
+        const _HomeCarousel(),
         const SizedBox(height: 16),
-        const _InfoSlider(),
+        const _EarnNudgeRow(),
       ],
     );
   }
@@ -130,97 +125,70 @@ class _RecentDropoffs extends ConsumerWidget {
     final recent = ref.watch(recentSearchesProvider).valueOrNull ?? const [];
     if (recent.isEmpty) return const SizedBox.shrink();
     final scheme = Theme.of(context).colorScheme;
-    return Column(
-      children: [
-        const SizedBox(height: 4),
-        for (final h in recent.take(3))
-          ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            leading: CircleAvatar(
-              radius: 18,
-              backgroundColor: scheme.surfaceContainerHighest,
-              child: Icon(Icons.history_rounded,
-                  size: 20, color: scheme.onSurfaceVariant),
-            ),
-            title: Text(h.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: h.address.isEmpty
-                ? null
-                : Text(h.address, maxLines: 1, overflow: TextOverflow.ellipsis),
-            onTap: () => context.push(Routes.whereTo, extra: h),
-          ),
-      ],
-    );
-  }
-}
-
-/// Branded launch-offer banner — shows a real active campaign when one
-/// exists (auto-applied at checkout, no code to enter), falling back to
-/// the static launch copy when nothing's currently live so the card is
-/// never empty.
-class _PromoBanner extends ConsumerWidget {
-  const _PromoBanner();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final l = AppL10n.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final offer = ref.watch(activeOffersProvider).valueOrNull?.firstOrNull;
-    final title = offer?.title ?? l.promoTitle;
-    final body = offer?.discountLine ?? l.promoBody;
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: () => openWhereTo(context),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          gradient: LinearGradient(
-            colors: [scheme.primary, scheme.tertiary],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 20,
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(top: 8),
+        itemCount: recent.take(3).length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final h = recent.take(3).toList()[i];
+          return Material(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(13),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(13),
+              onTap: () => context.push(Routes.whereTo, extra: h),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(13),
+                  border: Border.all(
+                      color: scheme.outlineVariant.withValues(alpha: 0.5)),
+                ),
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.history_rounded,
+                        size: 15, color: scheme.onSurfaceVariant),
+                    const SizedBox(width: 7),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 140),
+                      child: Text(
+                        h.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12.5, fontWeight: FontWeight.w700),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    body,
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-            const SizedBox(width: 12),
-            const Icon(Icons.local_offer_rounded, color: Colors.white, size: 44),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
 }
 
-/// Auto-advancing info carousel (safety / help / referrals).
-class _InfoSlider extends StatefulWidget {
-  const _InfoSlider();
+/// One combined, auto-advancing carousel — a real active campaign (or the
+/// static launch offer, so the slide is never empty) leads, followed by the
+/// parcel/safety/help/refer showcase slides. Previously two separate
+/// carousels stacked directly on top of each other doing the same visual
+/// job twice; this is one paginated rail, same as Grab/Pathao's home promo
+/// rail.
+class _HomeCarousel extends ConsumerStatefulWidget {
+  const _HomeCarousel();
 
   @override
-  State<_InfoSlider> createState() => _InfoSliderState();
+  ConsumerState<_HomeCarousel> createState() => _HomeCarouselState();
 }
 
-class _InfoSliderState extends State<_InfoSlider> {
+class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
   final _controller = PageController();
   int _page = 0;
 
@@ -233,7 +201,16 @@ class _InfoSliderState extends State<_InfoSlider> {
   @override
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final offer = ref.watch(activeOffersProvider).valueOrNull?.firstOrNull;
     final cards = <_InfoData>[
+      _InfoData(
+        Icons.local_offer_rounded,
+        offer?.title ?? l.promoTitle,
+        offer?.discountLine ?? l.promoBody,
+        [scheme.primary, scheme.tertiary],
+        onTap: () => openWhereTo(context),
+      ),
       _InfoData(
         Icons.inventory_2_rounded,
         l.parcelTitle,
@@ -502,31 +479,67 @@ class _WhereToCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Opacity(
       opacity: locked ? 0.6 : 1,
-      child: Card(
-        color: scheme.primaryContainer,
+      child: Material(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        elevation: 1.5,
+        shadowColor: Colors.black.withValues(alpha: 0.12),
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(20),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+            ),
             child: Row(
               children: [
-                Icon(locked ? Icons.lock_outline_rounded : Icons.search_rounded,
-                    color: scheme.onPrimaryContainer),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    locked ? l.activeRideBlocksNew : l.whereTo,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: scheme.onPrimaryContainer,
-                          fontWeight: FontWeight.w700,
-                          fontSize: locked ? 15 : null,
-                        ),
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: Icon(
+                    locked ? Icons.lock_outline_rounded : Icons.search_rounded,
+                    color: scheme.onPrimaryContainer,
                   ),
                 ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: locked
+                      ? Text(
+                          l.activeRideBlocksNew,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l.whereTo,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w800),
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              l.whereToSubtitle,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(color: scheme.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                ),
                 if (!locked)
-                  Icon(Icons.arrow_forward_rounded,
-                      color: scheme.onPrimaryContainer),
+                  Icon(Icons.chevron_right_rounded, color: scheme.onSurfaceVariant),
               ],
             ),
           ),
@@ -623,61 +636,120 @@ class _Service extends StatelessWidget {
   }
 }
 
-class _BecomeDriverCard extends ConsumerWidget {
-  const _BecomeDriverCard();
+/// Replaces the two full-width "become a driver" / "become a merchant"
+/// cards with one slim row carrying whichever asks still apply — full width
+/// competed visually with the primary "Where to?" search action above it,
+/// which this demotes back to a quiet secondary nudge. Hidden entirely once
+/// neither ask applies (already a driver *and* has a store on file).
+class _EarnNudgeRow extends ConsumerWidget {
+  const _EarnNudgeRow();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
-    return Card(
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(12),
-        leading: CircleAvatar(
-          backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-          child: Icon(
-            Icons.directions_car_rounded,
-            color: Theme.of(context).colorScheme.onSecondaryContainer,
+    final scheme = Theme.of(context).colorScheme;
+    final isDriver = ref.watch(authControllerProvider).user?.isDriver ?? false;
+    final myMerchants = ref.watch(myMerchantsProvider).valueOrNull;
+    final hasMerchant =
+        myMerchants != null && myMerchants.any((m) => !m.isRejected);
+    final showDriver = !isDriver;
+    final showMerchant = !hasMerchant;
+    if (!showDriver && !showMerchant) return const SizedBox.shrink();
+
+    final IconData icon;
+    final String title;
+    final String subtitle;
+    final VoidCallback onTap;
+    if (showDriver && showMerchant) {
+      icon = Icons.storefront_rounded;
+      title = l.earnNudgeBothTitle;
+      subtitle = l.earnNudgeBothBody;
+      onTap = () => _showChooser(context);
+    } else if (showDriver) {
+      icon = Icons.directions_car_rounded;
+      title = l.becomeDriver;
+      subtitle = l.becomeDriverBody;
+      onTap = () => context.push(Routes.becomeDriver);
+    } else {
+      icon = Icons.storefront_rounded;
+      title = l.becomeMerchant;
+      subtitle = l.becomeMerchantBody;
+      onTap = () => context.push(Routes.merchantOnboarding);
+    }
+
+    return Material(
+      color: scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: scheme.surface,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 18, color: scheme.primary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 13)),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 11, color: scheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: scheme.onSurfaceVariant),
+            ],
           ),
         ),
-        title: Text(
-          l.becomeDriver,
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        subtitle: Text(l.becomeDriverBody),
-        trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: () => context.push(Routes.becomeDriver),
       ),
     );
   }
-}
 
-/// Hidden once the account already has a store registration (pending,
-/// approved, or rejected-but-not-yet-resolved) — one registration owns
-/// exactly one store, so there's no "apply again" path while one is on file.
-class _BecomeMerchantCard extends ConsumerWidget {
-  const _BecomeMerchantCard();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final myMerchants = ref.watch(myMerchantsProvider).valueOrNull;
-    if (myMerchants != null && myMerchants.any((m) => !m.isRejected)) {
-      return const SizedBox.shrink();
-    }
+  void _showChooser(BuildContext context) {
     final l = AppL10n.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(12),
-        leading: CircleAvatar(
-          backgroundColor: scheme.tertiaryContainer,
-          child:
-              Icon(Icons.storefront_rounded, color: scheme.onTertiaryContainer),
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.directions_car_rounded),
+              title: Text(l.becomeDriver),
+              subtitle: Text(l.becomeDriverBody),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                context.push(Routes.becomeDriver);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.storefront_rounded),
+              title: Text(l.becomeMerchant),
+              subtitle: Text(l.becomeMerchantBody),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                context.push(Routes.merchantOnboarding);
+              },
+            ),
+          ],
         ),
-        title: Text(l.becomeMerchant,
-            style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Text(l.becomeMerchantBody),
-        trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: () => context.push(Routes.merchantOnboarding),
       ),
     );
   }
