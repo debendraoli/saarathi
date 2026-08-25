@@ -227,6 +227,7 @@ class Trip {
     this.distanceKm = 0,
     this.createdAt,
     this.cancelReason,
+    this.cancelledByRole,
     this.pricingMode = 'instant',
     this.askFare,
     this.searchRadiusKm,
@@ -247,6 +248,12 @@ class Trip {
   final double distanceKm;
   final DateTime? createdAt;
   final String? cancelReason;
+
+  /// 'rider' or 'driver' — only meaningful once `status == cancelled`. Used
+  /// to tell "I cancelled" (already navigating myself) apart from "the
+  /// other party cancelled on me" (needs its own notice + redirect) instead
+  /// of treating every cancellation the same regardless of who caused it.
+  final String? cancelledByRole;
 
   /// Route duration estimated once at booking time — a static fallback ETA
   /// for before a driver's live position is available to route a real one
@@ -286,6 +293,7 @@ class Trip {
         distanceKm: distanceKm,
         createdAt: createdAt,
         cancelReason: cancelReason,
+        cancelledByRole: cancelledByRole,
         pricingMode: pricingMode,
         askFare: askFare,
         searchRadiusKm: searchRadiusKm,
@@ -320,6 +328,7 @@ class Trip {
         distanceKm: asDouble(j['distance_km']),
         createdAt: DateTime.tryParse((j['created_at'] as String?) ?? ''),
         cancelReason: j['cancel_reason'] as String?,
+        cancelledByRole: j['cancelled_by_role'] as String?,
         pricingMode: (j['pricing_mode'] as String?) ?? 'instant',
         askFare: j['ask_fare'] == null ? null : asDouble(j['ask_fare']),
         searchRadiusKm: j['search_radius_km'] == null

@@ -239,8 +239,8 @@ class _DriverActiveTripCard extends ConsumerWidget {
             routingToPickup ? l.statusArriving : l.statusOnTrip,
             style: TextStyle(color: scheme.onPrimaryContainer),
           ),
-          trailing:
-              Icon(Icons.chevron_right_rounded, color: scheme.onPrimaryContainer),
+          trailing: Icon(Icons.chevron_right_rounded,
+              color: scheme.onPrimaryContainer),
           onTap: () => context.go('${Routes.trip}/${trip.id}'),
         ),
       ),
@@ -260,9 +260,6 @@ class _OnlineCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final statusColor = online
-        ? (dark ? Colors.green.shade400 : Colors.green.shade600)
-        : (dark ? Colors.red.shade300 : Colors.red.shade600);
     final statusContainer = online
         ? (dark ? Colors.green.shade900 : Colors.green.shade50)
         : (dark ? Colors.red.shade900 : Colors.red.shade50);
@@ -301,7 +298,9 @@ class _OnlineCard extends StatelessWidget {
             FilledButton(
               onPressed: busy ? null : onToggle,
               style: FilledButton.styleFrom(
-                backgroundColor: online ? Colors.red.shade600 : statusColor,
+                backgroundColor: online
+                    ? Colors.red.shade600
+                    : (dark ? Colors.green.shade400 : Colors.green.shade600),
                 foregroundColor: Colors.white,
               ),
               child: busy
@@ -374,7 +373,8 @@ class _TodayGoalCard extends ConsumerWidget {
                           Expanded(
                             child: Text(
                               goal.title,
-                              style: const TextStyle(fontWeight: FontWeight.w700),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w700),
                             ),
                           ),
                         ],
@@ -395,8 +395,8 @@ class _TodayGoalCard extends ConsumerWidget {
                       Text(
                         goal.achieved
                             ? l.driverGoalAchieved(_rewardLabel(goal))
-                            : l.driverGoalProgress(
-                                goals.ridesToday, goal.target, _rewardLabel(goal)),
+                            : l.driverGoalProgress(goals.ridesToday,
+                                goal.target, _rewardLabel(goal)),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],

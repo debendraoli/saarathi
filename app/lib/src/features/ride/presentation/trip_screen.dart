@@ -99,6 +99,31 @@ class _TripScreenState extends ConsumerState<TripScreen> {
     final stale = ref.watch(tripStaleProvider(tripId));
     final online = ref.watch(connectivityProvider).valueOrNull ?? true;
 
+    // A rider whose driver cancels on them (after having been accepted)
+    // otherwise just sits on a "Trip cancelled" status line with no clear
+    // next step — this notices the transition and takes them straight back
+    // to the booking sheet instead of leaving them to notice and back out
+    // manually. Scoped specifically to a driver-initiated cancellation
+    // (`cancelledByRole`): the rider's *own* cancel already navigates
+    // itself (see `_leaveTrip`/`showCancelReasonSheet`), and re-triggering
+    // here too would just double-navigate.
+    ref.listen(effectiveTripProvider(tripId), (prev, next) {
+      final trip = next.valueOrNull;
+      final prevTrip = prev?.valueOrNull;
+      if (trip == null || prevTrip == null) return;
+      final myId = ref.read(authControllerProvider).user?.id;
+      final iAmRider = myId != null && myId == trip.riderId;
+      if (!iAmRider) return;
+      final justCancelled = trip.status == TripStatus.cancelled &&
+          prevTrip.status != TripStatus.cancelled;
+      if (!justCancelled || trip.cancelledByRole != 'driver') return;
+      Haptics.warning();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l.driverCancelledNotice)),
+      );
+      context.go(Routes.whereTo);
+    });
+
     // This screen is reached via context.go (replacing the stack, so a
     // stale confirm/checkout form can't be re-submitted from history), which
     // leaves nothing for the system back button/gesture to pop — without
@@ -111,10 +136,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
       child: Scaffold(
         body: Column(
           children: [
-            if (!online)
-              const OfflineBanner()
-            else if (stale)
-              const StaleBanner(),
+            if (stale) const StaleBanner(),
             Expanded(
               child: tripAsync.when(
                 loading: () => const LoadingView(),
@@ -226,6 +248,16 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                             ),
                       // Invisible: routes incoming calls to the call screen.
                       _CallWatcher(tripId: tripId),
+                      if (!online)
+                        const SafeArea(
+                          child: Align(
+                            alignment: Alignment.topLeft,
+                            child: Padding(
+                              padding: EdgeInsets.all(12),
+                              child: OfflineBanner(),
+                            ),
+                          ),
+                        ),
                       // Invisible: the driver streams position during an active trip.
                       if (iAmDriver && trip.isActive)
                         _DriverLocationPublisher(tripId: tripId),
@@ -331,19 +363,11 @@ Future<void> _leaveTrip(
           trip.status == TripStatus.requested);
   if (cancelling) {
     Haptics.warning();
-    try {
-      await ref.read(rideRepositoryProvider).cancel(tripId);
-    } catch (_) {
-      // Still navigate away (the trip may in fact still be active — this
-      // is a best-effort escape hatch, not a blocking confirmation), but
-      // say so instead of silently treating a failed cancel as a
-      // successful one.
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppL10n.of(context).cancelMayNotHaveWorked)),
-        );
-      }
-    }
+    // Optimistic + retried in the background (see TripStatusUpdater) — this
+    // screen navigates away immediately below regardless of how long the
+    // actual request takes or whether it's currently offline, rather than
+    // blocking the back gesture on a network round-trip.
+    ref.read(tripStatusUpdaterProvider(tripId)).update('cancelled');
     // The home screen's search-bar lock reads this trip list — without
     // invalidating it, a just-cancelled trip still looks "active" and the
     // lock never lifts.
@@ -438,18 +462,12 @@ Future<void> showCancelReasonSheet(
     if (reason == null || !context.mounted) return;
     Haptics.warning();
   }
-  try {
-    await ref.read(rideRepositoryProvider).cancel(tripId, reason: reason);
-  } catch (_) {
-    // Still navigate away — this stays a best-effort escape hatch, not a
-    // blocking confirmation — but say so instead of silently treating a
-    // failed cancel as a successful one.
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppL10n.of(context).cancelMayNotHaveWorked)),
-      );
-    }
-  }
+  // Optimistic + retried in the background (see TripStatusUpdater) — this
+  // stays a quick, non-blocking escape hatch regardless of how long the
+  // actual request takes or whether it's currently offline.
+  ref
+      .read(tripStatusUpdaterProvider(tripId))
+      .update('cancelled', reason: reason);
   ref.invalidate(myTripsProvider);
   if (!context.mounted) return;
   // A driver who cancels goes back to Home to pick up the next offer; a
@@ -1124,7 +1142,7 @@ class _DriverNextSwipeState extends ConsumerState<_DriverNextSwipe> {
   bool _busy = false;
 
   /// Applies the status change optimistically and hands the actual `POST`
-  /// off to [DriverStatusUpdater], which keeps retrying independently of
+  /// off to [TripStatusUpdater], which keeps retrying independently of
   /// this widget's own lifetime — this swipe control is very likely to be
   /// unmounted the instant the optimistic status takes effect (advancing
   /// past `inProgress` means there's no more "next" swipe to show at all),
@@ -1135,7 +1153,7 @@ class _DriverNextSwipeState extends ConsumerState<_DriverNextSwipe> {
   /// clean and ready in case this exact widget somehow gets a *different*
   /// `next` transition to show before the trip poll catches up.
   Future<void> _confirm() async {
-    ref.read(driverStatusUpdaterProvider(widget.tripId)).update(widget.next.$1);
+    ref.read(tripStatusUpdaterProvider(widget.tripId)).update(widget.next.$1);
     Haptics.success();
     setState(() => _busy = true);
     await Future<void>.delayed(Duration.zero);
@@ -1581,6 +1599,22 @@ class _DriverLocationPublisherState
     ).listen(_onPosition);
     _compassSub = FlutterCompass.events?.listen((event) {
       _compassHeading = event.heading;
+      // `Geolocator.getPositionStream`'s `distanceFilter: 5` above means
+      // `_onPosition` (the only other place that writes to
+      // `localDriverPositionProvider`) simply never fires while genuinely
+      // stationary — exactly the case this compass blend exists for. Without
+      // pushing an update from here too, the vehicle icon would keep
+      // reading a heading from whatever the last-moving GPS fix reported
+      // and never actually visibly turn to face the compass while stopped.
+      final pos = _latest;
+      if (pos != null && pos.speed <= _minHeadingSpeedMs) {
+        _lastHeading = event.heading;
+        ref.read(localDriverPositionProvider.notifier).state = DriverPosition(
+          point: LatLng(pos.latitude, pos.longitude),
+          heading: _lastHeading,
+          speed: pos.speed,
+        );
+      }
     });
   }
 

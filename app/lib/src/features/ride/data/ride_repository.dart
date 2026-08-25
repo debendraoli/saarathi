@@ -179,7 +179,8 @@ class RideRepository {
   }
 
   Future<DriverGoals> todayGoals() async {
-    final res = await _api.get('/v1/rides/driver/today') as Map<String, dynamic>;
+    final res =
+        await _api.get('/v1/rides/driver/today') as Map<String, dynamic>;
     return DriverGoals.fromJson(res);
   }
 
@@ -239,17 +240,17 @@ class RideRepository {
   Future<void> cancelReviewReminder(String tripId) =>
       NotificationService.instance.cancel(_reviewReminderId(tripId));
 
-  Future<void> cancel(String id, {String? reason}) => _api.post(
-        '/v1/rides/$id/status',
-        body: {
-          'status': 'cancelled',
-          if (reason != null) 'reason': reason,
-        },
-      );
+  Future<void> cancel(String id, {String? reason}) =>
+      updateStatus(id, 'cancelled', reason: reason);
 
-  /// Driver advances the trip: arriving → in_progress → completed.
-  Future<void> updateStatus(String id, String status) =>
-      _api.post('/v1/rides/$id/status', body: {'status': status});
+  /// Driver advances the trip: arriving → in_progress → completed. Also used
+  /// for cancellation by either party (`status: 'cancelled'`, [reason]
+  /// meaningful only in that case) — see [cancel], now a thin wrapper.
+  Future<void> updateStatus(String id, String status, {String? reason}) =>
+      _api.post('/v1/rides/$id/status', body: {
+        'status': status,
+        if (reason != null) 'reason': reason,
+      });
 
   /// Driver publishes live position during an active trip (fanned out over WS).
   Future<void> postLocation(
@@ -266,7 +267,8 @@ class RideRepository {
         if (speed != null) 'speed': speed,
       });
 
-  Future<void> rate(String id, int stars, {List<String> tags = const []}) async {
+  Future<void> rate(String id, int stars,
+      {List<String> tags = const []}) async {
     await _api.post(
       '/v1/rides/$id/rate',
       body: {'stars': stars, 'tags': tags},

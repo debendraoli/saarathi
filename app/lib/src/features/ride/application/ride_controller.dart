@@ -124,7 +124,7 @@ final tripStaleProvider = Provider.autoDispose.family<bool, String>((ref, id) {
 
 /// A driver-side status transition (arriving → in_progress → completed)
 /// applied locally the instant the swipe completes, before the `POST status`
-/// that makes it real has even been attempted — see [DriverStatusUpdater].
+/// that makes it real has even been attempted — see [TripStatusUpdater].
 /// Cleared automatically once the poll confirms the same status (or a
 /// genuine rejection reverts it), never left to drift from the truth
 /// indefinitely.
@@ -135,7 +135,7 @@ final optimisticTripStatusProvider =
 /// layered on top — this, not the bare poll, is what the trip screen should
 /// actually watch, so a driver's own swipe shows up immediately regardless
 /// of how long the real status-update request takes (or whether it's
-/// currently offline and queued in [DriverStatusUpdater]).
+/// currently offline and queued in [TripStatusUpdater]).
 final effectiveTripProvider =
     Provider.autoDispose.family<AsyncValue<Trip>, String>((ref, tripId) {
   final base = ref.watch(tripStreamProvider(tripId));
@@ -154,22 +154,23 @@ final effectiveTripProvider =
       trip.status == optimistic ? trip : trip.copyWith(status: optimistic));
 });
 
-/// Retries a driver's status-update POST (arriving/in_progress/completed)
+/// Retries a status-update POST (arriving/in_progress/completed/cancelled)
 /// until it lands — backing [optimisticTripStatusProvider] so "swipe to
-/// start/complete" never blocks on the network. One instance per trip,
-/// created lazily and kept alive for the app's lifetime (a trip's status
-/// only ever advances a handful of times, so there's nothing meaningful to
-/// dispose): unlike a per-swipe-widget retry, this survives the swipe
-/// control itself disappearing the instant the optimistic status takes
-/// effect (e.g. advancing past `inProgress` immediately unmounts the
-/// "complete trip" swipe that triggered the update).
-final driverStatusUpdaterProvider =
-    Provider.family<DriverStatusUpdater, String>((ref, tripId) {
-  return DriverStatusUpdater(ref, tripId);
+/// start/complete" (driver) or "cancel ride" (either party) never blocks on
+/// the network. One instance per trip, created lazily and kept alive for
+/// the app's lifetime (a trip's status only ever changes a handful of
+/// times, so there's nothing meaningful to dispose): unlike a per-widget
+/// retry, this survives whatever UI triggered it disappearing the instant
+/// the optimistic status takes effect (e.g. advancing past `inProgress`
+/// immediately unmounts the "complete trip" swipe that triggered it; a
+/// cancel navigates the whole trip screen away immediately).
+final tripStatusUpdaterProvider =
+    Provider.family<TripStatusUpdater, String>((ref, tripId) {
+  return TripStatusUpdater(ref, tripId);
 });
 
-class DriverStatusUpdater {
-  DriverStatusUpdater(this._ref, this.tripId);
+class TripStatusUpdater {
+  TripStatusUpdater(this._ref, this.tripId);
   final Ref _ref;
   final String tripId;
 
@@ -177,15 +178,18 @@ class DriverStatusUpdater {
   ProviderSubscription<AsyncValue<bool>>? _connSub;
   int _attempt = 0;
   String? _pending;
+  String? _pendingReason;
 
   /// Applies [status] optimistically and attempts the real update — call
-  /// this instead of hitting `rideRepositoryProvider.updateStatus` directly
-  /// from a swipe control.
-  void update(String status) {
+  /// this instead of hitting `rideRepositoryProvider.updateStatus`/`cancel`
+  /// directly from a swipe control or a cancel button. [reason] is only
+  /// meaningful for `status == 'cancelled'`.
+  void update(String status, {String? reason}) {
     _ref.read(optimisticTripStatusProvider(tripId).notifier).state = TripStatus
         .values
         .firstWhere((s) => s.name == status, orElse: () => TripStatus.unknown);
     _pending = status;
+    _pendingReason = reason;
     _connSub ??= _ref.listen(connectivityProvider, (prev, next) {
       if ((next.valueOrNull ?? false) && _pending != null) {
         _retryTimer?.cancel();
@@ -209,8 +213,11 @@ class DriverStatusUpdater {
     final status = _pending;
     if (status == null) return;
     try {
-      await _ref.read(rideRepositoryProvider).updateStatus(tripId, status);
+      await _ref
+          .read(rideRepositoryProvider)
+          .updateStatus(tripId, status, reason: _pendingReason);
       _pending = null;
+      _pendingReason = null;
       _retryTimer?.cancel();
       _ref.invalidate(_tripPollProvider(tripId));
     } on ApiException catch (e) {
@@ -218,6 +225,7 @@ class DriverStatusUpdater {
         _scheduleRetry();
       } else {
         _pending = null;
+        _pendingReason = null;
         _ref.read(optimisticTripStatusProvider(tripId).notifier).state = null;
       }
     } catch (_) {

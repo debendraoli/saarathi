@@ -151,13 +151,6 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> {
               navigationTarget: driverPos,
             ),
           ),
-          if (!online)
-            const Positioned(
-              left: 0,
-              right: 0,
-              top: 0,
-              child: SafeArea(bottom: false, child: OfflineBanner()),
-            ),
           if (currentStep != null)
             Positioned(
               left: 0,
@@ -198,6 +191,13 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> {
                         onTap: () => context.pop(),
                       ),
                     ),
+                    if (!online) ...[
+                      const SizedBox(width: 10),
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 12),
+                        child: OfflineBanner(),
+                      ),
+                    ],
                     const SizedBox(width: 10),
                     if (route != null)
                       Expanded(

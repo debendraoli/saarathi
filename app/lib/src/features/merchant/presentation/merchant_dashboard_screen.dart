@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../core/network/api_client.dart';
+import '../../../core/offline/connectivity.dart';
 import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
@@ -15,7 +19,13 @@ import '../data/merchant_repository.dart';
 /// only means "just placed, needs accepting"), since a store dashboard
 /// should surface an order all the way through preparation and pickup, not
 /// just the moment it lands.
-const _activeStatuses = {'placed', 'confirmed', 'preparing', 'ready', 'picked_up'};
+const _activeStatuses = {
+  'placed',
+  'confirmed',
+  'preparing',
+  'ready',
+  'picked_up'
+};
 
 /// Standalone route (pushed from the account menu, or a "store approved"
 /// deep link) — thin Scaffold wrapper around [MerchantHomeBody].
@@ -107,7 +117,8 @@ class _StoreCardSkeleton extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                const Expanded(child: SkeletonBox(width: double.infinity, height: 16)),
+                const Expanded(
+                    child: SkeletonBox(width: double.infinity, height: 16)),
               ],
             ),
             const SizedBox(height: 10),
@@ -137,25 +148,77 @@ class _StoreCard extends ConsumerStatefulWidget {
 
 class _StoreCardState extends ConsumerState<_StoreCard> {
   late bool _open = widget.merchant.isOpen;
-  bool _busy = false;
 
-  Future<void> _toggle(bool value) async {
+  Timer? _retryTimer;
+  ProviderSubscription<AsyncValue<bool>>? _connSub;
+  int _attempt = 0;
+  bool? _pendingOpen;
+
+  @override
+  void dispose() {
+    _retryTimer?.cancel();
+    _connSub?.close();
+    super.dispose();
+  }
+
+  /// Flips the switch optimistically and retries the real request in the
+  /// background — same pattern as trip-status updates elsewhere in the app
+  /// (see `TripStatusUpdater`), so toggling while briefly offline doesn't
+  /// leave the switch stuck reverted or blocked on a network round-trip.
+  /// Unlike the driver's online presence (Redis-backed with a TTL a
+  /// connectivity drop can let lapse), `is_open` is a plain persistent DB
+  /// column with no expiry — there's nothing to "resume" after a drop, only
+  /// this toggle's own request to make resilient.
+  void _toggle(bool value) {
     Haptics.tap();
-    setState(() => _busy = true);
+    setState(() => _open = value);
+    _pendingOpen = value;
+    _connSub ??= ref.listenManual(connectivityProvider, (prev, next) {
+      if ((next.valueOrNull ?? false) && _pendingOpen != null) {
+        _retryTimer?.cancel();
+        _attempt = 0;
+        _attemptRun();
+      }
+    });
+    _retryTimer?.cancel();
+    _attempt = 0;
+    _attemptRun();
+  }
+
+  void _scheduleRetry() {
+    _retryTimer?.cancel();
+    final attempt = _attempt++;
+    final delaySecs = attempt >= 4 ? 30 : (1 << (attempt + 1)); // 2,4,8,16,30…
+    _retryTimer = Timer(Duration(seconds: delaySecs), _attemptRun);
+  }
+
+  Future<void> _attemptRun() async {
+    final target = _pendingOpen;
+    if (target == null) return;
     try {
       final now = await ref
           .read(merchantRepositoryProvider)
-          .setOpen(widget.merchant.id, value);
+          .setOpen(widget.merchant.id, target);
+      _pendingOpen = null;
+      _retryTimer?.cancel();
       if (mounted) setState(() => _open = now);
-    } catch (_) {
-      Haptics.error();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppL10n.of(context).errorNetwork)),
-        );
+    } on ApiException catch (e) {
+      if (e.isNetwork) {
+        _scheduleRetry();
+      } else {
+        // A genuine rejection (not connectivity) — revert the optimistic
+        // guess and say so, matching the old blocking behavior's error path.
+        _pendingOpen = null;
+        Haptics.error();
+        if (mounted) {
+          setState(() => _open = !target);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppL10n.of(context).errorNetwork)),
+          );
+        }
       }
-    } finally {
-      if (mounted) setState(() => _busy = false);
+    } catch (_) {
+      _scheduleRetry();
     }
   }
 
@@ -170,7 +233,8 @@ class _StoreCardState extends ConsumerState<_StoreCard> {
     final orders = m.isApproved
         ? ref.watch(merchantOrdersProvider(m.id)).valueOrNull ?? const []
         : const <CustomerOrder>[];
-    final incoming = orders.where((o) => _activeStatuses.contains(o.status)).toList();
+    final incoming =
+        orders.where((o) => _activeStatuses.contains(o.status)).toList();
     final now = DateTime.now();
     final ordersToday = orders.where((o) {
       final created = o.createdAt;
@@ -181,8 +245,7 @@ class _StoreCardState extends ConsumerState<_StoreCard> {
           o.status != 'cancelled' &&
           o.status != 'rejected';
     }).toList();
-    final revenueToday =
-        ordersToday.fold<double>(0, (sum, o) => sum + o.total);
+    final revenueToday = ordersToday.fold<double>(0, (sum, o) => sum + o.total);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -264,14 +327,7 @@ class _StoreCardState extends ConsumerState<_StoreCard> {
                 children: [
                   Text(_open ? l.merchantOpen : l.merchantClosed),
                   const Spacer(),
-                  if (_busy)
-                    const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else
-                    Switch(value: _open, onChanged: _toggle),
+                  Switch(value: _open, onChanged: _toggle),
                 ],
               ),
             if (m.isApproved) ...[

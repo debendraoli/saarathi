@@ -122,16 +122,17 @@ class StaleBanner extends StatelessWidget {
   }
 }
 
-/// Shown whenever the device has no network at all — distinct from
-/// [StaleBanner]'s "a background poll failed" case, this is for screens
-/// where connectivity itself (not just one poll) affects what's on screen:
-/// the active-trip map's live position/route can silently go stale with no
-/// network to refresh them. A solid, saturated bar (not the pale
-/// `errorContainer` tint the first version used, which read as barely-there
-/// sitting over a busy map) with a pulsing icon — this needs to actually
-/// grab attention, not blend into the background the way a quiet status
-/// line can. Reuses the same generic offline text home_shell already shows
-/// elsewhere, so "offline" reads consistently app-wide.
+/// Shown whenever the device has no network at all, on screens where a
+/// floating icon control already sits over the map (matching that same
+/// small-circle style) — distinct from [StaleBanner]'s "a background poll
+/// failed" case, this is for screens where connectivity itself (not just
+/// one poll) affects what's on screen: the active-trip map's live position/
+/// route can silently go stale with no network to refresh them. A pulsing
+/// icon, not a full-width bar — the earlier full-width version sat overtop
+/// the map and read as intrusive; this reads as one more status control
+/// among the others already there. Tapping it surfaces the same explanatory
+/// text home_shell shows elsewhere, so "offline" reads consistently
+/// app-wide without needing to spell it out permanently on screen.
 class OfflineBanner extends StatefulWidget {
   const OfflineBanner({super.key});
 
@@ -159,30 +160,19 @@ class _OfflineBannerState extends State<OfflineBanner>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
+    return Material(
       color: scheme.error,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ScaleTransition(
-            scale: _scale,
-            child:
-                Icon(Icons.wifi_off_rounded, size: 18, color: scheme.onError),
-          ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Text(
-              AppL10n.of(context).offlineBanner,
-              style: TextStyle(
-                color: scheme.onError,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
+      shape: const CircleBorder(),
+      elevation: 2,
+      child: IconButton(
+        tooltip: AppL10n.of(context).offlineBanner,
+        onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppL10n.of(context).offlineBanner)),
+        ),
+        icon: ScaleTransition(
+          scale: _scale,
+          child: Icon(Icons.wifi_off_rounded, color: scheme.onError),
+        ),
       ),
     );
   }

@@ -199,6 +199,7 @@
   "statusOnTrip": "On trip",
   "statusCompleted": "Trip completed",
   "tripCancelled": "Trip cancelled",
+  "driverCancelledNotice": "Your driver cancelled this ride.",
   "driverArrived": "I've arrived",
   "startTrip": "Start trip",
   "completeTrip": "Complete trip",
