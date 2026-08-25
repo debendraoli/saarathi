@@ -567,7 +567,9 @@ export const rides = {
   // Ops insights
   adminRides: (status?: string) =>
     ridesRequest<RideRow[]>(`/v1/admin/rides${status ? `?status=${encodeURIComponent(status)}` : ""}`),
-  cancellations: () => ridesRequest<RideRow[]>("/v1/admin/cancellations"),
+  cancellations: () => ridesRequest<CancellationRow[]>("/v1/admin/cancellations"),
+  reviewCancellation: (id: string) =>
+    ridesRequest<{ ok: boolean }>(`/v1/admin/cancellations/${id}/review`, { method: "POST" }),
   leaderboard: (role: string, by: string) =>
     ridesRequest<LeaderRow[]>(`/v1/admin/leaderboard?role=${role}&by=${by}`),
 
@@ -880,6 +882,10 @@ export interface RideRow {
   created_at: string;
   accepted_at: string | null;
   completed_at: string | null;
+}
+
+export interface CancellationRow extends RideRow {
+  reviewed: boolean;
 }
 
 export interface LeaderRow {

@@ -379,6 +379,33 @@ CREATE TABLE IF NOT EXISTS sos_incidents (
 );
 CREATE INDEX IF NOT EXISTS sos_status_idx ON sos_incidents (status, created_at DESC);
 
+-- Trusted contacts a rider/driver adds for their own peace of mind — not
+-- currently auto-notified on SOS (that's staff-routed, see sos_incidents);
+-- this is the account's own emergency-contact list.
+CREATE TABLE IF NOT EXISTS trusted_contacts (
+    id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     uuid        NOT NULL,
+    name        text        NOT NULL,
+    phone       text        NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS trusted_contacts_user_idx ON trusted_contacts (user_id);
+
+-- One flat thread per user for the in-app support chat — no separate
+-- "conversation" row, just messages grouped by user_id (see routes::support).
+CREATE TABLE IF NOT EXISTS support_messages (
+    id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       uuid        NOT NULL,
+    sender_id     uuid        NOT NULL,
+    sender_role   text        NOT NULL,           -- user | staff
+    body          text        NOT NULL,
+    trip_id       uuid,
+    read_by_user  boolean     NOT NULL DEFAULT false,
+    read_by_staff boolean     NOT NULL DEFAULT false,
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS support_messages_user_idx ON support_messages (user_id, created_at);
+
 -- DEPRECATED / frozen — the "unlimited for a period" subscription pass model
 -- has been retired in favour of an always-on per-ride credit draw (no fee ever
 -- exceeds the standard commission, so no fair-cap reconciliation is needed).
@@ -581,4 +608,15 @@ CREATE TABLE IF NOT EXISTS fare_rate_proposals (
 );
 CREATE INDEX IF NOT EXISTS fare_rate_proposals_status_idx
     ON fare_rate_proposals (status, created_at DESC);
+
+-- Staff acknowledgement of a cancelled trip on the Complaints console — the
+-- console's nav-count pill otherwise counts every cancellation ever (unlike
+-- reports/kyc/sos/places/support, cancellations have no natural "pending"
+-- state to bound it), so it never goes down. One row per trip means the
+-- pill counts only cancellations no staff member has looked at yet.
+CREATE TABLE IF NOT EXISTS complaint_reviews (
+    trip_id     uuid        PRIMARY KEY REFERENCES trips (id),
+    reviewed_by uuid        NOT NULL,
+    reviewed_at timestamptz NOT NULL DEFAULT now()
+);
 

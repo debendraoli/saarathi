@@ -23,6 +23,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/admin/rides", get(rides))
         .route("/v1/admin/cancellations", get(cancellations))
+        .route("/v1/admin/cancellations/{id}/review", post(review_cancellation))
         .route("/v1/admin/leaderboard", get(leaderboard))
         .route("/v1/admin/riders", get(riders))
         .route("/v1/admin/riders/{id}", get(rider_detail))
@@ -87,23 +88,71 @@ async fn rides(
     Ok(Json(rows))
 }
 
+#[derive(Serialize, sqlx::FromRow)]
+struct CancellationRow {
+    id: Uuid,
+    rider_id: Uuid,
+    rider_name: Option<String>,
+    driver_id: Option<Uuid>,
+    driver_name: Option<String>,
+    status: String,
+    final_fare: Decimal,
+    payment_method: String,
+    cancel_reason: Option<String>,
+    cancelled_by_role: Option<String>,
+    driver_stars: Option<i32>,
+    created_at: DateTime<Utc>,
+    accepted_at: Option<DateTime<Utc>>,
+    completed_at: Option<DateTime<Utc>>,
+    reviewed: bool,
+}
+
 async fn cancellations(
     State(st): State<AppState>,
     _staff: StaffUser,
-) -> AppResult<Json<Vec<RideRow>>> {
-    let rows: Vec<RideRow> = sqlx::query_as(
+) -> AppResult<Json<Vec<CancellationRow>>> {
+    let rows: Vec<CancellationRow> = sqlx::query_as(
         "SELECT t.id, t.rider_id, ur.full_name AS rider_name, t.driver_id, \
                 ud.full_name AS driver_name, t.status::text AS status, t.final_fare, \
                 t.payment_method, t.cancel_reason, t.cancelled_by_role, \
-                NULL::int AS driver_stars, t.created_at, t.accepted_at, t.completed_at \
+                NULL::int AS driver_stars, t.created_at, t.accepted_at, t.completed_at, \
+                (cr.trip_id IS NOT NULL) AS reviewed \
          FROM trips t \
          JOIN users ur ON ur.id = t.rider_id \
          LEFT JOIN users ud ON ud.id = t.driver_id \
+         LEFT JOIN complaint_reviews cr ON cr.trip_id = t.id \
          WHERE t.status = 'cancelled' ORDER BY t.created_at DESC LIMIT 200",
     )
     .fetch_all(&st.db)
     .await?;
     Ok(Json(rows))
+}
+
+/// Marks a cancelled trip as looked-at, so it drops out of the Complaints
+/// nav-count pill. Idempotent (`ON CONFLICT DO NOTHING`) — clicking "reviewed"
+/// twice, or two staff acting on the same row, isn't an error.
+async fn review_cancellation(
+    State(st): State<AppState>,
+    StaffUser(claims): StaffUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<serde_json::Value>> {
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM trips WHERE id = $1 AND status = 'cancelled')")
+            .bind(id)
+            .fetch_one(&st.db)
+            .await?;
+    if !exists {
+        return Err(AppError::NotFound);
+    }
+    sqlx::query(
+        "INSERT INTO complaint_reviews (trip_id, reviewed_by) VALUES ($1, $2) \
+         ON CONFLICT (trip_id) DO NOTHING",
+    )
+    .bind(id)
+    .bind(claims.sub)
+    .execute(&st.db)
+    .await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 #[derive(Serialize, sqlx::FromRow)]

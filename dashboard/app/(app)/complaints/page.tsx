@@ -1,18 +1,37 @@
 "use client";
 
-import { rides, type RideRow } from "@/lib/api";
+import { Pagination, usePaged } from "@/components/Toolbar";
+import { rides, type CancellationRow } from "@/lib/api";
 import { useEffect, useState } from "react";
 
 export default function ComplaintsPage() {
-  const [rows, setRows] = useState<RideRow[]>([]);
+  const [rows, setRows] = useState<CancellationRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
-  useEffect(() => {
+  function load() {
     rides
       .cancellations()
       .then(setRows)
       .catch((e) => setError((e as Error).message));
-  }, []);
+  }
+
+  useEffect(load, []);
+
+  async function markReviewed(id: string) {
+    setBusy(id);
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, reviewed: true } : r)));
+    try {
+      await rides.reviewCancellation(id);
+    } catch (e) {
+      setError((e as Error).message);
+      load(); // roll back the optimistic update
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const { page, setPage, pageCount, total, slice } = usePaged(rows, 15);
 
   return (
     <div className="stack">
@@ -31,10 +50,11 @@ export default function ComplaintsPage() {
               <th>Reason</th>
               <th>Fare</th>
               <th>When</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {slice.map((r) => (
               <tr key={r.id}>
                 <td>{r.rider_name ?? r.rider_id.slice(0, 8)}</td>
                 <td>{r.driver_name ?? (r.driver_id ? r.driver_id.slice(0, 8) : "—")}</td>
@@ -46,14 +66,24 @@ export default function ComplaintsPage() {
                 <td>{r.cancel_reason ?? "—"}</td>
                 <td className="subtle">NPR {r.final_fare}</td>
                 <td className="subtle">{new Date(r.created_at).toLocaleString()}</td>
+                <td style={{ textAlign: "right" }}>
+                  {r.reviewed ? (
+                    <span className="badge approved">reviewed</span>
+                  ) : (
+                    <button className="btn ghost" disabled={busy === r.id} onClick={() => markReviewed(r.id)}>
+                      {busy === r.id ? "…" : "Mark reviewed"}
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={6} className="subtle" style={{ textAlign: "center", padding: 24 }}>No cancellations.</td></tr>
+              <tr><td colSpan={7} className="subtle" style={{ textAlign: "center", padding: 24 }}>No cancellations.</td></tr>
             )}
           </tbody>
         </table>
       </div>
+      <Pagination page={page} pageCount={pageCount} total={total} onPage={setPage} />
     </div>
   );
 }

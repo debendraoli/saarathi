@@ -386,6 +386,44 @@ a {
     @apply font-semibold;
   }
 
+  /* New-notification toasts — slide in from the right edge as they arrive,
+     independent of the bell dropdown above. */
+  .toast-stack {
+    @apply fixed right-6 top-20 z-50 flex w-[340px] flex-col gap-2.5;
+    pointer-events: none;
+  }
+  .toast {
+    @apply relative flex cursor-pointer flex-col gap-1 rounded-2xl px-4 py-3 pr-8 text-[13px];
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-brand);
+    box-shadow: 0 20px 48px -20px rgba(0, 0, 0, 0.75);
+    pointer-events: auto;
+    animation: toast-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .toast.leaving {
+    animation: toast-out 260ms ease-in both;
+  }
+  .toast .title {
+    @apply font-semibold;
+  }
+  .toast-close {
+    @apply absolute right-2 top-2 grid h-5 w-5 cursor-pointer place-items-center rounded-md;
+    color: var(--color-faint);
+    background: transparent;
+    border: none;
+  }
+  .toast-close:hover {
+    color: var(--color-text);
+    background: var(--color-surface-2);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toast,
+    .toast.leaving {
+      animation: none;
+    }
+  }
+
   /* Search box. */
   .search {
     @apply relative flex items-center;
@@ -563,5 +601,26 @@ a {
     aspect-ratio: 4 / 3;
     object-fit: cover;
     background: #000;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(24px);
   }
 }

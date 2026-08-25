@@ -2,6 +2,7 @@
 
 import { BarChart, Donut, Kpi } from "@/components/Charts";
 import { ConfirmModal } from "@/components/Modal";
+import { Pagination, usePaged } from "@/components/Toolbar";
 import {
     api,
     rides,
@@ -42,6 +43,8 @@ export default function PartnerPortalPage() {
   const [campValue, setCampValue] = useState(10);
   const [confirm, setConfirm] = useState<null | "topup" | "payout">(null);
   const [busy, setBusy] = useState(false);
+
+  const ledgerPaged = usePaged(ledger, 10);
 
   const active = memberships.find((m) => m.partner_id === pid);
   const canManageMembers = active?.role === "owner" || active?.role === "admin";
@@ -334,7 +337,7 @@ export default function PartnerPortalPage() {
               </tr>
             </thead>
             <tbody>
-              {ledger.map((l, i) => (
+              {ledgerPaged.slice.map((l, i) => (
                 <tr key={i}>
                   <td className="subtle">{l.kind}</td>
                   <td>NPR {Number(l.amount).toLocaleString()}</td>
@@ -351,6 +354,12 @@ export default function PartnerPortalPage() {
               )}
             </tbody>
           </table>
+          <Pagination
+            page={ledgerPaged.page}
+            pageCount={ledgerPaged.pageCount}
+            total={ledgerPaged.total}
+            onPage={ledgerPaged.setPage}
+          />
         </div>
       )}
 

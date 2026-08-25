@@ -1,5 +1,6 @@
 "use client";
 
+import { Pagination, usePaged } from "@/components/Toolbar";
 import { rides, type Report } from "@/lib/api";
 import { useEffect, useState } from "react";
 
@@ -25,6 +26,8 @@ export default function ReportsPage() {
     await load();
   }
 
+  const { page, setPage, pageCount, total, slice } = usePaged(rows, 15);
+
   return (
     <div className="stack">
       <div>
@@ -45,7 +48,7 @@ export default function ReportsPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {slice.map((r) => (
               <tr key={r.id}>
                 <td>{r.category}</td>
                 <td>
@@ -84,6 +87,7 @@ export default function ReportsPage() {
           </tbody>
         </table>
       </div>
+      <Pagination page={page} pageCount={pageCount} total={total} onPage={setPage} />
     </div>
   );
 }
