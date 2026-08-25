@@ -125,9 +125,13 @@ class MapView extends StatefulWidget {
   /// bottom value leaves room for a booking sheet sitting over the map.
   final EdgeInsets fitPadding;
 
-  /// Shows a floating "recenter on route" button, top-right — snaps back to
-  /// fitting every pin on screen after the rider has panned/zoomed away.
-  /// Only meaningful alongside [autoFitPins]/2+ [pins].
+  /// Shows a single floating nav button, bottom-right (same slot
+  /// [showLocateButton] would use — don't set both on the same screen):
+  /// centers on the rider's live GPS by default, and swaps to "back to
+  /// route" (re-fitting every pin) once they've panned/zoomed far enough
+  /// from the fitted route that the route is the more useful target.
+  /// Meaningful alongside [autoFitPins]/2+ [pins]; harmless without it —
+  /// the button just always acts as "my location".
   final bool showRecenterButton;
 
   @override
@@ -144,6 +148,11 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   AnimationController? _fitAnim;
   List<LatLng>? _lastFitPoints;
   Timer? _resizeFitDebounce;
+
+  /// True once the rider has panned/zoomed far enough from the fitted route
+  /// that the combined nav button should offer "back to route" instead of
+  /// "my location" — see [_navButtonIcon].
+  bool _awayFromRoute = false;
 
   AnimationController? _routeAnim;
   List<LatLng> _revealedRoute = const [];
@@ -281,6 +290,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
       toZoom: targetZoom,
       controllerSlot: (c) => _fitAnim = c,
     );
+    if (_awayFromRoute) setState(() => _awayFromRoute = false);
   }
 
   /// Shared camera tween used by both driver-follow ([_animateTo]) and
@@ -410,12 +420,31 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   /// final size — debounced since a resize animation emits many events in
   /// quick succession.
   void _onMapEvent(MapEvent event) {
-    if (event is! MapEventNonRotatedSizeChange) return;
-    if (!widget.autoFitPins) return;
-    _resizeFitDebounce?.cancel();
-    _resizeFitDebounce = Timer(const Duration(milliseconds: 200), () {
-      if (mounted) _maybeFitPins(force: true);
-    });
+    if (event is MapEventNonRotatedSizeChange && widget.autoFitPins) {
+      _resizeFitDebounce?.cancel();
+      _resizeFitDebounce = Timer(const Duration(milliseconds: 200), () {
+        if (mounted) _maybeFitPins(force: true);
+      });
+    }
+    if (widget.showRecenterButton) _updateAwayFromRoute();
+  }
+
+  /// Recomputes [_awayFromRoute] from how far the camera's current center
+  /// has drifted from the fitted route's own center, relative to the
+  /// route's own span — a fixed-meter threshold would be too tight for a
+  /// long cross-town route and too loose for two pins a block apart.
+  void _updateAwayFromRoute() {
+    final points = _lastFitPoints;
+    if (points == null || points.length < 2) return;
+    final bounds = LatLngBounds.fromPoints(points);
+    const dist = Distance();
+    final halfDiagonal =
+        dist.as(LengthUnit.Meter, bounds.southWest, bounds.northEast) / 2;
+    final offset = dist.as(LengthUnit.Meter, bounds.center, _controller.camera.center);
+    final away = offset > halfDiagonal * 1.3 + 150;
+    if (away != _awayFromRoute && mounted) {
+      setState(() => _awayFromRoute = away);
+    }
   }
 
   @override
@@ -582,19 +611,39 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
             ),
           ),
         if (widget.showRecenterButton)
+          // One button, bottom-right (same spot showLocateButton would use —
+          // the two are never both on for the same screen today), that does
+          // whichever of "find me" / "back to route" is actually useful
+          // right now: defaults to centering on the rider's live GPS, and
+          // swaps to snapping back to the fitted route once they've panned
+          // far enough away from it that the route itself is no longer the
+          // obviously-useful target.
           Positioned(
-            top: 8,
+            bottom: widget.locateButtonBottomOffset,
             right: 12,
             child: SafeArea(
-              bottom: false,
+              top: false,
               child: Material(
                 color: Theme.of(context).colorScheme.surface,
                 shape: const CircleBorder(),
                 elevation: 2,
                 child: IconButton(
-                  tooltip: 'Recenter',
-                  onPressed: () => _maybeFitPins(force: true),
-                  icon: const Icon(Icons.route_rounded),
+                  tooltip: _awayFromRoute ? 'Back to route' : 'My location',
+                  onPressed: _awayFromRoute
+                      ? () => _maybeFitPins(force: true)
+                      : _locateMe,
+                  icon: _locating
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                        )
+                      : Icon(_awayFromRoute
+                          ? Icons.route_rounded
+                          : Icons.my_location_rounded),
                 ),
               ),
             ),

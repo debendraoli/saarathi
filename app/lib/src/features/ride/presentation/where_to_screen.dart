@@ -504,7 +504,10 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
             route: route?.valueOrNull ?? (path.length >= 2 ? path : const []),
             onTap: (p) => setState(() => _dest = p),
             autoFitPins: true,
-            showRecenterButton: _pickup != null && _dest != null,
+            // Always on: acts as a plain "my location" button before a
+            // route exists, and swaps to "back to route" once one does and
+            // the rider has panned away from it — see MapView's doc comment.
+            showRecenterButton: true,
             pins: [
               if (_pickup != null)
                 MapPin(
@@ -1218,6 +1221,28 @@ void _showRequestDriverSheet(
                         Navigator.of(sheetContext).pop();
                       },
                 child: Text(l.requestSpecificDriver),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.notifications_active_rounded,
+                    size: 16,
+                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      l.driverWillBeNotified,
+                      style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(sheetContext)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
