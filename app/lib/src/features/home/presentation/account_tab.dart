@@ -7,6 +7,8 @@ import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/models.dart';
+import '../../contributions/data/contributions_repository.dart';
+import '../../contributions/domain/models.dart' show PointsSummary;
 import '../../driver/data/driver_kyc_repository.dart';
 import '../../driver/domain/models.dart' show KycStatus;
 import '../../marketplace/domain/models.dart' show Merchant;
@@ -24,6 +26,7 @@ class AccountTab extends ConsumerWidget {
     final driverKyc = user?.isDriver ?? false
         ? ref.watch(driverKycProvider).valueOrNull
         : null;
+    final points = ref.watch(pointsSummaryProvider).valueOrNull;
 
     return ListView(
       // This route's Scaffold has no SafeArea, so without the extra bottom
@@ -50,6 +53,8 @@ class AccountTab extends ConsumerWidget {
                 ),
           orElse: () => const SizedBox.shrink(),
         ),
+        const SizedBox(height: 16),
+        _EarnBanner(points: points),
         const SizedBox(height: 16),
         Card(
           child: ListTile(
@@ -219,6 +224,113 @@ class _ProfileHeader extends StatelessWidget {
               onPressed: onEditName,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Promoted "contribute and earn" card — pulled out of the hamburger drawer
+/// (where it used to sit as three flat, disconnected rows) since this is a
+/// real earn mechanic (points redeem for wallet credit), not a settings-tier
+/// feature. Shows a live balance once loaded; falls back to just the pitch
+/// while [points] is still null (loading, or the rider has never opened the
+/// contribute flow before).
+class _EarnBanner extends StatelessWidget {
+  const _EarnBanner({required this.points});
+  final PointsSummary? points;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppL10n.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => context.push(Routes.placesHub),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [scheme.tertiary, scheme.tertiaryContainer],
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: scheme.onTertiary.withValues(alpha: .18),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(Icons.location_on_rounded, color: scheme.onTertiary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l.earnCardTag.toUpperCase(),
+                      style: TextStyle(
+                        color: scheme.onTertiary.withValues(alpha: .85),
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: .6,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      l.earnCardTitle,
+                      style: TextStyle(
+                        color: scheme.onTertiary,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15.5,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      l.earnCardBody,
+                      style: TextStyle(
+                        color: scheme.onTertiary.withValues(alpha: .9),
+                        fontSize: 11.5,
+                        height: 1.4,
+                      ),
+                    ),
+                    if (points != null) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: scheme.onTertiary.withValues(alpha: .16),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Text(
+                          l.earnCardBalance(
+                            points!.balance,
+                            points!.balance * points!.pointsToNprRate,
+                          ),
+                          style: TextStyle(
+                            color: scheme.onTertiary,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

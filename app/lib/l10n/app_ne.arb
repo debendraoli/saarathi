@@ -469,7 +469,6 @@
   "errorGeneric": "केही गडबड भयो। पुनः प्रयास गर्नुहोस्।",
 
   "contributeToMap": "नक्सामा योगदान गर्नुहोस्",
-  "myPointsBadges": "मेरो पोइन्ट र ब्याज",
   "categoryOrganisation": "संस्था",
   "categoryBuilding": "भवन",
   "categoryLandmark": "चोक / गोलचक्कर",
@@ -500,5 +499,23 @@
   "redeemPointsConfirmTitle": "पोइन्ट रिडिम गर्ने?",
   "redeemPointsConfirmBody": "यसले तपाईंको पूरा पोइन्ट ब्यालेन्स वालेट क्रेडिटको लागि रिडिम गर्छ। यो फिर्ता गर्न सकिँदैन।",
   "redeemPointsBelowMin": "रिडिम गर्न कम्तीमा {min} पोइन्ट चाहिन्छ",
-  "redeemSuccess": "रिडिम भयो! तपाईंको वालेटमा क्रेडिट थपियो।"
+  "redeemSuccess": "रिडिम भयो! तपाईंको वालेटमा क्रेडिट थपियो।",
+  "placesHubTitle": "योगदान गर्नुहोस् र कमाउनुहोस्",
+  "earnCardTag": "स्थानहरू",
+  "earnCardTitle": "योगदान गरेर पैसा कमाउनुहोस्",
+  "earnCardBody": "नजिकैको पसल, ल्यान्डमार्क, वा बन्द सडक नक्सामा राख्नुहोस्। हरेक स्वीकृत योगदानमा पोइन्ट पाउनुहोस् — जुनसुकै बेला वालेटमा साट्नुहोस्।",
+  "earnCardBalance": "{points} पोइन्ट · NPR {npr} बराबर",
+  "nprEquivalent": "≈ NPR {amount} · वालेटमा साट्न मिल्ने",
+  "howItWorks": "यसरी काम गर्छ",
+  "earnStep1Title": "नक्सामा छुटेको ठाउँ भेट्टाउनुहोस्",
+  "earnStep1Body": "नजिकैको पसल, ल्यान्डमार्क, बन्द सडक, वा नयाँ भवन",
+  "earnStep2Title": "पिन गर्नुहोस् र त्यहीं फोटो खिच्नुहोस्",
+  "earnStep2Body": "तपाईं साँच्चै त्यहाँ हुनुहुन्छ भनेर GPS ले पुष्टि गर्छ",
+  "earnStep3Title": "समीक्षा भएपछि पोइन्ट पाउनुहोस्",
+  "earnStep3Body": "न्यूनतमभन्दा माथि पुगेपछि जुनसुकै बेला साट्न सकिन्छ",
+  "addNewPlace": "नयाँ ठाउँ थप्नुहोस्",
+  "recentSubmissions": "भर्खरका योगदानहरू",
+  "seeAll": "सबै हेर्नुहोस्",
+  "notificationsDeviceSection": "सूचना र डिभाइस",
+  "preferencesSection": "प्राथमिकताहरू"
 }

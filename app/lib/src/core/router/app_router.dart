@@ -12,9 +12,9 @@ import '../../features/auth/presentation/otp_screen.dart';
 import '../../features/auth/presentation/phone_screen.dart';
 import '../../features/comms/presentation/call_screen.dart';
 import '../../features/comms/presentation/chat_screen.dart';
+import '../../features/contributions/presentation/contribute_hub_screen.dart';
 import '../../features/contributions/presentation/contribute_screen.dart';
 import '../../features/contributions/presentation/my_contributions_screen.dart';
-import '../../features/contributions/presentation/points_badges_screen.dart';
 import '../../features/driver/presentation/become_driver_screen.dart';
 import '../../features/driver/presentation/kyc_documents_screen.dart';
 import '../../features/home/presentation/account_tab.dart';
@@ -75,9 +75,9 @@ class Routes {
   static const merchantMenu = '/store/menu';
   static const merchantAnalytics = '/store/analytics';
   static const merchantOffers = '/store/offers';
+  static const placesHub = '/places';
   static const contribute = '/places/contribute';
   static const myContributions = '/places/mine';
-  static const pointsBadges = '/places/points';
 }
 
 /// One consistent motion language for every screen transition (Material's
@@ -346,6 +346,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: Routes.placesHub,
+        pageBuilder: (_, state) =>
+            _page(const ContributeHubScreen(), key: state.pageKey),
+      ),
+      GoRoute(
         path: Routes.contribute,
         pageBuilder: (_, state) =>
             _page(const ContributeScreen(), key: state.pageKey),
@@ -354,11 +359,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: Routes.myContributions,
         pageBuilder: (_, state) =>
             _page(const MyContributionsScreen(), key: state.pageKey),
-      ),
-      GoRoute(
-        path: Routes.pointsBadges,
-        pageBuilder: (_, state) =>
-            _page(const PointsBadgesScreen(), key: state.pageKey),
       ),
     ],
     // Android's Flutter embedding independently pushes an incoming

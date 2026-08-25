@@ -471,7 +471,6 @@
   "errorGeneric": "Something went wrong. Please try again.",
 
   "contributeToMap": "Contribute to map",
-  "myPointsBadges": "My points & badges",
   "categoryOrganisation": "Organisation",
   "categoryBuilding": "Building",
   "categoryLandmark": "Chowk / Roundabout",
@@ -505,5 +504,29 @@
   "@redeemPointsBelowMin": {
     "placeholders": { "min": { "type": "int" } }
   },
-  "redeemSuccess": "Redeemed! Your wallet has been credited."
+  "redeemSuccess": "Redeemed! Your wallet has been credited.",
+  "placesHubTitle": "Contribute & earn",
+  "earnCardTag": "Places",
+  "earnCardTitle": "Contribute and earn money",
+  "earnCardBody": "Map a shop, a landmark, or a closed road near you. Get points for every approved spot — cash out to your wallet anytime.",
+  "earnCardBalance": "{points} pts · worth NPR {npr}",
+  "@earnCardBalance": {
+    "placeholders": { "points": { "type": "int" }, "npr": { "type": "int" } }
+  },
+  "nprEquivalent": "≈ NPR {amount} · redeemable to your wallet",
+  "@nprEquivalent": {
+    "placeholders": { "amount": { "type": "int" } }
+  },
+  "howItWorks": "How it works",
+  "earnStep1Title": "Spot something missing on the map",
+  "earnStep1Body": "A shop, landmark, closed road, or new building near you",
+  "earnStep2Title": "Pin it and snap a photo on the spot",
+  "earnStep2Body": "Your GPS fix proves you're really there",
+  "earnStep3Title": "Get points once it's reviewed",
+  "earnStep3Body": "Cash out anytime once you're above the minimum",
+  "addNewPlace": "Add a new place",
+  "recentSubmissions": "Recent submissions",
+  "seeAll": "See all",
+  "notificationsDeviceSection": "Notifications & device",
+  "preferencesSection": "Preferences"
 }

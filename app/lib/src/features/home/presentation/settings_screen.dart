@@ -25,6 +25,18 @@ class SettingsScreen extends ConsumerWidget {
     final user = ref.watch(authControllerProvider).user;
     final locale = ref.watch(localeControllerProvider);
     final merchants = ref.watch(myMerchantsProvider);
+    final showBackgroundCard = (user?.isDriver ?? false) ||
+        (merchants.valueOrNull?.isNotEmpty ?? false);
+    // The permission card hides itself once granted, so without this check a
+    // rider with notifications already on and no background-running card
+    // would see an empty "Notifications & device" section — just a label
+    // with nothing under it, above "Preferences".
+    final showDeviceSection =
+        showBackgroundCard || !PushService.instance.permissionGranted;
+    final sectionLabelStyle = Theme.of(context)
+        .textTheme
+        .labelLarge
+        ?.copyWith(fontWeight: FontWeight.w800, letterSpacing: .3);
 
     return Scaffold(
       appBar: AppBar(title: Text(l.settingsTitle)),
@@ -32,31 +44,40 @@ class SettingsScreen extends ConsumerWidget {
         padding: EdgeInsets.fromLTRB(
             16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
         children: [
-          const _NotificationPermissionCard(),
-          // Only relevant to roles that need to keep *receiving* things
-          // while backgrounded — a driver's job offers, a merchant's
-          // incoming orders. A plain rider has nothing that needs the app
-          // alive in the background, so the section would just be
-          // confusing noise for them.
-          if ((user?.isDriver ?? false) ||
-              (merchants.valueOrNull?.isNotEmpty ?? false)) ...[
-            const _BackgroundRunningCard(),
-            const SizedBox(height: 16),
+          if (showDeviceSection) ...[
+            Text(l.notificationsDeviceSection, style: sectionLabelStyle),
+            const SizedBox(height: 8),
+            const _NotificationPermissionCard(),
+            if (showBackgroundCard) const _BackgroundRunningCard(),
+            const SizedBox(height: 24),
           ],
-          Text(l.chooseLanguage, style: Theme.of(context).textTheme.labelLarge),
+          Text(l.preferencesSection, style: sectionLabelStyle),
           const SizedBox(height: 8),
-          SegmentedButton<String>(
-            segments: [
-              ButtonSegment(value: 'en', label: Text(l.languageEnglish)),
-              ButtonSegment(value: 'ne', label: Text(l.languageNepali)),
-            ],
-            selected: {locale?.languageCode ?? 'en'},
-            onSelectionChanged: (s) => ref
-                .read(localeControllerProvider.notifier)
-                .set(Locale(s.first)),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(l.chooseLanguage,
+                      style: Theme.of(context).textTheme.labelLarge),
+                  const SizedBox(height: 8),
+                  SegmentedButton<String>(
+                    segments: [
+                      ButtonSegment(value: 'en', label: Text(l.languageEnglish)),
+                      ButtonSegment(value: 'ne', label: Text(l.languageNepali)),
+                    ],
+                    selected: {locale?.languageCode ?? 'en'},
+                    onSelectionChanged: (s) => ref
+                        .read(localeControllerProvider.notifier)
+                        .set(Locale(s.first)),
+                  ),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 24),
-          Text(l.aboutSection, style: Theme.of(context).textTheme.labelLarge),
+          Text(l.aboutSection, style: sectionLabelStyle),
           const SizedBox(height: 8),
           const _AboutCard(),
         ],

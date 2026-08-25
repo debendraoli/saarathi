@@ -233,18 +233,8 @@ class _MenuDrawer extends ConsumerWidget {
             const Divider(),
             ListTile(
               leading: const Icon(Icons.add_location_alt_rounded),
-              title: Text(l.contributeToMap),
-              onTap: () => go(Routes.contribute),
-            ),
-            ListTile(
-              leading: const Icon(Icons.history_rounded),
-              title: Text(l.myContributions),
-              onTap: () => go(Routes.myContributions),
-            ),
-            ListTile(
-              leading: const Icon(Icons.military_tech_rounded),
-              title: Text(l.myPointsBadges),
-              onTap: () => go(Routes.pointsBadges),
+              title: Text(l.placesHubTitle),
+              onTap: () => go(Routes.placesHub),
             ),
           ],
         ),
