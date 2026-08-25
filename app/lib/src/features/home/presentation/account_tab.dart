@@ -59,7 +59,8 @@ class AccountTab extends ConsumerWidget {
         Card(
           child: ListTile(
             leading: const Icon(Icons.account_balance_wallet_rounded),
-            title: Text(mode == AppMode.driver ? l.creditsTitle : l.walletTitle),
+            title:
+                Text(mode == AppMode.driver ? l.creditsTitle : l.walletTitle),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => context.push(Routes.wallet),
           ),
@@ -70,8 +71,9 @@ class AccountTab extends ConsumerWidget {
             leading: const Icon(Icons.insights_rounded),
             title: Text(l.myStatsAction),
             trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => context.push(
-                mode == AppMode.driver ? Routes.driverEarnings : Routes.myStats),
+            onTap: () => context.push(mode == AppMode.driver
+                ? Routes.driverEarnings
+                : Routes.myStats),
           ),
         ),
         const SizedBox(height: 16),
@@ -89,8 +91,12 @@ class AccountTab extends ConsumerWidget {
             Haptics.warning();
             ref.read(authControllerProvider.notifier).signOut();
           },
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Theme.of(context).colorScheme.error,
+            side: BorderSide(color: Theme.of(context).colorScheme.error),
+          ),
           icon: const Icon(Icons.logout_rounded),
-          label: const Text('Sign out'),
+          label: Text(l.logout),
         ),
       ],
     );
@@ -261,7 +267,8 @@ class _EarnBanner extends StatelessWidget {
                   color: scheme.onTertiary.withValues(alpha: .18),
                   borderRadius: BorderRadius.circular(11),
                 ),
-                child: Icon(Icons.location_on_rounded, color: scheme.onTertiary),
+                child:
+                    Icon(Icons.location_on_rounded, color: scheme.onTertiary),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -298,8 +305,8 @@ class _EarnBanner extends StatelessWidget {
                     if (points != null) ...[
                       const SizedBox(height: 10),
                       Container(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
                           color: scheme.onTertiary.withValues(alpha: .16),
                           borderRadius: BorderRadius.circular(9),
@@ -341,7 +348,8 @@ class _MerchantCard extends StatelessWidget {
         leading: const Icon(Icons.storefront_rounded),
         title: Row(
           children: [
-            Flexible(child: Text(l.merchantStore, overflow: TextOverflow.ellipsis)),
+            Flexible(
+                child: Text(l.merchantStore, overflow: TextOverflow.ellipsis)),
             if (merchant.isApproved) ...[
               const SizedBox(width: 4),
               Icon(Icons.verified_rounded, size: 16, color: scheme.primary),

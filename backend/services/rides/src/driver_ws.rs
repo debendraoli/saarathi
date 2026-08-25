@@ -49,6 +49,9 @@ async fn driver_socket_loop(socket: WebSocket, st: AppState, driver_id: uuid::Uu
     let (mut sink, mut stream) = socket.split();
     let mut rx = st.hub.subscribe(driver_id).await;
 
+    let mut presence_conn = st.redis.clone();
+    saarathi_core::presence::mark_online(&mut presence_conn, driver_id).await;
+
     // Forward every push (offers, and anything else later published to this
     // driver's channel) straight to the client.
     let send_task = tokio::spawn(async move {
@@ -60,12 +63,26 @@ async fn driver_socket_loop(socket: WebSocket, st: AppState, driver_id: uuid::Uu
     });
 
     // Nothing meaningful arrives from the client on this socket — it exists
-    // purely to receive pushes — so just wait for it to close.
-    while let Some(Ok(msg)) = stream.next().await {
-        if let Message::Close(_) = msg {
-            break;
+    // purely to receive pushes — so just wait for it to close. Refresh the
+    // presence mark periodically so a long-lived idle connection doesn't
+    // expire out from under a still-online driver.
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(20));
+    ticker.tick().await; // first tick fires immediately; skip it, we just marked online
+    loop {
+        tokio::select! {
+            msg = stream.next() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) => break,
+                }
+            }
+            _ = ticker.tick() => {
+                saarathi_core::presence::mark_online(&mut presence_conn, driver_id).await;
+            }
         }
     }
 
     send_task.abort();
+    saarathi_core::presence::mark_offline(&mut presence_conn, driver_id).await;
 }

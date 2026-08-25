@@ -827,7 +827,7 @@ struct CreateDeliveryTripResponse {
 /// which is fine — it happens once, not on a hot path. A failed attempt
 /// rolls the transaction back without writing `trip_id`, so a genuine retry
 /// (merchant re-marks the order `ready`) still goes through cleanly.
-async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()> {
+pub(crate) async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()> {
     let mut tx = st.db.begin().await?;
     let o: (Uuid, Uuid, Decimal, String, f64, f64, Option<Uuid>) = sqlx::query_as(
         "SELECT o.customer_id, o.merchant_id, o.delivery_fee, o.payment_method, \

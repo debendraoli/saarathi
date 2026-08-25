@@ -19,6 +19,7 @@ pub mod money;
 pub mod partner_ledger;
 pub mod payments;
 pub mod pelias_index;
+pub mod presence;
 pub mod pricing;
 pub mod routing;
 pub mod wallet;

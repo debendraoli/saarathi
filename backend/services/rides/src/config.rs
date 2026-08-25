@@ -15,6 +15,12 @@ pub struct Config {
     /// Base URL of the saarathi-routing service, e.g. http://localhost:8084.
     /// Empty = skip the service and use the local haversine fallback.
     pub routing_service_url: String,
+    /// Base URL of the saarathi-merchant service, e.g. http://merchant:8088 —
+    /// used only to call back into it (`/v1/internal/orders/{id}/redispatch`)
+    /// when a delivery trip it created gets cancelled during the arrival
+    /// phase. Empty = skip the call (logged); the order is still reverted
+    /// locally either way, just without an automatic re-dispatch attempt.
+    pub merchant_service_url: String,
     /// Multiplier applied to straight-line distance when falling back to
     /// haversine (approximates real road distance in a town like Ghorahi).
     pub road_factor: Decimal,
@@ -75,6 +81,7 @@ impl Config {
             jwt_secret: req("JWT_SECRET")?,
             internal_service_secret: opt("INTERNAL_SERVICE_SECRET").unwrap_or_default(),
             routing_service_url: opt("ROUTING_SERVICE_URL").unwrap_or_default(),
+            merchant_service_url: opt("MERCHANT_SERVICE_URL").unwrap_or_default(),
             road_factor: dec_env("ROUTING_ROAD_FACTOR", "1.3"),
             avg_speed_kmh: dec_env("ROUTING_AVG_SPEED_KMH", "22"),
             two_wheeler_per_km: dec_env("FARE_TWO_WHEELER_PER_KM", "20"),

@@ -3,6 +3,7 @@
   "appName": "Saarathi",
 
   "actionContinue": "Continue",
+  "logout": "Logout",
   "actionCancel": "Cancel",
   "actionRetry": "Retry",
   "actionNext": "Next",

@@ -1,3 +1,4 @@
+import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -12,6 +13,21 @@ final locationServiceProvider = StreamProvider<bool>((ref) async* {
   yield await isLocationServiceEnabled();
   yield* Geolocator.getServiceStatusStream()
       .map((s) => s == ServiceStatus.enabled);
+});
+
+/// Device compass heading (degrees, 0-360) — kept alive for the app's whole
+/// process lifetime once first watched, deliberately never torn down and
+/// re-subscribed per trip. `flutter_compass`'s underlying platform listener
+/// was found live not to restart reliably once every Dart-side listener had
+/// cancelled and a new one attached later (confirmed: it worked for the
+/// first trip after app launch, then silently produced no more events for
+/// any later trip) — `ref.keepAlive()` here means the very first
+/// subscription is also the only one that ever happens, sidestepping that
+/// restart path entirely rather than depending on the plugin fixing it.
+final compassHeadingProvider = StreamProvider<double?>((ref) {
+  ref.keepAlive();
+  return (FlutterCompass.events ?? const Stream<CompassEvent>.empty())
+      .map((event) => event.heading);
 });
 
 // Dedupe concurrent requests — the plugins throw if a second request starts

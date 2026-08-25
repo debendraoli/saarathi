@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
@@ -201,7 +200,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                         driverLoc,
                         vehicleIconFor(trip.vehicleClass),
                         Theme.of(context).colorScheme.tertiary,
-                        rotate: true,
+                        heading: driverPos?.heading,
                         id: 'driver',
                       ),
                   ];
@@ -245,6 +244,13 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                                   MediaQuery.of(context).size.height *
                                       _sheetClearance,
                               navigationTarget: navTarget,
+                              // Keep this small in-trip map north-up — the
+                              // vehicle pin now rotates in place via its own
+                              // `heading` instead. The fullscreen
+                              // NavigationScreen is the one place that still
+                              // spins the map itself (its own dedicated
+                              // heading-up turn-by-turn view).
+                              rotateMap: false,
                             ),
                       // Invisible: routes incoming calls to the call screen.
                       _CallWatcher(tripId: tripId),
@@ -630,7 +636,11 @@ class _StatusSheet extends ConsumerWidget {
               ],
               if (counterpart != null) ...[
                 const SizedBox(height: 14),
-                _CounterpartRow(person: counterpart, tripId: trip.id),
+                _CounterpartRow(
+                  person: counterpart,
+                  tripId: trip.id,
+                  enabled: !done,
+                ),
               ],
               if (trip.isActive) ...[
                 const SizedBox(height: 14),
@@ -1217,9 +1227,19 @@ class _Avatar extends StatelessWidget {
 /// (button hidden) until `phone` is non-null (trip not yet active, or
 /// already finished).
 class _CounterpartRow extends StatelessWidget {
-  const _CounterpartRow({required this.person, required this.tripId});
+  const _CounterpartRow({
+    required this.person,
+    required this.tripId,
+    this.enabled = true,
+  });
   final TripPerson person;
   final String tripId;
+
+  /// False once the trip is completed/cancelled — reached via a
+  /// notification or Activities tap on an old trip shouldn't leave a live
+  /// "call/message" affordance for someone the rider/driver has no ongoing
+  /// reason to contact anymore.
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1256,20 +1276,27 @@ class _CounterpartRow extends StatelessWidget {
           ),
         ),
         Material(
-          color: Colors.blue.shade600,
+          color:
+              enabled ? Colors.blue.shade600 : scheme.surfaceContainerHighest,
           shape: const CircleBorder(),
           child: IconButton(
-            icon: const Icon(Icons.chat_rounded, color: Colors.white),
-            onPressed: () => context.push(Routes.chat, extra: tripId),
+            icon: Icon(Icons.chat_rounded,
+                color: enabled ? Colors.white : scheme.onSurfaceVariant),
+            onPressed:
+                enabled ? () => context.push(Routes.chat, extra: tripId) : null,
           ),
         ),
         const SizedBox(width: 8),
         Material(
-          color: Colors.green.shade600,
+          color:
+              enabled ? Colors.green.shade600 : scheme.surfaceContainerHighest,
           shape: const CircleBorder(),
           child: IconButton(
-            icon: const Icon(Icons.call_rounded, color: Colors.white),
-            onPressed: () => _showCallOptions(context, tripId, person.phone),
+            icon: Icon(Icons.call_rounded,
+                color: enabled ? Colors.white : scheme.onSurfaceVariant),
+            onPressed: enabled
+                ? () => _showCallOptions(context, tripId, person.phone)
+                : null,
             tooltip: AppL10n.of(context).callDriver,
           ),
         ),
@@ -1532,7 +1559,7 @@ class _DriverLocationPublisherState
   static const _distance = Distance();
 
   StreamSubscription<Position>? _sub;
-  StreamSubscription<CompassEvent>? _compassSub;
+  ProviderSubscription<AsyncValue<double?>>? _compassSub;
   Timer? _keepAliveTimer;
   Timer? _retryTimer;
   ProviderSubscription<AsyncValue<bool>>? _connSub;
@@ -1597,8 +1624,10 @@ class _DriverLocationPublisherState
         distanceFilter: 5,
       ),
     ).listen(_onPosition);
-    _compassSub = FlutterCompass.events?.listen((event) {
-      _compassHeading = event.heading;
+    _compassSub = ref.listenManual(compassHeadingProvider, (prev, next) {
+      final heading = next.valueOrNull;
+      if (heading == null) return;
+      _compassHeading = heading;
       // `Geolocator.getPositionStream`'s `distanceFilter: 5` above means
       // `_onPosition` (the only other place that writes to
       // `localDriverPositionProvider`) simply never fires while genuinely
@@ -1608,7 +1637,7 @@ class _DriverLocationPublisherState
       // and never actually visibly turn to face the compass while stopped.
       final pos = _latest;
       if (pos != null && pos.speed <= _minHeadingSpeedMs) {
-        _lastHeading = event.heading;
+        _lastHeading = heading;
         ref.read(localDriverPositionProvider.notifier).state = DriverPosition(
           point: LatLng(pos.latitude, pos.longitude),
           heading: _lastHeading,
@@ -1690,7 +1719,7 @@ class _DriverLocationPublisherState
   @override
   void dispose() {
     _sub?.cancel();
-    _compassSub?.cancel();
+    _compassSub?.close();
     _keepAliveTimer?.cancel();
     _retryTimer?.cancel();
     _connSub?.close();

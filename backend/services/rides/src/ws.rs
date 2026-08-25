@@ -105,32 +105,52 @@ async fn socket_loop(socket: WebSocket, st: AppState, uid: Uuid, trip: Uuid) {
         json!({ "type": "presence", "event": "join", "sender_id": uid }).to_string(),
     );
 
-    while let Some(Ok(msg)) = stream.next().await {
-        match msg {
-            Message::Text(text) => {
-                let enriched = enrich(text.as_str(), uid);
-                let kind = enriched
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("event")
-                    .to_string();
-                let _ = sqlx::query(
-                    "INSERT INTO trip_events (trip_id, sender_id, kind, payload) VALUES ($1, $2, $3, $4)",
-                )
-                .bind(trip)
-                .bind(uid)
-                .bind(&kind)
-                .bind(&enriched)
-                .execute(&st.db)
-                .await;
-                st.hub.publish(trip, enriched.to_string());
+    // Also mark this user reachable in-app for the notify service's push
+    // suppression (`saarathi_core::presence`) — separate from the trip-room
+    // "presence" broadcast event above, which is peer-facing UI, not a
+    // cross-service signal. Refreshed periodically since a socket can sit
+    // idle a long time (e.g. a rider just watching the map) with no inbound
+    // client messages to piggyback the refresh on.
+    let mut presence_conn = st.redis.clone();
+    saarathi_core::presence::mark_online(&mut presence_conn, uid).await;
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(20));
+    ticker.tick().await;
+
+    loop {
+        tokio::select! {
+            msg = stream.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        let enriched = enrich(text.as_str(), uid);
+                        let kind = enriched
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .unwrap_or("event")
+                            .to_string();
+                        let _ = sqlx::query(
+                            "INSERT INTO trip_events (trip_id, sender_id, kind, payload) VALUES ($1, $2, $3, $4)",
+                        )
+                        .bind(trip)
+                        .bind(uid)
+                        .bind(&kind)
+                        .bind(&enriched)
+                        .execute(&st.db)
+                        .await;
+                        st.hub.publish(trip, enriched.to_string());
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Err(_)) => break,
+                    Some(Ok(_)) => {}
+                }
             }
-            Message::Close(_) => break,
-            _ => {}
+            _ = ticker.tick() => {
+                saarathi_core::presence::mark_online(&mut presence_conn, uid).await;
+            }
         }
     }
 
     send_task.abort();
+    saarathi_core::presence::mark_offline(&mut presence_conn, uid).await;
     st.hub.publish(
         trip,
         json!({ "type": "presence", "event": "leave", "sender_id": uid }).to_string(),

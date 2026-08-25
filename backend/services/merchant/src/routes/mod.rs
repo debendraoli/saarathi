@@ -1,5 +1,6 @@
 //! Router assembly.
 
+pub mod internal;
 pub mod marketplace;
 pub mod zone;
 
@@ -10,4 +11,5 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .merge(marketplace::routes())
         .merge(zone::routes())
+        .merge(internal::routes())
 }

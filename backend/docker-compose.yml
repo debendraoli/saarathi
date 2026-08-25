@@ -163,6 +163,7 @@ services:
       <<: *svc-env
       RIDES_PORT: 8082
       ROUTING_SERVICE_URL: http://routing:8084
+      MERCHANT_SERVICE_URL: http://merchant:8088
       GEOCODER_URL: ${GEOCODER_URL:-https://photon.komoot.io}
       # WebRTC ICE — set these in prod to your Coturn; blank = public STUN only.
       TURN_SECRET: ${TURN_SECRET:-}
@@ -211,6 +212,8 @@ services:
       postgres:
         condition: service_healthy
       nats:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8083/health"]

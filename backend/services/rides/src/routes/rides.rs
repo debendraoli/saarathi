@@ -543,6 +543,20 @@ pub(crate) async fn do_update_status(
         return Err(AppError::Forbidden);
     }
 
+    // A courier who has already picked up the order can only complete the
+    // delivery from here, not cancel it — the package is physically with
+    // them, so "cancelled" would leave it in limbo with no clean recovery
+    // the way it does before pickup (see the revert-and-redispatch branch
+    // below, which only ever applies pre-pickup). Plain rides are
+    // deliberately untouched by this — a driver may still need to cancel
+    // mid-ride for a genuine safety/emergency reason.
+    if status == "cancelled" && m.trip_type == "delivery" && m.status == "in_progress" {
+        return Err(AppError::bad(
+            ErrorCode::InvalidStatus,
+            "a delivery already picked up can only be completed, not cancelled",
+        ));
+    }
+
     let ts_col = match status.as_str() {
         "cancelled" => ", cancelled_at = now()",
         _ => "",
@@ -587,7 +601,66 @@ pub(crate) async fn do_update_status(
         .await?;
     }
 
+    // A courier cancelling before pickup (the only case that reaches here —
+    // the guard above already rejected it once `in_progress`) leaves the
+    // order still sitting at the merchant with nobody coming to get it.
+    // Revert it back to `ready` and clear `trip_id` so a fresh courier can
+    // actually be dispatched, instead of leaving it permanently stuck
+    // pointing at a dead trip (`spawn_courier` refuses to run again while
+    // `trip_id IS NOT NULL`).
+    let mut redispatch_order: Option<(Uuid, Uuid)> = None;
+    if m.trip_type == "delivery" && status == "cancelled" {
+        redispatch_order = sqlx::query_as(
+            "UPDATE orders SET trip_id = NULL, status = 'ready', updated_at = now() \
+             WHERE trip_id = $1 AND status NOT IN ('delivered', 'cancelled', 'rejected') \
+             RETURNING id, merchant_id",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    }
+
     tx.commit().await?;
+
+    // Best-effort, off the request path: neither the merchant notice nor
+    // the redispatch attempt should block this response or have any
+    // bearing on whether the cancellation itself succeeded.
+    if let Some((order_id, merchant_id)) = redispatch_order {
+        if let Ok(Some(owner_id)) = sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT owner_user_id FROM merchants WHERE id = $1",
+        )
+        .bind(merchant_id)
+        .fetch_one(&st.db)
+        .await
+        {
+            crate::notify::send(
+                &st.nats,
+                owner_id,
+                saarathi_core::domain::notif::TRANSACTIONAL,
+                "Courier cancelled",
+                "Your delivery driver cancelled before pickup — looking for a new one.",
+                Some(format!("saarathi://order/{order_id}")),
+            )
+            .await;
+        }
+        if !st.config.merchant_service_url.is_empty() {
+            let st = st.clone();
+            tokio::spawn(async move {
+                let client = reqwest::Client::new();
+                let res = client
+                    .post(format!(
+                        "{}/v1/internal/orders/{order_id}/redispatch",
+                        st.config.merchant_service_url
+                    ))
+                    .header("x-internal-secret", &st.config.internal_service_secret)
+                    .send()
+                    .await;
+                if let Err(e) = res {
+                    tracing::warn!(order = %order_id, error = %e, "redispatch call to merchant service failed");
+                }
+            });
+        }
+    }
 
     st.hub.publish(
         id,

@@ -58,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
     let database_url = std::env::var("DATABASE_URL")?;
     let jwt_secret = std::env::var("JWT_SECRET")?;
     let nats_url = env_or("NATS_URL", "nats://localhost:4222");
+    let redis_url = env_or("REDIS_URL", "redis://localhost:6379");
     let port: u16 = env_or("NOTIFY_PORT", "8083").parse()?;
 
     let pool = PgPoolOptions::new()
@@ -69,13 +70,32 @@ async fn main() -> anyhow::Result<()> {
         .execute(&pool)
         .await?;
 
+    // Used to skip a redundant push/SMS when the recipient already has a
+    // live in-app connection (see `saarathi_core::presence` — written by
+    // rides' WebSocket handlers). Presence is a nice-to-have, not a
+    // correctness requirement, so a Redis outage here degrades to "treat
+    // everyone as offline" (send the push) rather than failing startup.
+    let redis = match redis::Client::open(redis_url.clone()) {
+        Ok(client) => match redis::aio::ConnectionManager::new(client).await {
+            Ok(conn) => Some(conn),
+            Err(e) => {
+                tracing::warn!(error = %e, "notify: redis unavailable; presence check disabled");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "notify: invalid REDIS_URL; presence check disabled");
+            None
+        }
+    };
+
     // Consume notification requests off the bus. If NATS is down we still serve
     // the (read-only) inbox — delivery resumes when the bus returns.
     let fcm = fcm::FcmSender::from_env();
     let sms = sms::SmsSender::from_env().map(Arc::new);
     match async_nats::connect(&nats_url).await {
         Ok(client) => {
-            tokio::spawn(consume(client, pool.clone(), fcm.clone(), sms.clone()));
+            tokio::spawn(consume(client, pool.clone(), fcm.clone(), sms.clone(), redis.clone()));
             tracing::info!(%nats_url, "notify: subscribed to {NOTIFY_SUBJECT}");
         }
         Err(e) => tracing::warn!(error = %e, "notify: NATS unavailable; inbox is read-only"),
@@ -107,6 +127,7 @@ async fn consume(
     pool: PgPool,
     fcm: Option<Arc<fcm::FcmSender>>,
     sms: Option<Arc<sms::SmsSender>>,
+    redis: Option<redis::aio::ConnectionManager>,
 ) {
     let mut sub = match client.subscribe(NOTIFY_SUBJECT).await {
         Ok(s) => s,
@@ -118,7 +139,8 @@ async fn consume(
     while let Some(msg) = sub.next().await {
         match serde_json::from_slice::<NotifyRequest>(&msg.payload) {
             Ok(req) => {
-                if let Err(e) = deliver(&pool, &req, fcm.as_deref(), sms.as_deref()).await {
+                if let Err(e) = deliver(&pool, &req, fcm.as_deref(), sms.as_deref(), redis.clone()).await
+                {
                     tracing::warn!(error = %e, "notify: delivery failed");
                 }
             }
@@ -132,6 +154,7 @@ async fn deliver(
     req: &NotifyRequest,
     fcm: Option<&fcm::FcmSender>,
     sms: Option<&sms::SmsSender>,
+    mut redis: Option<redis::aio::ConnectionManager>,
 ) -> anyhow::Result<()> {
     if !req.silent {
         sqlx::query(
@@ -146,12 +169,28 @@ async fn deliver(
         .await?;
     }
 
+    // Skip the tray notification (and, below, the SMS fallback) entirely
+    // when the recipient already has a live in-app connection — a silent
+    // device-to-device signal excepted, since that's not something the app
+    // surfaces on its own from an open connection. The in-app inbox row
+    // above is written unconditionally either way, so nothing is lost, just
+    // the redundant push/SMS a reachable user doesn't need.
+    let online = if req.silent { false } else {
+        match redis.as_mut() {
+            Some(conn) => saarathi_core::presence::is_online(conn, req.user_id).await,
+            None => false,
+        }
+    };
+
     // Fan out to the user's registered devices via FCM (when configured). A
     // stale token (FCM UNREGISTERED) is pruned on the spot — no point paying
     // for it on every future notification, and it'd otherwise sit forever
     // since nothing else ever revisits `device_tokens`.
     let mut any_push_sent = false;
-    if let Some(sender) = fcm {
+    if online {
+        tracing::info!(user_id = %req.user_id, class = %req.class,
+            "notify: recipient online in-app; suppressing push");
+    } else if let Some(sender) = fcm {
         let tokens: Vec<(String,)> =
             sqlx::query_as("SELECT token FROM device_tokens WHERE user_id = $1")
                 .bind(req.user_id)
@@ -194,7 +233,7 @@ async fn deliver(
     // is fine. Silent signals never escalate to SMS — there's no user-
     // facing content to send, and a device-to-device signal that can't
     // reach the device isn't something to text about.
-    if should_escalate_to_sms(req.silent, &req.class, any_push_sent) {
+    if should_escalate_to_sms(req.silent, &req.class, any_push_sent || online) {
         if let Some(sender) = sms {
             let phone: Option<String> =
                 sqlx::query_scalar("SELECT phone FROM users WHERE id = $1")

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show pi;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -19,16 +20,25 @@ const routeLineColor = Color(0xFF1A73E8);
 /// A pin to render on the map.
 class MapPin {
   const MapPin(this.point, this.icon, this.color,
-      {this.rotate = false, this.id, this.label});
+      {this.rotate = false, this.heading, this.id, this.label});
   final LatLng point;
   final IconData icon;
   final Color color;
 
   /// Keep this pin screen-fixed (pointing "up") regardless of map rotation —
-  /// for a directional icon (the driver's nav arrow) on a heading-up map.
-  /// Plain location pins (pickup/destination) leave this false so they
-  /// rotate with the map like everything else.
+  /// for a directional icon (the driver's nav arrow) on a heading-up map
+  /// (`MapView.rotateMap: true`, the fullscreen turn-by-turn screen). Plain
+  /// location pins (pickup/destination) leave this false so they rotate with
+  /// the map like everything else.
   final bool rotate;
+
+  /// Bearing (degrees, 0-360) to rotate this pin's icon by directly — for a
+  /// directional icon on a map that *isn't* itself rotating
+  /// (`MapView.rotateMap: false`), so the icon visibly turns in place to
+  /// face the reported heading instead of relying on the map spinning
+  /// underneath a screen-fixed glyph. Combining this with [rotate]`: true`
+  /// on a rotating map isn't meaningful — pick one scheme per screen.
+  final double? heading;
 
   /// Stable identity ("pickup", "stop-0", "dest", …) used to key the marker
   /// widget so its entrance animation plays once per pin, not on every map
@@ -89,6 +99,7 @@ class MapView extends StatefulWidget {
     this.fitPadding = const EdgeInsets.fromLTRB(48, 96, 48, 320),
     this.showRecenterButton = false,
     this.callouts = const [],
+    this.rotateMap = true,
   });
 
   final LatLng center;
@@ -108,6 +119,14 @@ class MapView extends StatefulWidget {
   /// otherwise just use once, on first build.
   final DriverPosition? navigationTarget;
   final double navigationZoom;
+
+  /// Whether [navigationTarget]'s heading rotates the map itself (heading-up
+  /// nav, screen-fixed vehicle icon) — the fullscreen turn-by-turn screen's
+  /// scheme. `false` keeps the map north-up and leaves camera-follow/
+  /// look-ahead panning intact, for a screen that instead rotates the
+  /// vehicle *icon* itself via `MapPin.heading` (e.g. the in-trip map, so
+  /// it doesn't spin the whole map under a rider just watching it).
+  final bool rotateMap;
 
   /// Shows a floating "recenter on my location" button, bottom-right — off
   /// by default so screens that already manage their own map overlays there
@@ -322,7 +341,8 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   /// to make a compass [heading] point "up" on screen, the content has to
   /// turn the opposite way. (Sign flipped here rather than in the caller —
   /// easy single-line fix if it ever reads backwards on a real device.)
-  double? _mapRotationFor(double? heading) => heading == null ? null : -heading;
+  double? _mapRotationFor(double? heading) =>
+      (!widget.rotateMap || heading == null) ? null : -heading;
 
   /// The point the camera should actually center on for a given driver
   /// position — offset ahead of the raw GPS point in the direction of
@@ -694,7 +714,12 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
       child: _PopInMarker(
         child: pin.label != null
             ? _NumberedPin(label: pin.label!, color: pin.color)
-            : Icon(pin.icon, color: pin.color, size: 38),
+            : pin.heading != null
+                ? Transform.rotate(
+                    angle: pin.heading! * (pi / 180),
+                    child: Icon(pin.icon, color: pin.color, size: 38),
+                  )
+                : Icon(pin.icon, color: pin.color, size: 38),
       ),
     );
   }

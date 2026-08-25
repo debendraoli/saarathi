@@ -29,3 +29,4 @@ tower-http = { workspace = true }
 async-nats = { workspace = true }
 futures-util = { workspace = true }
 reqwest = { workspace = true }
+redis = { workspace = true }
