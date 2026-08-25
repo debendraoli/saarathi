@@ -79,7 +79,7 @@ http:
       rule: >-
         PathPrefix(`/v1/merchants`) || PathPrefix(`/v1/orders`)
         || PathPrefix(`/v1/merchant`) || PathPrefix(`/v1/admin/merchants`)
-        || PathPrefix(`/v1/items`)
+        || PathPrefix(`/v1/items`) || PathPrefix(`/v1/offers`)
 
     partners:
       entryPoints: ["web"]

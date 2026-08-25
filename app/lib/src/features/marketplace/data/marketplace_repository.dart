@@ -51,6 +51,17 @@ class MarketplaceRepository {
     return res.cast<Map<String, dynamic>>().map(MerchantOffer.fromJson).toList();
   }
 
+  /// Active offers across every nearby open merchant in [vertical] — the
+  /// "Offers near you" rail on the browse screen.
+  Future<List<NearbyOffer>> nearbyOffers(String vertical, LatLng? at) async {
+    final res = await _api.get('/v1/offers/nearby', query: {
+      'vertical': vertical,
+      if (at != null) 'lat': at.latitude,
+      if (at != null) 'lng': at.longitude,
+    }) as List;
+    return res.cast<Map<String, dynamic>>().map(NearbyOffer.fromJson).toList();
+  }
+
   /// Search items across all open merchants. [sort]: nearest | cheapest | rating.
   Future<List<ItemResult>> searchItems(
     String query, {
@@ -167,9 +178,14 @@ final marketplaceRepositoryProvider = Provider<MarketplaceRepository>((ref) {
   );
 });
 
-final merchantsProvider =
-    FutureProvider.autoDispose.family<List<Merchant>, String>((ref, vertical) {
-  return ref.watch(marketplaceRepositoryProvider).merchants(vertical, null);
+final merchantsProvider = FutureProvider.autoDispose
+    .family<List<Merchant>, (String, LatLng?)>((ref, args) {
+  return ref.watch(marketplaceRepositoryProvider).merchants(args.$1, args.$2);
+});
+
+final nearbyOffersProvider = FutureProvider.autoDispose
+    .family<List<NearbyOffer>, (String, LatLng?)>((ref, args) {
+  return ref.watch(marketplaceRepositoryProvider).nearbyOffers(args.$1, args.$2);
 });
 
 final myOrdersProvider = FutureProvider.autoDispose<List<CustomerOrder>>((ref) {

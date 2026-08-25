@@ -15,10 +15,14 @@ import '../domain/models.dart';
 /// Search items across every open merchant, sorted by nearest / cheapest / top
 /// rated. Tapping a hit opens its merchant so the user can add it to a cart.
 class ItemSearchScreen extends ConsumerStatefulWidget {
-  const ItemSearchScreen({super.key, this.vertical});
+  const ItemSearchScreen({super.key, this.vertical, this.initialQuery});
 
   /// Restrict to 'food' or 'grocery'; null searches both.
   final String? vertical;
+
+  /// Pre-filled from a category-shortcut tap on the browse screen — runs
+  /// immediately instead of waiting for the rider to type.
+  final String? initialQuery;
 
   @override
   ConsumerState<ItemSearchScreen> createState() => _ItemSearchScreenState();
@@ -36,6 +40,10 @@ class _ItemSearchScreenState extends ConsumerState<ItemSearchScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialQuery != null && widget.initialQuery!.isNotEmpty) {
+      _controller.text = widget.initialQuery!;
+      _onChanged(widget.initialQuery!);
+    }
     currentLatLng().then((p) {
       if (mounted) setState(() => _near = p);
     });

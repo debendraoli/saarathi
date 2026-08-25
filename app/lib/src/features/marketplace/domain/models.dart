@@ -64,6 +64,78 @@ class Merchant {
       );
 }
 
+/// One merchant's active offer, surfaced across the whole vertical (not
+/// scoped to a single store) — `GET /v1/offers/nearby`. Backs the "Offers
+/// near you" carousel on the browse screen; distinct from [MenuItem]'s
+/// per-store `storeOffersProvider`, which only fires once a merchant is
+/// already open.
+class NearbyOffer {
+  const NearbyOffer({
+    required this.id,
+    required this.merchantId,
+    required this.merchantName,
+    required this.vertical,
+    this.imageKey,
+    required this.kind,
+    this.value,
+    this.maxDiscount,
+    required this.minOrderAmount,
+    this.distanceKm,
+  });
+
+  final String id;
+  final String merchantId;
+  final String merchantName;
+  final String vertical;
+  final String? imageKey;
+  final String kind; // free_delivery | percent | flat
+  final double? value;
+  final double? maxDiscount;
+  final double minOrderAmount;
+  final double? distanceKm;
+
+  String? get imageUrl => asImageUrl(imageKey);
+
+  /// Short ribbon/badge text, e.g. "40% OFF", "Free delivery", "Rs 100 OFF".
+  String get badgeText {
+    switch (kind) {
+      case 'free_delivery':
+        return 'Free delivery';
+      case 'percent':
+        return '${value?.toStringAsFixed(0) ?? 0}% OFF';
+      default:
+        return 'Rs ${value?.toStringAsFixed(0) ?? 0} OFF';
+    }
+  }
+
+  /// A short qualifier under the badge, e.g. "Up to NPR 150" or "Orders over
+  /// NPR 300" — empty when the offer has neither a cap nor a minimum.
+  String get qualifier {
+    if (maxDiscount != null) {
+      return 'Up to NPR ${maxDiscount!.toStringAsFixed(0)}';
+    }
+    if (minOrderAmount > 0) {
+      return 'Orders over NPR ${minOrderAmount.toStringAsFixed(0)}';
+    }
+    return '';
+  }
+
+  factory NearbyOffer.fromJson(Map<String, dynamic> j) => NearbyOffer(
+        id: j['id'] as String,
+        merchantId: j['merchant_id'] as String,
+        merchantName: (j['merchant_name'] as String?) ?? '',
+        vertical: (j['vertical'] as String?) ?? 'food',
+        imageKey: j['image_key'] as String?,
+        kind: (j['kind'] as String?) ?? 'flat',
+        value: j['value'] == null ? null : asDouble(j['value']),
+        maxDiscount:
+            j['max_discount'] == null ? null : asDouble(j['max_discount']),
+        minOrderAmount: asDouble(j['min_order_amount']),
+        distanceKm:
+            j['distance_m'] == null ? null : asDouble(j['distance_m']) / 1000.0,
+      );
+}
+
 class MenuItem {
   const MenuItem({
     required this.id,

@@ -51,6 +51,7 @@ pub fn routes() -> Router<AppState> {
             post(deactivate_offer),
         )
         .route("/v1/merchants/{id}/offers/active", get(active_offers))
+        .route("/v1/offers/nearby", get(nearby_offers))
         .route("/v1/merchant/orders", get(merchant_orders))
         .route("/v1/merchant/menu", post(add_menu_item))
         .route(
@@ -1062,6 +1063,68 @@ async fn active_offers(
     .fetch_all(&st.db)
     .await?;
     Ok(Json(rows))
+}
+
+#[derive(Deserialize)]
+struct NearbyOffersQuery {
+    vertical: Option<String>,
+    lat: Option<f64>,
+    lng: Option<f64>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+struct NearbyOffer {
+    id: Uuid,
+    merchant_id: Uuid,
+    merchant_name: String,
+    vertical: String,
+    image_key: Option<String>,
+    kind: String,
+    value: Option<Decimal>,
+    max_discount: Option<Decimal>,
+    min_order_amount: Decimal,
+    distance_m: f64,
+}
+
+/// Active, in-window offers across nearby open merchants — the "Offers near
+/// you" rail on the browse screen. Same visibility rules as [list_merchants]
+/// (open, approved, in the merchant's delivery zone if it has one).
+async fn nearby_offers(
+    State(st): State<AppState>,
+    _auth: AuthUser,
+    Query(q): Query<NearbyOffersQuery>,
+) -> AppResult<Json<Vec<NearbyOffer>>> {
+    let lat = q.lat.unwrap_or(28.033);
+    let lng = q.lng.unwrap_or(82.484);
+    let rows: Vec<NearbyOffer> = sqlx::query_as(
+        "SELECT o.id, m.id AS merchant_id, m.name AS merchant_name, m.vertical, \
+                m.image_key, o.kind, o.value, o.max_discount, o.min_order_amount, \
+                ST_Distance(m.geog, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography) AS distance_m \
+         FROM merchant_offers o \
+         JOIN merchants m ON m.id = o.merchant_id \
+         WHERE o.active = true \
+           AND (o.starts_at IS NULL OR o.starts_at <= now()) \
+           AND (o.ends_at IS NULL OR o.ends_at >= now()) \
+           AND m.is_open AND m.status = 'approved' \
+           AND ($3::text IS NULL OR m.vertical = $3) \
+         ORDER BY distance_m ASC LIMIT 20",
+    )
+    .bind(lat)
+    .bind(lng)
+    .bind(q.vertical)
+    .fetch_all(&st.db)
+    .await?;
+
+    let mut visible = Vec::with_capacity(rows.len());
+    for o in rows {
+        let in_zone = zone::is_point_in_zone(&st, o.merchant_id, lat, lng)
+            .await
+            .map_err(AppError::Other)?;
+        if in_zone != Some(false) {
+            visible.push(o);
+        }
+    }
+    Ok(Json(visible))
 }
 
 #[derive(Deserialize)]
