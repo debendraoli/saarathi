@@ -52,7 +52,9 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
       case _Filter.all:
         return merchants;
       case _Filter.offers:
-        return merchants.where((m) => offerByMerchant.containsKey(m.id)).toList();
+        return merchants
+            .where((m) => offerByMerchant.containsKey(m.id))
+            .toList();
       case _Filter.rating4:
         return merchants.where((m) => m.rating >= 4.0).toList();
       case _Filter.under30:
@@ -95,6 +97,7 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       _VerticalToggle(
                         kind: _kind,
@@ -122,7 +125,10 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                 ),
                 if (offerList.isNotEmpty) ...[
                   const SizedBox(height: 18),
-                  _SectionHead(title: l.offersNearYou),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _SectionHead(title: l.offersNearYou),
+                  ),
                   const SizedBox(height: 10),
                   _OfferCarousel(offers: offerList),
                 ],
@@ -141,7 +147,8 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                   _EmptyMerchants(kind: _kind)
                 else if (filtered.isEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
                     child: Center(
                       child: Text(
                         l.noMerchantsMatchFilter,
@@ -155,6 +162,7 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         for (final m in filtered) ...[
                           _MerchantCard(
@@ -444,7 +452,8 @@ class _CategoryRail extends StatelessWidget {
                     textAlign: TextAlign.center,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                        fontSize: 11, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
@@ -539,7 +548,8 @@ class _OfferCarouselState extends State<_OfferCarousel> {
                     end: Alignment.bottomRight,
                   ),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -614,7 +624,8 @@ class _FilterChips extends StatelessWidget {
             onSelected: (_) => onChanged(f),
             avatar: Icon(icon, size: 15),
             label: Text(label),
-            labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+            labelStyle:
+                const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
           );
         },
       ),
@@ -642,157 +653,173 @@ class _MerchantCard extends StatelessWidget {
         onTap: () => context.push(Routes.merchant, extra: merchant),
         child: Padding(
           padding: const EdgeInsets.all(9),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Stack(
-                children: [
-                  Container(
-                    width: 88,
-                    height: 88,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(13),
-                      gradient: LinearGradient(
-                        colors: grad,
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(fallbackIcon, color: Colors.white70, size: 30),
-                  ),
-                  if (offer != null)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 3),
-                        decoration: const BoxDecoration(
-                          color: Color(0xCC000000),
-                          borderRadius: BorderRadius.only(
-                            bottomLeft: Radius.circular(13),
-                            bottomRight: Radius.circular(13),
-                          ),
-                        ),
-                        child: Text(
-                          offer!.badgeText,
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          // Fixed to the photo's own height so the Row's cross axis is
+          // bounded — without this, the meta row's Spacer() (below) sits in
+          // a Column stretched by an unbounded-height Row (this card is a
+          // ListView item, and Row's cross axis inherits that unbounded
+          // height unless something here pins it), which is the classic
+          // "flex child with unbounded constraints" crash: RenderFlex
+          // throws during layout, and since this Row lives inside the
+          // ListView's shared Viewport, that one exception blanks the
+          // entire scroll view, not just this card.
+          child: SizedBox(
+            height: 88,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Stack(
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
+                    Container(
+                      width: 88,
+                      height: 88,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(13),
+                        gradient: LinearGradient(
+                          colors: grad,
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child:
+                          Icon(fallbackIcon, color: Colors.white70, size: 30),
+                    ),
+                    if (offer != null)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 3),
+                          decoration: const BoxDecoration(
+                            color: Color(0xCC000000),
+                            borderRadius: BorderRadius.only(
+                              bottomLeft: Radius.circular(13),
+                              bottomRight: Radius.circular(13),
+                            ),
+                          ),
                           child: Text(
-                            merchant.name,
+                            offer!.badgeText,
+                            textAlign: TextAlign.center,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 15,
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2.5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: scheme.tertiaryContainer,
-                            borderRadius: BorderRadius.circular(7),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.star_rounded,
-                                  size: 12, color: scheme.onTertiaryContainer),
-                              const SizedBox(width: 2),
-                              Text(
-                                merchant.rating.toStringAsFixed(1),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  color: scheme.onTertiaryContainer,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (merchant.address != null) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        merchant.address!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: scheme.onSurfaceVariant,
                         ),
                       ),
-                    ],
-                    const Spacer(),
-                    Row(
-                      children: [
-                        Icon(Icons.schedule_rounded,
-                            size: 13, color: scheme.onSurfaceVariant),
-                        const SizedBox(width: 3),
-                        Text('${merchant.prepMins}m',
-                            style: TextStyle(
-                                fontSize: 11.5, color: scheme.onSurfaceVariant)),
-                        if (merchant.distanceKm != null) ...[
-                          const SizedBox(width: 10),
-                          Icon(Icons.near_me_rounded,
-                              size: 12, color: scheme.onSurfaceVariant),
-                          const SizedBox(width: 3),
-                          Text(
-                            '${merchant.distanceKm!.toStringAsFixed(1)} km',
-                            style: TextStyle(
-                                fontSize: 11.5, color: scheme.onSurfaceVariant),
-                          ),
-                        ],
-                        const Spacer(),
-                        if (!merchant.isOpen)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: scheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
+                  ],
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
                             child: Text(
-                              'Closed',
-                              style: TextStyle(
-                                color: scheme.onSurfaceVariant,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800,
+                              merchant.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15,
                               ),
                             ),
                           ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: scheme.tertiaryContainer,
+                              borderRadius: BorderRadius.circular(7),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.star_rounded,
+                                    size: 12,
+                                    color: scheme.onTertiaryContainer),
+                                const SizedBox(width: 2),
+                                Text(
+                                  merchant.rating.toStringAsFixed(1),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: scheme.onTertiaryContainer,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (merchant.address != null) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          merchant.address!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
                       ],
-                    ),
-                  ],
+                      const Spacer(),
+                      Row(
+                        children: [
+                          Icon(Icons.schedule_rounded,
+                              size: 13, color: scheme.onSurfaceVariant),
+                          const SizedBox(width: 3),
+                          Text('${merchant.prepMins}m',
+                              style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: scheme.onSurfaceVariant)),
+                          if (merchant.distanceKm != null) ...[
+                            const SizedBox(width: 10),
+                            Icon(Icons.near_me_rounded,
+                                size: 12, color: scheme.onSurfaceVariant),
+                            const SizedBox(width: 3),
+                            Text(
+                              '${merchant.distanceKm!.toStringAsFixed(1)} km',
+                              style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: scheme.onSurfaceVariant),
+                            ),
+                          ],
+                          const Spacer(),
+                          if (!merchant.isOpen)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: scheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                'Closed',
+                                style: TextStyle(
+                                  color: scheme.onSurfaceVariant,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
