@@ -7,6 +7,7 @@ pub mod bonus;
 pub mod config;
 pub mod db;
 pub mod dispatch;
+pub mod driver_ws;
 pub mod error;
 pub mod flags;
 pub mod hub;

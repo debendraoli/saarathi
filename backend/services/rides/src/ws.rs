@@ -9,6 +9,12 @@
 //!   { "type": "chat",     "body": "on my way" }     // masked text chat
 //!   { "type": "signal",   "kind": "offer"|"answer"|"ice", "data": {..} }  // WebRTC
 //! The server stamps `sender_id` and fans each message out to both peers.
+//! Every message here is broadcast-only (persisted to `trip_events`, fanned
+//! out to every subscriber) — `location`/`status`/bidding mutations go over
+//! plain HTTP (see `routes::tracking`/`routes::rides`/`routes::bidding`),
+//! which already has client-side retry/backoff; a request/reply ack protocol
+//! on top of this socket wasn't worth the added complexity for how
+//! infrequently those requests actually fire.
 
 use crate::auth::verify_access;
 use crate::state::AppState;

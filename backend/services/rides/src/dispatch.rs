@@ -529,8 +529,15 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
     tx.commit().await?;
 
     for &did in &targets {
+        // Published on the *driver's* own channel (see `driver_ws.rs`), not
+        // the trip's — a driver being offered this trip has no reason to
+        // already be connected to a WebSocket scoped to a trip they don't
+        // know exists yet. The driver-scoped socket is instead connected for
+        // as long as the driver app considers itself online, exactly so
+        // this reaches it immediately instead of waiting on the fallback
+        // poll below to notice.
         st.hub.publish(
-            trip_id,
+            did,
             serde_json::json!({
                 "type": "offer",
                 "trip_id": trip_id,

@@ -4,7 +4,7 @@ use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::models::{Trip, TRIP_COLS};
 use crate::pricing::{self, Estimate};
-use crate::routing::{LatLng, RouteProfile};
+use crate::routing::{LatLng, RouteProfile, RouteStep};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
@@ -153,6 +153,9 @@ struct RouteResp {
     duration_secs: i32,
     /// Ordered road-shape points for drawing the route polyline on the map.
     geometry: Vec<LatLng>,
+    /// Turn-by-turn maneuvers, in order — empty when the routing engine
+    /// couldn't supply them (offline fallback).
+    steps: Vec<RouteStep>,
 }
 
 /// Road-following route geometry for the map (pickup → stops → destination).
@@ -175,6 +178,7 @@ async fn route_geometry(
         distance_km: route.distance_km,
         duration_secs: route.duration_secs,
         geometry: route.geometry,
+        steps: route.steps,
     }))
 }
 
@@ -464,14 +468,20 @@ struct StatusRequest {
     reason: Option<String>,
 }
 
-async fn update_status(
-    State(st): State<AppState>,
-    AuthUser(claims): AuthUser,
-    Path(id): Path<Uuid>,
-    Json(body): Json<StatusRequest>,
-) -> AppResult<Json<Trip>> {
+/// Everything `update_status` actually does, factored out so the WebSocket
+/// handler (`ws.rs`) can accept a `status` frame sent over the already-open
+/// trip socket and perform the exact same transition — same validation,
+/// same completion/cancellation handling, same order-mirroring, same
+/// broadcast — rather than only ever being reachable over HTTP.
+pub(crate) async fn do_update_status(
+    st: &AppState,
+    claims: &crate::auth::Claims,
+    id: Uuid,
+    status: String,
+    reason: Option<String>,
+) -> AppResult<Trip> {
     const ALLOWED: [&str; 4] = ["arriving", "in_progress", "completed", "cancelled"];
-    if !ALLOWED.contains(&body.status.as_str()) {
+    if !ALLOWED.contains(&status.as_str()) {
         return Err(AppError::bad(
             ErrorCode::InvalidStatus,
             "invalid status transition",
@@ -483,7 +493,7 @@ async fn update_status(
     // Validated here with a plain (non-locking) read since the money-
     // critical part re-validates under its own row lock inside that
     // function; no need to hold this connection's lock across the call.
-    if body.status == "completed" {
+    if status == "completed" {
         let row: Option<(Uuid, Option<Uuid>, String)> = sqlx::query_as(
             "SELECT rider_id, driver_id, trip_type::text FROM trips WHERE id = $1",
         )
@@ -515,8 +525,8 @@ async fn update_status(
                 ));
             }
         }
-        let trip = complete_trip(&st, id, claims.sub).await?;
-        return Ok(Json(trip));
+        let trip = complete_trip(st, id, claims.sub).await?;
+        return Ok(trip);
     }
 
     let mut tx = st.db.begin().await?;
@@ -533,7 +543,7 @@ async fn update_status(
         return Err(AppError::Forbidden);
     }
 
-    let ts_col = match body.status.as_str() {
+    let ts_col = match status.as_str() {
         "cancelled" => ", cancelled_at = now()",
         _ => "",
     };
@@ -551,8 +561,8 @@ async fn update_status(
          WHERE id = $1 RETURNING {TRIP_COLS}"
     )))
     .bind(id)
-    .bind(&body.status)
-    .bind(&body.reason)
+    .bind(&status)
+    .bind(&reason)
     .bind(claims.sub)
     .bind(cancelled_by_role)
     .fetch_one(&mut *tx)
@@ -567,7 +577,7 @@ async fn update_status(
     // late-arriving trip status can't clobber one, e.g., cancelled by staff
     // support in the meantime. (`completed` isn't handled here — it never
     // reaches this function anymore, see the early-return above.)
-    if m.trip_type == "delivery" && body.status == "in_progress" {
+    if m.trip_type == "delivery" && status == "in_progress" {
         sqlx::query(
             "UPDATE orders SET status = 'picked_up', updated_at = now() \
              WHERE trip_id = $1 AND status NOT IN ('delivered', 'cancelled', 'rejected')",
@@ -581,9 +591,9 @@ async fn update_status(
 
     st.hub.publish(
         id,
-        json!({ "type": "status", "status": body.status }).to_string(),
+        json!({ "type": "status", "status": status }).to_string(),
     );
-    if body.status == "cancelled" && m.status != "cancelled" {
+    if status == "cancelled" && m.status != "cancelled" {
         crate::routes::metrics::track(
             &st.db,
             "ride_cancelled",
@@ -594,9 +604,19 @@ async fn update_status(
         )
         .await;
     }
-    if m.status.as_str() != body.status {
-        notify_status_change(&st, &m, id, claims.sub, &body.status).await;
+    if m.status.as_str() != status {
+        notify_status_change(st, &m, id, claims.sub, &status).await;
     }
+    Ok(trip)
+}
+
+async fn update_status(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<StatusRequest>,
+) -> AppResult<Json<Trip>> {
+    let trip = do_update_status(&st, &claims, id, body.status, body.reason).await?;
     Ok(Json(trip))
 }
 

@@ -94,20 +94,26 @@ async fn maybe_auto_complete(st: &AppState, trip_id: Uuid, driver_id: Uuid, lat:
 }
 
 #[derive(Deserialize)]
-struct Location {
-    lat: f64,
-    lng: f64,
-    heading: Option<f64>,
-    speed: Option<f64>,
+pub(crate) struct Location {
+    pub(crate) lat: f64,
+    pub(crate) lng: f64,
+    pub(crate) heading: Option<f64>,
+    pub(crate) speed: Option<f64>,
 }
 
-async fn post_location(
-    State(st): State<AppState>,
-    AuthUser(claims): AuthUser,
-    Path(id): Path<Uuid>,
-    Json(b): Json<Location>,
-) -> AppResult<Json<Value>> {
-    assert_participant(&st, id, &claims).await?;
+/// Everything `post_location` actually does, factored out so the WebSocket
+/// handler (`ws.rs`) can accept a `location` frame sent over the already-open
+/// trip socket and perform the exact same write — same Redis HSET/EXPIRE,
+/// same `trip_events` breadcrumb, same broadcast, same auto-complete check —
+/// rather than only ever being reachable over HTTP. The HTTP route below is
+/// now a thin wrapper; nothing here is axum-specific.
+pub(crate) async fn do_post_location(
+    st: &AppState,
+    claims: &crate::auth::Claims,
+    id: Uuid,
+    b: Location,
+) -> AppResult<()> {
+    assert_participant(st, id, claims).await?;
     let mut r = st.redis.clone();
     let key = format!("trip:{id}:loc");
     let _: () = redis::cmd("HSET")
@@ -147,7 +153,17 @@ async fn post_location(
     .await;
 
     st.hub.publish(id, payload.to_string());
-    maybe_auto_complete(&st, id, claims.sub, b.lat, b.lng).await;
+    maybe_auto_complete(st, id, claims.sub, b.lat, b.lng).await;
+    Ok(())
+}
+
+async fn post_location(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+    Json(b): Json<Location>,
+) -> AppResult<Json<Value>> {
+    do_post_location(&st, &claims, id, b).await?;
     Ok(Json(json!({ "ok": true })))
 }
 

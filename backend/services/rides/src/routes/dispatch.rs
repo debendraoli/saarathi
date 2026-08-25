@@ -30,18 +30,23 @@ pub fn routes() -> Router<AppState> {
 }
 
 #[derive(Deserialize)]
-struct OnlineRequest {
-    lat: f64,
-    lng: f64,
+pub(crate) struct OnlineRequest {
+    pub(crate) lat: f64,
+    pub(crate) lng: f64,
     #[serde(default)]
-    job_types: Vec<String>,
+    pub(crate) job_types: Vec<String>,
 }
 
-async fn go_online(
-    State(st): State<AppState>,
-    AuthUser(claims): AuthUser,
-    Json(body): Json<OnlineRequest>,
-) -> AppResult<Json<Value>> {
+/// Everything `go_online` actually does, factored out so the new
+/// driver-scoped WebSocket (`driver_ws.rs`) — connected for as long as the
+/// driver app considers itself online, independent of any specific trip —
+/// can accept an `online` frame and perform the exact same transition,
+/// rather than only ever being reachable over HTTP.
+pub(crate) async fn do_go_online(
+    st: &AppState,
+    claims: &crate::auth::Claims,
+    body: OnlineRequest,
+) -> AppResult<Vec<String>> {
     if claims.role != roles::DRIVER {
         return Err(AppError::Forbidden);
     }
@@ -59,7 +64,7 @@ async fn go_online(
     } else {
         body.job_types
     };
-    dispatch::set_online(&st, claims.sub, body.lat, body.lng, &job_types)
+    dispatch::set_online(st, claims.sub, body.lat, body.lng, &job_types)
         .await
         .map_err(AppError::Other)?;
     // Persist the availability toggle so the dashboard sees who is online and it
@@ -73,22 +78,31 @@ async fn go_online(
     {
         tracing::warn!(driver = %claims.sub, error = %e, "is_online=true persistence failed");
     }
+    Ok(job_types)
+}
+
+async fn go_online(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<OnlineRequest>,
+) -> AppResult<Json<Value>> {
+    let job_types = do_go_online(&st, &claims, body).await?;
     Ok(Json(json!({ "online": true, "job_types": job_types })))
 }
 
 #[derive(Deserialize)]
-struct HeartbeatRequest {
-    lat: f64,
-    lng: f64,
+pub(crate) struct HeartbeatRequest {
+    pub(crate) lat: f64,
+    pub(crate) lng: f64,
     #[serde(default)]
-    job_types: Vec<String>,
+    pub(crate) job_types: Vec<String>,
 }
 
-async fn heartbeat(
-    State(st): State<AppState>,
-    AuthUser(claims): AuthUser,
-    Json(body): Json<HeartbeatRequest>,
-) -> AppResult<Json<Value>> {
+pub(crate) async fn do_heartbeat(
+    st: &AppState,
+    claims: &crate::auth::Claims,
+    body: HeartbeatRequest,
+) -> AppResult<()> {
     if claims.role != roles::DRIVER {
         return Err(AppError::Forbidden);
     }
@@ -97,17 +111,23 @@ async fn heartbeat(
     } else {
         body.job_types
     };
-    dispatch::set_online(&st, claims.sub, body.lat, body.lng, &job_types)
+    dispatch::set_online(st, claims.sub, body.lat, body.lng, &job_types)
         .await
         .map_err(AppError::Other)?;
+    Ok(())
+}
+
+async fn heartbeat(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<HeartbeatRequest>,
+) -> AppResult<Json<Value>> {
+    do_heartbeat(&st, &claims, body).await?;
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn go_offline(
-    State(st): State<AppState>,
-    AuthUser(claims): AuthUser,
-) -> AppResult<Json<Value>> {
-    dispatch::set_offline(&st, claims.sub)
+pub(crate) async fn do_go_offline(st: &AppState, claims: &crate::auth::Claims) -> AppResult<()> {
+    dispatch::set_offline(st, claims.sub)
         .await
         .map_err(AppError::Other)?;
     if let Err(e) = sqlx::query("UPDATE drivers SET is_online = false WHERE user_id = $1")
@@ -117,6 +137,14 @@ async fn go_offline(
     {
         tracing::warn!(driver = %claims.sub, error = %e, "is_online=false persistence failed");
     }
+    Ok(())
+}
+
+async fn go_offline(
+    State(st): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<Value>> {
+    do_go_offline(&st, &claims).await?;
     Ok(Json(json!({ "online": false })))
 }
 

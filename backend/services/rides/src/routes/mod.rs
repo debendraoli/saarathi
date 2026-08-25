@@ -22,6 +22,7 @@ pub mod support;
 pub mod surge;
 pub mod tracking;
 
+use crate::driver_ws;
 use crate::state::AppState;
 use crate::ws;
 use axum::{routing::get, Json, Router};
@@ -38,6 +39,7 @@ pub fn router(state: AppState) -> Router {
     Router::<AppState>::new()
         .route("/health", get(health))
         .route("/v1/ws", get(ws::ws_handler))
+        .route("/v1/driver/ws", get(driver_ws::driver_ws_handler))
         .merge(rides::routes())
         .merge(bidding::routes())
         .merge(delivery::routes())
