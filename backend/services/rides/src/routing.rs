@@ -2,7 +2,7 @@
 //! `saarathi_core::routing::RoutingClient`, the single implementation now
 //! shared with `saarathi-merchant`.
 
-pub use saarathi_core::routing::{LatLng, RouteProfile, RouteResult};
+pub use saarathi_core::routing::{LatLng, ManeuverKind, RouteProfile, RouteResult, RouteStep};
 
 use crate::config::Config;
 use rust_decimal::prelude::*;

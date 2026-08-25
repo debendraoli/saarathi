@@ -9,7 +9,9 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use rust_decimal::prelude::*;
-use saarathi_core::routing::{haversine_path, LatLng, RouteProfile, RouteRequest, RouteResult};
+use saarathi_core::routing::{
+    haversine_path, LatLng, ManeuverKind, RouteProfile, RouteRequest, RouteResult, RouteStep,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -126,6 +128,7 @@ async fn route(
             duration_secs: 0,
             geometry: Vec::new(),
             source: "none".into(),
+            steps: Vec::new(),
         }));
     }
     let profile = RouteProfile::from_wire(&req.profile);
@@ -265,12 +268,51 @@ struct ValhallaLeg {
     /// Encoded polyline (Valhalla uses precision 1e6) of this leg's shape.
     #[serde(default)]
     shape: String,
+    #[serde(default)]
+    maneuvers: Vec<ValhallaManeuver>,
 }
 
 #[derive(Deserialize)]
 struct ValhallaSummary {
     length: f64, // km (units=kilometers)
     time: f64,   // seconds
+}
+
+/// One entry of Valhalla's own turn-by-turn output — `instruction` is
+/// already a complete, ready-to-display sentence ("Turn left onto Omkar
+/// Marga."), so this just carries it through rather than re-deriving it.
+#[derive(Deserialize)]
+struct ValhallaManeuver {
+    #[serde(rename = "type")]
+    kind: i32,
+    instruction: String,
+    #[serde(default)]
+    street_names: Vec<String>,
+    length: f64, // km
+    time: f64,   // seconds
+    begin_shape_index: usize,
+}
+
+/// Valhalla's maneuver type codes (`odin::TripLeg_Maneuver_Type`) collapsed
+/// to the small set of icons a nav UI actually needs to distinguish —
+/// unlisted/transit-only codes fall back to `Straight`, a safe default for
+/// a driving-only app.
+fn maneuver_kind(valhalla_type: i32) -> ManeuverKind {
+    match valhalla_type {
+        1 | 2 | 3 => ManeuverKind::Depart,
+        4 | 5 | 6 => ManeuverKind::Arrive,
+        9 => ManeuverKind::SlightRight,
+        16 => ManeuverKind::SlightLeft,
+        10 | 18 | 20 | 23 => ManeuverKind::Right,
+        11 => ManeuverKind::SharpRight,
+        12 => ManeuverKind::UturnRight,
+        13 => ManeuverKind::UturnLeft,
+        14 => ManeuverKind::SharpLeft,
+        15 | 19 | 21 | 24 => ManeuverKind::Left,
+        25 => ManeuverKind::Merge,
+        26 | 27 => ManeuverKind::Roundabout,
+        _ => ManeuverKind::Straight,
+    }
 }
 
 // ── OSRM wire types ──────────────────────────────────────────────────────────
@@ -432,9 +474,24 @@ impl Inner {
         // Valhalla returns one encoded polyline per leg (precision 1e6); stitch
         // them into a single ordered path for the map.
         let mut geometry = Vec::new();
+        let mut steps = Vec::new();
         for leg in &resp.trip.legs {
+            // Global offset so a step's `start_index` points into the
+            // *stitched* multi-leg geometry below, not just this one leg's
+            // own shape array (maneuvers report leg-relative indices).
+            let leg_offset = geometry.len();
             if !leg.shape.is_empty() {
                 geometry.extend(decode_polyline(&leg.shape, 1e6));
+            }
+            for m in &leg.maneuvers {
+                steps.push(RouteStep {
+                    instruction: m.instruction.clone(),
+                    street_name: m.street_names.first().cloned(),
+                    distance_km: Decimal::from_f64(m.length).unwrap_or_default().round_dp(3),
+                    duration_secs: m.time.round() as i32,
+                    maneuver: maneuver_kind(m.kind),
+                    start_index: leg_offset + m.begin_shape_index,
+                });
             }
         }
         Ok(RouteResult {
@@ -444,6 +501,7 @@ impl Inner {
             duration_secs: resp.trip.summary.time.round() as i32,
             geometry,
             source: "valhalla".into(),
+            steps,
         })
     }
 
@@ -463,6 +521,7 @@ impl Inner {
             duration_secs,
             geometry,
             source: "osrm".into(),
+            steps: Vec::new(),
         })
     }
 
@@ -502,6 +561,7 @@ impl Inner {
             duration_secs: route.duration.round() as i32,
             geometry,
             source: "osrm".into(),
+            steps: Vec::new(),
         })
     }
 }

@@ -56,6 +56,48 @@ pub struct RouteResult {
     pub geometry: Vec<LatLng>,
     /// Which method produced this: "valhalla" | "osrm" | "haversine" | "none".
     pub source: String,
+    /// Turn-by-turn maneuvers, in order. Only populated for `source ==
+    /// "valhalla"` today (Valhalla returns full instructions natively; OSRM
+    /// would need a separate `steps=true` request, not yet wired up). Empty
+    /// for the haversine fallback — there's no real road path to narrate.
+    #[serde(default)]
+    pub steps: Vec<RouteStep>,
+}
+
+/// One leg of a turn-by-turn route — human-readable, ready to display as-is
+/// (Valhalla generates the instruction text; this isn't rebuilding a
+/// narration engine, just carrying its output through).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouteStep {
+    pub instruction: String,
+    pub street_name: Option<String>,
+    pub distance_km: Decimal,
+    pub duration_secs: i32,
+    pub maneuver: ManeuverKind,
+    /// Index into the route's `geometry` where this step begins — the
+    /// client's "you are here for this step" marker.
+    pub start_index: usize,
+}
+
+/// Coarse maneuver shape, for picking an icon — deliberately not the source
+/// engine's own numeric type code passed through verbatim, since that's an
+/// implementation detail of whichever engine answered (Valhalla today).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManeuverKind {
+    Depart,
+    Arrive,
+    Straight,
+    SlightLeft,
+    Left,
+    SharpLeft,
+    UturnLeft,
+    SlightRight,
+    Right,
+    SharpRight,
+    UturnRight,
+    Roundabout,
+    Merge,
 }
 
 /// Haversine sum over the legs — the offline-safe fallback. `road_factor`
@@ -68,6 +110,7 @@ pub fn haversine_path(points: &[LatLng], road_factor: f64, avg_speed_kmh: f64) -
             duration_secs: 0,
             geometry: Vec::new(),
             source: "none".into(),
+            steps: Vec::new(),
         };
     }
     let mut road = 0.0;
@@ -86,6 +129,7 @@ pub fn haversine_path(points: &[LatLng], road_factor: f64, avg_speed_kmh: f64) -
         // still draws something sensible.
         geometry: points.to_vec(),
         source: "haversine".into(),
+        steps: Vec::new(),
     }
 }
 
@@ -134,6 +178,7 @@ impl RoutingClient {
                 duration_secs: 0,
                 geometry: Vec::new(),
                 source: "none".into(),
+                steps: Vec::new(),
             };
         }
         if !self.service_url.is_empty() {
