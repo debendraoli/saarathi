@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../../shared/widgets/common.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../data/contributions_repository.dart';
 import '../domain/models.dart';
-import 'contribute_screen.dart';
-import 'my_contributions_screen.dart';
 
 /// Landing screen for the places-contribution program: balance + redeem,
 /// a short "how it works" pitch, the one action that matters (add a place),
@@ -21,16 +21,15 @@ class ContributeHubScreen extends ConsumerStatefulWidget {
   const ContributeHubScreen({super.key});
 
   @override
-  ConsumerState<ContributeHubScreen> createState() => _ContributeHubScreenState();
+  ConsumerState<ContributeHubScreen> createState() =>
+      _ContributeHubScreenState();
 }
 
 class _ContributeHubScreenState extends ConsumerState<ContributeHubScreen> {
   bool _redeeming = false;
 
   Future<void> _addPlace() async {
-    final ok = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const ContributeScreen()),
-    );
+    final ok = await context.push<bool>(Routes.contribute);
     if (ok == true) {
       ref.invalidate(myContributionsProvider);
       ref.invalidate(pointsSummaryProvider);
@@ -85,11 +84,7 @@ class _ContributeHubScreenState extends ConsumerState<ContributeHubScreen> {
     }
   }
 
-  void _seeAllHistory() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const MyContributionsScreen()),
-    );
-  }
+  void _seeAllHistory() => context.push(Routes.myContributions);
 
   @override
   Widget build(BuildContext context) {
@@ -177,7 +172,8 @@ class _ContributeHubScreenState extends ConsumerState<ContributeHubScreen> {
                       scrollDirection: Axis.horizontal,
                       itemCount: summary.badges.length,
                       separatorBuilder: (_, __) => const SizedBox(width: 10),
-                      itemBuilder: (_, i) => _BadgeChip(badge: summary.badges[i]),
+                      itemBuilder: (_, i) =>
+                          _BadgeChip(badge: summary.badges[i]),
                     ),
                   ),
                 const SizedBox(height: 24),
@@ -311,7 +307,8 @@ class _HeroCard extends StatelessWidget {
 }
 
 class _StepRow extends StatelessWidget {
-  const _StepRow({required this.number, required this.title, required this.body});
+  const _StepRow(
+      {required this.number, required this.title, required this.body});
   final int number;
   final String title;
   final String body;
@@ -347,8 +344,8 @@ class _StepRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(title,
-                    style:
-                        const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 13)),
                 const SizedBox(height: 2),
                 Text(body,
                     style: TextStyle(
@@ -379,7 +376,8 @@ class _BadgeChip extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.military_tech_rounded, color: scheme.onTertiaryContainer, size: 26),
+          Icon(Icons.military_tech_rounded,
+              color: scheme.onTertiaryContainer, size: 26),
           const SizedBox(height: 6),
           Text(
             badge.title,
@@ -407,9 +405,21 @@ class _RecentTile extends StatelessWidget {
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
     final (label, color, icon) = switch (item.status) {
-      'approved' => (l.contributionStatusApproved, scheme.primary, Icons.check_circle_rounded),
-      'rejected' => (l.contributionStatusRejected, scheme.error, Icons.cancel_rounded),
-      _ => (l.contributionStatusPending, scheme.outline, Icons.hourglass_top_rounded),
+      'approved' => (
+          l.contributionStatusApproved,
+          scheme.primary,
+          Icons.check_circle_rounded
+        ),
+      'rejected' => (
+          l.contributionStatusRejected,
+          scheme.error,
+          Icons.cancel_rounded
+        ),
+      _ => (
+          l.contributionStatusPending,
+          scheme.outline,
+          Icons.hourglass_top_rounded
+        ),
     };
     return Card(
       margin: const EdgeInsets.only(top: 8),
@@ -420,7 +430,8 @@ class _RecentTile extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+            Text(label,
+                style: TextStyle(color: color, fontWeight: FontWeight.w600)),
             if (item.pointsAwarded != null)
               Text('+${item.pointsAwarded}',
                   style: Theme.of(context).textTheme.bodySmall),

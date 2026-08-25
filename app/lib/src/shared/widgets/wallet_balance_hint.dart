@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../core/router/app_router.dart';
 import '../../features/wallet/data/wallet_repository.dart';
-import '../../features/wallet/presentation/topup_screen.dart';
 
 /// Shown wherever "wallet" is an available payment method — wallet payments
 /// actually debit now, so surface whether the balance covers the amount
@@ -47,9 +48,7 @@ class WalletBalanceHint extends ConsumerWidget {
               ),
               if (low)
                 TextButton(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const TopupScreen()),
-                  ),
+                  onPressed: () => context.push(Routes.topup),
                   child: Text(l.topUp),
                 ),
             ],

@@ -114,12 +114,11 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                 const SizedBox(height: 14),
                 _CategoryRail(
                   kind: _kind,
-                  onTap: (query) => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => ItemSearchScreen(
-                        vertical: _vertical,
-                        initialQuery: query,
-                      ),
+                  onTap: (query) => context.push(
+                    Routes.itemSearch,
+                    extra: ItemSearchArgs(
+                      vertical: _vertical,
+                      initialQuery: query,
                     ),
                   ),
                 ),
@@ -147,8 +146,8 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
                   _EmptyMerchants(kind: _kind)
                 else if (filtered.isEmpty)
                   Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 24),
                     child: Center(
                       child: Text(
                         l.noMerchantsMatchFilter,
@@ -348,10 +347,9 @@ class _AnimatedSearchBarState extends State<_AnimatedSearchBar> {
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => ItemSearchScreen(vertical: widget.vertical),
-          ),
+        onTap: () => context.push(
+          Routes.itemSearch,
+          extra: ItemSearchArgs(vertical: widget.vertical),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),

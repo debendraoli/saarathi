@@ -12,6 +12,15 @@ import '../../../core/router/app_router.dart';
 import '../data/marketplace_repository.dart';
 import '../domain/models.dart';
 
+/// [ItemSearchScreen]'s constructor args, passed through go_router's `extra`
+/// (see `Routes.itemSearch`) rather than the route needing to know its
+/// constructor shape directly.
+class ItemSearchArgs {
+  const ItemSearchArgs({this.vertical, this.initialQuery});
+  final String? vertical;
+  final String? initialQuery;
+}
+
 /// Search items across every open merchant, sorted by nearest / cheapest / top
 /// rated. Tapping a hit opens its merchant so the user can add it to a cart.
 class ItemSearchScreen extends ConsumerStatefulWidget {

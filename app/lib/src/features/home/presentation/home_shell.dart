@@ -73,12 +73,20 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final hasApprovedMerchant =
         merchantsAsync.valueOrNull?.any((m) => m.isApproved) ?? false;
 
-    // Reconcile cached data when connectivity is restored.
+    // Reconcile cached data when connectivity is restored — `driverKycProvider`/
+    // `myMerchantsProvider` matter most here: a one-shot `FutureProvider` that
+    // failed while offline just sits in `AsyncError` forever with nothing to
+    // retry it automatically, which (see `identityLoading` below) used to
+    // both leave `DriverHome`'s own "Retry" screen stuck and make the
+    // rider/driver switch spuriously reappear for an already-approved
+    // driver, since an error was being read the same as "not yet approved".
     ref.listen(connectivityProvider, (prev, next) {
       if (prev?.valueOrNull == false && next.valueOrNull == true) {
         ref.invalidate(myTripsProvider);
         ref.invalidate(inboxProvider);
         ref.invalidate(savedPlacesProvider);
+        ref.invalidate(driverKycProvider);
+        ref.invalidate(myMerchantsProvider);
       }
     });
     final online = ref.watch(connectivityProvider).valueOrNull ?? true;
@@ -95,6 +103,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             (driverKycAsync != null &&
                 !driverKycAsync.hasValue &&
                 driverKycAsync.isLoading);
+    // A fetch that failed (offline, say) and never got a real value is
+    // "still don't know", not "confirmed not approved" — without this, the
+    // switch used to spuriously reappear for an already-approved driver the
+    // instant one of these providers hit a network error. Deliberately
+    // separate from `identityLoading` above: `home`'s own selection stays
+    // unchanged, so `DriverHome`/`MerchantHomeBody`'s own `.when(error: …)`
+    // branch still gets to show a real "Retry" affordance — this only
+    // stops the *switch* from asserting a negative off the back of an error.
+    final identityUncertain =
+        (!merchantsAsync.hasValue && merchantsAsync.hasError) ||
+            (driverKycAsync != null &&
+                !driverKycAsync.hasValue &&
+                driverKycAsync.hasError);
 
     final Widget home;
     if (identityLoading) {
@@ -114,6 +135,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // switch flash into view for a moment right after login before these
     // resolve and hide it again.
     final showModeSwitch = !identityLoading &&
+        !identityUncertain &&
         isDriverAccount &&
         !driverKycApproved &&
         !hasApprovedMerchant;
@@ -128,9 +150,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             icon: const Icon(Icons.menu_rounded),
             onPressed: () {
               Haptics.tap();
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const _MenuScreen()),
-              );
+              context.push(Routes.menu);
             },
           ),
         ],
@@ -160,9 +180,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
 /// The hamburger menu, as a full screen (not a partial-width slide-over) —
 /// user identity up top, then the screens that used to be bottom tabs, with
-/// room to grow as more sections are added.
-class _MenuScreen extends ConsumerWidget {
-  const _MenuScreen();
+/// room to grow as more sections are added. A real `GoRoute` (see
+/// `Routes.menu`), reached via `context.push` — not a raw
+/// `Navigator.push(MaterialPageRoute(...))` sitting on top of go_router's
+/// own Navigator, which corrupted its route-match bookkeeping badly enough
+/// that every screen reached through here had a broken back button.
+class MenuScreen extends ConsumerWidget {
+  const MenuScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -172,7 +196,6 @@ class _MenuScreen extends ConsumerWidget {
 
     void go(String route) {
       Haptics.tap();
-      Navigator.of(context).pop();
       context.push(route);
     }
 
@@ -186,8 +209,9 @@ class _MenuScreen extends ConsumerWidget {
               child: Row(
                 children: [
                   IconButton(
-                    icon: Icon(Icons.close_rounded, color: scheme.onPrimaryContainer),
-                    onPressed: () => Navigator.of(context).pop(),
+                    icon: Icon(Icons.close_rounded,
+                        color: scheme.onPrimaryContainer),
+                    onPressed: () => context.pop(),
                   ),
                   const SizedBox(width: 6),
                   CircleAvatar(
@@ -284,7 +308,9 @@ class _HomeLoading extends StatelessWidget {
     // rarer than a plain rider/driver account, and the current mode toggle
     // (known synchronously, unlike the merchant/KYC lookups this is standing
     // in for) is otherwise a reliable guess at which shape is coming.
-    return isDriverMode ? const DriverHomeSkeleton() : const RiderHomeSkeleton();
+    return isDriverMode
+        ? const DriverHomeSkeleton()
+        : const RiderHomeSkeleton();
   }
 }
 
