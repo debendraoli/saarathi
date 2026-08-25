@@ -11,6 +11,8 @@
   "actionGetStarted": "Get started",
   "actionOk": "OK",
 
+  "developedBy": "Developed by {company}",
+  "@developedBy": { "placeholders": { "company": {} } },
   "chooseLanguage": "Choose your language",
   "languageEnglish": "English",
   "languageNepali": "नेपाली",

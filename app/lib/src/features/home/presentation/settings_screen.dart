@@ -54,6 +54,15 @@ class SettingsScreen extends ConsumerWidget {
                 .read(localeControllerProvider.notifier)
                 .set(Locale(s.first)),
           ),
+          const SizedBox(height: 32),
+          Center(
+            child: Text(
+              l.developedBy('Apex Infratech Pvt. Ltd.'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+            ),
+          ),
         ],
       ),
     );
