@@ -37,6 +37,10 @@ class DriverForegroundService {
         channelName: 'Driver online',
         channelDescription: 'Keeps you online to receive ride requests',
         onlyAlertOnce: true,
+        // "Online since HH:MM" reads as a live status the way a persistent
+        // ongoing-activity notification should, rather than a static label
+        // that could have been posted at any point in the session.
+        showWhen: true,
       ),
       iosNotificationOptions: const IOSNotificationOptions(),
       foregroundTaskOptions: ForegroundTaskOptions(
@@ -63,6 +67,26 @@ class DriverForegroundService {
     if (await FlutterForegroundTask.isRunningService) {
       await FlutterForegroundTask.stopService();
     }
+  }
+
+  /// Reflects live driver status in the persistent notification — this is
+  /// the closest Android equivalent to a Dynamic Island / Live Activity:
+  /// no separate widget surface exists, but the same ongoing notification
+  /// already required to stay alive in the background can double as one by
+  /// actually updating instead of sitting on static text the whole session.
+  /// A no-op if the service isn't running (e.g. a stray call right as the
+  /// driver goes offline) — nothing to update in that case.
+  static Future<void> updateStatus({required int pendingOffers}) async {
+    if (!await FlutterForegroundTask.isRunningService) return;
+    final hasOffers = pendingOffers > 0;
+    await FlutterForegroundTask.updateService(
+      notificationTitle: hasOffers
+          ? 'Saarathi — $pendingOffers new request${pendingOffers > 1 ? 's' : ''}'
+          : 'Saarathi — online',
+      notificationText: hasOffers
+          ? 'Tap to view and respond'
+          : 'Receiving ride & delivery requests',
+    );
   }
 
   /// Ask the OS to exclude the app from battery optimisation so it isn't killed

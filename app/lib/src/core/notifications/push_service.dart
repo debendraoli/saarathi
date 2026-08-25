@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:permission_handler/permission_handler.dart' show openAppSettings;
+import 'package:permission_handler/permission_handler.dart'
+    show openAppSettings;
 
 import '../network/api_client.dart';
 import 'notification_service.dart';
@@ -94,6 +95,12 @@ class PushService {
         if (api != null) register(api);
       });
       _ready = true;
+      // `init()` no longer blocks `runApp()` (see main.dart) — an app-boot
+      // `register()` call can easily land before this finishes and no-op on
+      // `!_ready`, with nothing else ever re-triggering it. Retry once here
+      // if that happened, so the race costs nothing.
+      final api = _lastApi;
+      if (api != null) register(api);
     } catch (_) {
       // Firebase not configured yet — push disabled, app runs normally.
     }
@@ -104,7 +111,8 @@ class PushService {
   Future<void> refreshPermissionStatus() async {
     if (!_ready) return;
     try {
-      final settings = await FirebaseMessaging.instance.getNotificationSettings();
+      final settings =
+          await FirebaseMessaging.instance.getNotificationSettings();
       _authStatus = settings.authorizationStatus;
     } catch (_) {/* Firebase not configured */}
   }
