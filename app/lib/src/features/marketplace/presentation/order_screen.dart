@@ -29,21 +29,30 @@ class OrderScreen extends ConsumerWidget {
     final order = ref.watch(orderProvider(orderId));
     final stale = ref.watch(orderStaleProvider(orderId));
 
-    // Reached via context.go from checkout (replacing the stack so a placed
-    // order can't be re-submitted from history) — without this, the system
-    // back button/gesture has nothing to pop and exits the app instead of
-    // returning to Saarathi's home.
+    // Reached two different ways: `context.go` from checkout (replacing the
+    // stack so a placed order can't be re-submitted from history — nothing
+    // to pop back to there, so leaving goes to Home) and `context.push`
+    // from a real caller (Activities' order history) that should be popped
+    // back to instead of blown past to Home.
+    void leave() {
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go(Routes.home);
+      }
+    }
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) context.go(Routes.home);
+        if (!didPop) leave();
       },
       child: Scaffold(
         appBar: AppBar(
           title: Text(l.yourOrder),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_rounded),
-            onPressed: () => context.go(Routes.home),
+            onPressed: leave,
           ),
         ),
         body: Column(

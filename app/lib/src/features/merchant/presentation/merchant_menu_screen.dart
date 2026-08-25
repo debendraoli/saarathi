@@ -1,5 +1,6 @@
 import 'dart:io' show File;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -107,12 +108,12 @@ class _ItemTileState extends ConsumerState<_ItemTile> {
           ? null
           : ClipRRect(
               borderRadius: BorderRadius.circular(10),
-              child: Image.network(
-                it.imageUrl!,
+              child: CachedNetworkImage(
+                imageUrl: it.imageUrl!,
                 width: 48,
                 height: 48,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) =>
+                errorWidget: (_, __, ___) =>
                     const SizedBox(width: 48, height: 48),
               ),
             ),

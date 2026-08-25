@@ -129,6 +129,9 @@
   "noActivityYet": "No activity yet",
   "confirmRide": "Confirm ride",
   "surgeNotice": "Prices went up — high demand right now",
+  "resolvingSharedLink": "Opening shared location…",
+  "sharedLinkFailed": "Couldn't open that link",
+  "cancelMayNotHaveWorked": "Couldn't confirm the cancellation — check your ride's status",
   "fareBreakdown": "Fare breakdown",
   "total": "Total",
 

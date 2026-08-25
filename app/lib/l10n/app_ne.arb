@@ -129,6 +129,9 @@
   "noActivityYet": "अहिलेसम्म कुनै गतिविधि छैन",
   "confirmRide": "यात्रा पक्का गर्नुहोस्",
   "surgeNotice": "मूल्य बढ्यो — अहिले माग धेरै छ",
+  "resolvingSharedLink": "साझा गरिएको स्थान खोल्दै…",
+  "sharedLinkFailed": "त्यो लिङ्क खोल्न सकिएन",
+  "cancelMayNotHaveWorked": "रद्द भएको पुष्टि हुन सकेन — आफ्नो यात्राको स्थिति जाँच्नुहोस्",
   "fareBreakdown": "भाडा विवरण",
   "total": "जम्मा",
 

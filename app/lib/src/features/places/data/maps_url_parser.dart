@@ -73,6 +73,15 @@ ResolvedMapsLink? _extract(String url) {
   return ResolvedMapsLink(origin: _extractOrigin(url), destination: destination);
 }
 
+/// Cheap, synchronous pre-check so a caller can tell "this is worth trying
+/// to resolve" (and can show a resolving indicator) apart from "not a Maps
+/// link at all" before committing to the network round-trip
+/// [resolveGoogleMapsUrl] may need for a short link.
+bool containsGoogleMapsUrl(String text) {
+  final url = _urlPattern.firstMatch(text.trim())?.group(0) ?? text.trim();
+  return looksLikeGoogleMapsUrl(url);
+}
+
 /// Resolves a pasted or shared Google Maps link. Long-form URLs
 /// (`.../@lat,lng,...`, `?q=lat,lng`, or a `/dir/?...origin=...&destination=...`
 /// route link) are parsed directly with no network call; short links

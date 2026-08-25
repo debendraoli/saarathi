@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,7 +14,8 @@ class RideRepository {
   final ApiClient _api;
   final SharedPreferences _prefs;
 
-  Future<FareEstimate> estimate(RideDraft draft) async {
+  Future<FareEstimate> estimate(RideDraft draft,
+      {CancelToken? cancelToken}) async {
     final res = await _api.post(
       '/v1/rides/estimate',
       body: {
@@ -22,6 +24,7 @@ class RideRepository {
         'stops': [for (final s in draft.stops) s.toJson()],
         'vehicle_class': draft.vehicleClass.wire,
       },
+      cancelToken: cancelToken,
     );
     return FareEstimate.fromJson(res as Map<String, dynamic>);
   }

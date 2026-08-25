@@ -75,6 +75,11 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   double? _ask;
   bool _booking = false;
 
+  /// Guards `_openSearch`/`_addStop`/`_saveDest` — a rapid double-tap on
+  /// their triggering row/button before the first push/dialog opens could
+  /// otherwise stack two `AddressSearchScreen` routes or two save dialogs.
+  bool _navigating = false;
+
   /// True while [_destLabel] is still the raw "lat, lng" placeholder a
   /// Maps-link deep link/share hands over (see [_rawCoordPattern]) and the
   /// background reverse-geocode to a human label hasn't landed yet.
@@ -121,6 +126,11 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     _loadLocation();
     _surgeCheckTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       if (!mounted || _mode != RideMode.ride) return;
+      // _openSearch/_addStop push another screen on top without disposing
+      // this one — skip the tick while it's covered, so the fare provider
+      // isn't invalidated (and the surge snackbar can't fire) for a screen
+      // the rider isn't even looking at right now.
+      if (ModalRoute.of(context)?.isCurrent == false) return;
       final draft = _draft();
       if (draft == null) return;
       ref.invalidate(fareEstimateProvider(draft));
@@ -180,6 +190,8 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   }
 
   Future<void> _openSearch({required bool forPickup}) async {
+    if (_navigating) return;
+    _navigating = true;
     final l = AppL10n.of(context);
     final pick = await Navigator.of(context).push<AddressPick>(
       MaterialPageRoute(
@@ -189,6 +201,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
         ),
       ),
     );
+    _navigating = false;
     if (pick?.hit == null || !mounted) return;
     final hit = pick!.hit!;
     // A pasted Maps link always means "this is the destination" — regardless
@@ -214,11 +227,14 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   }
 
   Future<void> _addStop() async {
+    if (_navigating) return;
+    _navigating = true;
     final pick = await Navigator.of(context).push<AddressPick>(
       MaterialPageRoute(
         builder: (_) => const AddressSearchScreen(allowMap: false),
       ),
     );
+    _navigating = false;
     if (pick?.hit == null || !mounted) return;
     final hit = pick!.hit!;
     // Same "it's the destination" rule as pickup/destination search — a
@@ -384,7 +400,8 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   }
 
   Future<void> _saveDest() async {
-    if (_dest == null) return;
+    if (_dest == null || _navigating) return;
+    _navigating = true;
     final controller = TextEditingController(text: _destLabel.text.trim());
     final label = await showDialog<String>(
       context: context,
@@ -407,6 +424,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
         ],
       ),
     );
+    _navigating = false;
     if (label == null || label.isEmpty) return;
     try {
       await ref
@@ -479,7 +497,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
               if (_pickup != null)
                 MapPin(
                   _pickup!,
-                  Icons.my_location_rounded,
+                  Icons.waving_hand_rounded,
                   Theme.of(context).colorScheme.primary,
                 ),
               for (final s in _stops)
@@ -491,7 +509,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
               if (_dest != null)
                 MapPin(
                   _dest!,
-                  Icons.location_on_rounded,
+                  Icons.sports_score_rounded,
                   Theme.of(context).colorScheme.secondary,
                 ),
             ],
@@ -532,7 +550,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                 }),
                 onPayment: (p) => setState(() => _payment = p),
                 onAsk: (v) => setState(() => _ask = v),
-                onBook: selectedEstimate?.valueOrNull == null
+                onBook: selectedEstimate?.valueOrNull == null || _booking
                     ? null
                     : () => _book(selectedEstimate!.valueOrNull!.finalFare),
                 onSave: _dest == null ? null : _saveDest,
@@ -708,7 +726,7 @@ class _Sheet extends StatelessWidget {
                     _LocationRow(
                       label: l.pickup,
                       dotColor: scheme.primary,
-                      icon: Icons.trip_origin,
+                      icon: Icons.waving_hand_rounded,
                       text: pickupText,
                       isPlaceholder: false,
                       loading: resolvingPickup,
@@ -735,7 +753,7 @@ class _Sheet extends StatelessWidget {
                     _LocationRow(
                       label: l.destination,
                       dotColor: scheme.secondary,
-                      icon: Icons.location_on_rounded,
+                      icon: Icons.sports_score_rounded,
                       text: destText ?? l.searchAddressHint,
                       isPlaceholder: destText == null,
                       loading: resolvingDest,

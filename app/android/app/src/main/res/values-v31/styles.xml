@@ -11,7 +11,12 @@
         <!-- Manually added (flutter_native_splash doesn't generate this for
              Android 12+) — the "SAARATHI" wordmark, via the dedicated
              branding-image slot rather than the safe-zone-constrained icon
-             slot, which clips a full logo+wordmark into unreadable text. -->
+             slot. Confirmed empirically (2026-08-25): feeding the combined
+             logo+wordmark image (splash_logo.png) into the icon slot itself
+             gets circularly masked and the text is unreadable ("SAARATHI"
+             renders as "A ADATI") — this two-slot split is the only way to
+             show both the icon and legible text on Android 12+.
+        -->
         <item name="android:windowSplashScreenBrandingImage">@drawable/splash_wordmark</item>
     </style>
     <!-- Theme applied to the Android Window as soon as the process has started.

@@ -1,8 +1,11 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/offline/json_cache.dart';
+import '../../../core/prefs.dart';
 import '../../../shared/request_ring.dart';
 import '../../../shared/resilient_poll.dart';
 import '../../marketplace/domain/models.dart';
@@ -11,8 +14,9 @@ import '../domain/models.dart';
 /// Merchant-owner surface: the store(s) a user owns, their menu, and the live
 /// order queue. Backed by the /v1/merchant/* endpoints (owner- or staff-scoped).
 class MerchantRepository {
-  MerchantRepository(this._api);
+  MerchantRepository(this._api, this._prefs);
   final ApiClient _api;
+  final SharedPreferences _prefs;
 
   /// Self-service store registration. Returns the new merchant id.
   Future<String> apply({
@@ -35,10 +39,12 @@ class MerchantRepository {
     return res['id'] as String;
   }
 
-  Future<List<Merchant>> myMerchants() async {
-    final res = await _api.get('/v1/merchant/merchants') as List;
-    return res.cast<Map<String, dynamic>>().map(Merchant.fromJson).toList();
-  }
+  Future<List<Merchant>> myMerchants() => cacheThroughList(
+        prefs: _prefs,
+        key: 'cache.merchant.myMerchants',
+        fetch: () => _api.get('/v1/merchant/merchants'),
+        parse: Merchant.fromJson,
+      );
 
   Future<List<MenuItem>> menu(String merchantId) async {
     final res =
@@ -126,11 +132,12 @@ class MerchantRepository {
     return MerchantAnalytics.fromJson(res);
   }
 
-  Future<List<MerchantOffer>> offers(String merchantId) async {
-    final res =
-        await _api.get('/v1/merchant/merchants/$merchantId/offers') as List;
-    return res.cast<Map<String, dynamic>>().map(MerchantOffer.fromJson).toList();
-  }
+  Future<List<MerchantOffer>> offers(String merchantId) => cacheThroughList(
+        prefs: _prefs,
+        key: 'cache.merchant.offers.$merchantId',
+        fetch: () => _api.get('/v1/merchant/merchants/$merchantId/offers'),
+        parse: MerchantOffer.fromJson,
+      );
 
   Future<void> createOffer({
     required String merchantId,
@@ -162,7 +169,10 @@ class MerchantRepository {
 }
 
 final merchantRepositoryProvider = Provider<MerchantRepository>((ref) {
-  return MerchantRepository(ref.watch(apiClientProvider));
+  return MerchantRepository(
+    ref.watch(apiClientProvider),
+    ref.watch(sharedPreferencesProvider),
+  );
 });
 
 final myMerchantsProvider =

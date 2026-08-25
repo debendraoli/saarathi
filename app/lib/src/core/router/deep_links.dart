@@ -1,10 +1,13 @@
 import 'package:app_links/app_links.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../features/places/data/maps_url_parser.dart';
 import '../../features/places/data/places_repository.dart';
 import 'app_router.dart';
+import '../scaffold_messenger.dart';
 
 /// Maps an incoming `saarathi://` link to an in-app route, or null if we don't
 /// recognise it. Custom-scheme links arrive as `saarathi://trip/<id>`, so the
@@ -44,9 +47,46 @@ final deepLinkHandlerProvider = Provider<void>((ref) {
   final router = ref.watch(goRouterProvider);
   final links = AppLinks();
 
+  // Bumped before every resolve attempt below; a call whose generation has
+  // been superseded by a newer one by the time its network round-trip
+  // finishes discards its own result instead of navigating — otherwise two
+  // links arriving close together race, and whichever's resolveGoogleMapsUrl
+  // happens to finish *last* would win the navigation regardless of which
+  // one actually arrived last.
+  var generation = 0;
+  Uri? lastHandledUri;
+
   Future<bool> tryOpenAsMapsPin(String text) async {
+    if (!containsGoogleMapsUrl(text)) return false;
+    final myGeneration = ++generation;
+    final messenger = rootScaffoldMessengerKey.currentState;
+    final l = messenger == null ? null : AppL10n.of(messenger.context);
+    if (l != null) {
+      messenger?.hideCurrentSnackBar();
+      messenger?.showSnackBar(SnackBar(
+        content: Text(l.resolvingSharedLink),
+        duration: const Duration(seconds: 12),
+      ));
+    }
     final resolved = await resolveGoogleMapsUrl(text);
-    if (resolved == null) return false;
+    if (myGeneration != generation) {
+      // Superseded — a newer link/share owns the snackbar now; don't stomp
+      // on it or navigate for this stale one. Still report "handled" so the
+      // caller doesn't fall through to routeForDeepLink for what was a real
+      // (if stale) Maps link.
+      return true;
+    }
+    if (resolved == null) {
+      if (l != null) {
+        messenger?.hideCurrentSnackBar();
+        messenger?.showSnackBar(SnackBar(content: Text(l.sharedLinkFailed)));
+      }
+      // Definitely a Maps link (containsGoogleMapsUrl was true) that just
+      // failed to resolve — not something routeForDeepLink would ever
+      // match either way, so still "handled".
+      return true;
+    }
+    messenger?.hideCurrentSnackBar();
     // Navigate the moment there's a point — not once there's a human label
     // for it too. Waiting on the reverse-geocode here meant a cold start
     // via a shared link sat on whatever the router's initial route is
@@ -73,6 +113,12 @@ final deepLinkHandlerProvider = Provider<void>((ref) {
   }
 
   Future<void> handle(Uri uri) async {
+    // `getInitialLink()` and the first `uriLinkStream` emission can both
+    // fire for the very same cold-start link on some platforms/app_links
+    // versions — skip an exact repeat of the link just handled rather than
+    // resolving (and navigating) twice.
+    if (uri == lastHandledUri) return;
+    lastHandledUri = uri;
     if (await tryOpenAsMapsPin(uri.toString())) return;
     final target = routeForDeepLink(uri);
     if (target != null) router.go(target);

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -190,12 +191,11 @@ class _ItemHitTile extends StatelessWidget {
           height: 52,
           child: item.imageUrl == null
               ? placeholder
-              : Image.network(
-                  item.imageUrl!,
+              : CachedNetworkImage(
+                  imageUrl: item.imageUrl!,
                   fit: BoxFit.cover,
-                  loadingBuilder: (_, child, p) =>
-                      p == null ? child : placeholder,
-                  errorBuilder: (_, __, ___) => placeholder,
+                  placeholder: (_, __) => placeholder,
+                  errorWidget: (_, __, ___) => placeholder,
                 ),
         ),
       ),

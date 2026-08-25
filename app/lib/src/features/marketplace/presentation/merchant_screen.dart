@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -124,7 +125,7 @@ class _Header extends StatelessWidget {
                 backgroundColor: scheme.primaryContainer,
                 backgroundImage: merchant.imageUrl == null
                     ? null
-                    : NetworkImage(merchant.imageUrl!),
+                    : CachedNetworkImageProvider(merchant.imageUrl!),
                 child: merchant.imageUrl != null
                     ? null
                     : Icon(
@@ -349,12 +350,11 @@ class _ItemThumb extends StatelessWidget {
         height: 64,
         child: imageUrl == null
             ? placeholder
-            : Image.network(
-                imageUrl!,
+            : CachedNetworkImage(
+                imageUrl: imageUrl!,
                 fit: BoxFit.cover,
-                loadingBuilder: (_, child, progress) =>
-                    progress == null ? child : placeholder,
-                errorBuilder: (_, __, ___) => placeholder,
+                placeholder: (_, __) => placeholder,
+                errorWidget: (_, __, ___) => placeholder,
               ),
       ),
     );

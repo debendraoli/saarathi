@@ -8,6 +8,7 @@ import 'core/notifications/notification_nav.dart';
 import 'core/prefs.dart';
 import 'core/router/app_router.dart';
 import 'core/router/deep_links.dart';
+import 'core/scaffold_messenger.dart';
 import 'core/theme/app_theme.dart';
 
 class SaarathiApp extends ConsumerWidget {
@@ -22,6 +23,7 @@ class SaarathiApp extends ConsumerWidget {
 
     return MaterialApp.router(
       title: 'Saarathi',
+      scaffoldMessengerKey: rootScaffoldMessengerKey,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),

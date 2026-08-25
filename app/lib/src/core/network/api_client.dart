@@ -40,7 +40,15 @@ class ApiClient {
         headers: {'content-type': 'application/json'},
       ),
     );
+    // Dio defaults to decoding JSON synchronously on the calling isolate —
+    // for a response over ~50KB (list-heavy endpoints like trip history,
+    // item search results) that's real jank on the UI isolate.
+    // BackgroundTransformer keeps small payloads synchronous (avoiding
+    // compute()'s isolate-hop overhead for the common case) and only
+    // offloads genuinely large ones.
+    _dio.transformer = BackgroundTransformer();
     _bare = Dio(BaseOptions(baseUrl: AppConfig.apiBase));
+    _bare.transformer = BackgroundTransformer();
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
@@ -123,15 +131,25 @@ class ApiClient {
     return completer.future;
   }
 
-  Future<dynamic> get(String path, {Map<String, dynamic>? query}) =>
-      _send(() => _dio.get<dynamic>(path, queryParameters: query));
+  /// [cancelToken], when given, lets a caller abandon this request once it's
+  /// been superseded (a rapidly-switched vehicle class, a newer search
+  /// query, a newer deep-link resolution) instead of just discarding the
+  /// eventual result — the in-flight HTTP call itself is aborted, not just
+  /// its response ignored.
+  Future<dynamic> get(String path,
+          {Map<String, dynamic>? query, CancelToken? cancelToken}) =>
+      _send(() => _dio.get<dynamic>(path,
+          queryParameters: query, cancelToken: cancelToken));
 
   Future<dynamic> post(String path,
-          {Object? body, Map<String, String>? headers}) =>
+          {Object? body,
+          Map<String, String>? headers,
+          CancelToken? cancelToken}) =>
       _send(() => _dio.post<dynamic>(
             path,
             data: body,
             options: headers == null ? null : Options(headers: headers),
+            cancelToken: cancelToken,
           ));
 
   Future<dynamic> put(String path, {Object? body}) =>
@@ -154,6 +172,12 @@ class ApiClient {
       final res = await run();
       return res.data;
     } on DioException catch (e) {
+      // A caller-cancelled request (superseded by a newer one) isn't a real
+      // failure worth surfacing as an ApiException — let it propagate as
+      // the DioException it is so `e.type == DioExceptionType.cancel` can
+      // be checked and silently ignored, same convention CancelToken users
+      // rely on elsewhere.
+      if (e.type == DioExceptionType.cancel) rethrow;
       throw _mapError(e);
     }
   }

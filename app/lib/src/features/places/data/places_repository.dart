@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -89,13 +90,18 @@ class PlacesRepository {
   Future<void> remove(String id) => _api.delete('/v1/me/locations/$id');
 
   /// Address autocomplete, biased toward [near] when provided.
-  Future<List<PlaceHit>> search(String query, {LatLng? near}) async {
+  Future<List<PlaceHit>> search(String query,
+      {LatLng? near, CancelToken? cancelToken}) async {
     if (query.trim().length < 2) return const [];
-    final res = await _api.get('/v1/geo/search', query: {
-      'q': query.trim(),
-      if (near != null) 'lat': near.latitude,
-      if (near != null) 'lng': near.longitude,
-    }) as List;
+    final res = await _api.get(
+      '/v1/geo/search',
+      query: {
+        'q': query.trim(),
+        if (near != null) 'lat': near.latitude,
+        if (near != null) 'lng': near.longitude,
+      },
+      cancelToken: cancelToken,
+    ) as List;
     return res.cast<Map<String, dynamic>>().map(PlaceHit.fromGeo).toList();
   }
 

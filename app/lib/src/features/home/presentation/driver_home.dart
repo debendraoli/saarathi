@@ -504,13 +504,13 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
             ),
             const SizedBox(height: 12),
             _RoutePoint(
-              icon: Icons.trip_origin,
+              icon: Icons.waving_hand_rounded,
               label: _pickupLabel ?? '…',
               color: Theme.of(context).colorScheme.primary,
             ),
             const SizedBox(height: 6),
             _RoutePoint(
-              icon: Icons.location_on_rounded,
+              icon: Icons.sports_score_rounded,
               label: _destLabel ?? '…',
               color: Theme.of(context).colorScheme.secondary,
             ),

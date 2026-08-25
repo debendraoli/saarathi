@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart' show CancelToken, DioException, DioExceptionType;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
@@ -55,6 +56,12 @@ class _AddressSearchScreenState extends ConsumerState<AddressSearchScreen> {
   bool _loading = false;
   String _query = '';
 
+  /// Aborts the in-flight `/v1/geo/search` call itself (not just its
+  /// result) when a newer keystroke supersedes it — the `q != _query`
+  /// staleness check below already keeps a superseded response from
+  /// overwriting fresher results, this just stops wasting the request too.
+  CancelToken? _searchCancel;
+
   @override
   void initState() {
     super.initState();
@@ -64,6 +71,7 @@ class _AddressSearchScreenState extends ConsumerState<AddressSearchScreen> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _searchCancel?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -78,6 +86,7 @@ class _AddressSearchScreenState extends ConsumerState<AddressSearchScreen> {
   void _onChanged(String value) {
     _query = value;
     _debounce?.cancel();
+    _searchCancel?.cancel();
     if (value.trim().length < 2) {
       setState(() {
         _results = const [];
@@ -129,15 +138,21 @@ class _AddressSearchScreenState extends ConsumerState<AddressSearchScreen> {
 
   Future<void> _runSearch() async {
     final q = _query;
+    final cancelToken = CancelToken();
+    _searchCancel = cancelToken;
     try {
-      final hits =
-          await ref.read(placesRepositoryProvider).search(q, near: _near);
+      final hits = await ref
+          .read(placesRepositoryProvider)
+          .search(q, near: _near, cancelToken: cancelToken);
       if (!mounted || q != _query) return;
       setState(() {
         _results = hits;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
+      // Cancelled means a newer search already took over _loading/_results
+      // — nothing to reset here.
+      if (e is DioException && e.type == DioExceptionType.cancel) return;
       if (mounted) setState(() => _loading = false);
     }
   }

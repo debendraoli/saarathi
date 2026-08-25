@@ -159,7 +159,7 @@ class _TripSummaryCard extends StatelessWidget {
         children: [
           if (summary.pickupLabel != null)
             _SummaryRow(
-              icon: Icons.trip_origin,
+              icon: Icons.waving_hand_rounded,
               iconColor: scheme.primary,
               label: l.pickup,
               value: summary.pickupLabel!,
@@ -168,7 +168,7 @@ class _TripSummaryCard extends StatelessWidget {
             const SizedBox(height: 8),
           if (summary.destLabel != null)
             _SummaryRow(
-              icon: Icons.location_on_rounded,
+              icon: Icons.sports_score_rounded,
               iconColor: scheme.secondary,
               label: l.destination,
               value: summary.destLabel!,

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -90,12 +91,12 @@ class TripScreen extends ConsumerWidget {
                   final fixedPins = [
                     MapPin(
                       trip.origin,
-                      Icons.trip_origin,
+                      Icons.waving_hand_rounded,
                       Theme.of(context).colorScheme.primary,
                     ),
                     MapPin(
                       trip.dest,
-                      Icons.location_on_rounded,
+                      Icons.sports_score_rounded,
                       Theme.of(context).colorScheme.secondary,
                     ),
                     if (driverLoc != null)
@@ -225,8 +226,15 @@ Future<void> _leaveTrip(
     try {
       await ref.read(rideRepositoryProvider).cancel(tripId);
     } catch (_) {
-      // Best-effort — still navigate away; a trip that failed to cancel
-      // here just shows as active on Home, same as any other network blip.
+      // Still navigate away (the trip may in fact still be active — this
+      // is a best-effort escape hatch, not a blocking confirmation), but
+      // say so instead of silently treating a failed cancel as a
+      // successful one.
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppL10n.of(context).cancelMayNotHaveWorked)),
+        );
+      }
     }
     // The home screen's search-bar lock reads this trip list — without
     // invalidating it, a just-cancelled trip still looks "active" and the
@@ -325,8 +333,14 @@ Future<void> showCancelReasonSheet(
   try {
     await ref.read(rideRepositoryProvider).cancel(tripId, reason: reason);
   } catch (_) {
-    // Best-effort — still navigate away; a trip that failed to cancel here
-    // just shows as active on Home, same as any other network blip.
+    // Still navigate away — this stays a best-effort escape hatch, not a
+    // blocking confirmation — but say so instead of silently treating a
+    // failed cancel as a successful one.
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppL10n.of(context).cancelMayNotHaveWorked)),
+      );
+    }
   }
   ref.invalidate(myTripsProvider);
   if (!context.mounted) return;
@@ -600,7 +614,7 @@ class RouteSummary extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _RoutePoint(
-          icon: Icons.trip_origin,
+          icon: Icons.waving_hand_rounded,
           color: scheme.primary,
           value: pickup,
         ),
@@ -612,7 +626,7 @@ class RouteSummary extends StatelessWidget {
           ),
         ),
         _RoutePoint(
-          icon: Icons.location_on_rounded,
+          icon: Icons.sports_score_rounded,
           color: scheme.secondary,
           value: dest,
         ),
@@ -1043,7 +1057,8 @@ class _Avatar extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final url = asImageUrl(photoUrl);
     if (url != null) {
-      return CircleAvatar(radius: radius, backgroundImage: NetworkImage(url));
+      return CircleAvatar(
+          radius: radius, backgroundImage: CachedNetworkImageProvider(url));
     }
     final initials = (name == null || name!.trim().isEmpty)
         ? '?'

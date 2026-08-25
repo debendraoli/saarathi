@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -8,9 +9,17 @@ import '../data/ride_repository.dart';
 import '../domain/models.dart';
 
 /// One-shot fare estimate for a drafted ride (auto-disposed when unused).
+/// Rapidly switching vehicle class fires one of these per class — the
+/// CancelToken aborts a class's in-flight request the moment its family
+/// instance is no longer watched (superseded by a different draft), instead
+/// of letting an abandoned quote finish on the wire for nothing.
 final fareEstimateProvider =
     FutureProvider.autoDispose.family<FareEstimate, RideDraft>((ref, draft) {
-  return ref.watch(rideRepositoryProvider).estimate(draft);
+  final cancelToken = CancelToken();
+  ref.onDispose(cancelToken.cancel);
+  return ref
+      .watch(rideRepositoryProvider)
+      .estimate(draft, cancelToken: cancelToken);
 });
 
 /// An ordered path (pickup → stops → destination) + profile for a route lookup.

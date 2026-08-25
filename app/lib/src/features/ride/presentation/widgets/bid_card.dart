@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
@@ -45,7 +46,8 @@ class BidCard extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 22,
-                  backgroundImage: url != null ? NetworkImage(url) : null,
+                  backgroundImage:
+                      url != null ? CachedNetworkImageProvider(url) : null,
                   backgroundColor: scheme.secondaryContainer,
                   child: url == null
                       ? Text(
