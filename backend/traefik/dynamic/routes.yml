@@ -39,6 +39,7 @@ http:
         || PathPrefix(`/v1/driver/analytics`) || PathPrefix(`/v1/driver/credits`)
         || PathPrefix(`/v1/driver/heartbeat`) || PathPrefix(`/v1/driver/offers`)
         || PathPrefix(`/v1/driver/offline`) || PathPrefix(`/v1/driver/online`)
+        || PathPrefix(`/v1/driver/ws`)
         || PathPrefix(`/v1/admin/analytics`) || PathPrefix(`/v1/admin/cancellations`)
         || PathPrefix(`/v1/admin/credit-plans`) || PathPrefix(`/v1/admin/flags`)
         || PathPrefix(`/v1/admin/leaderboard`) || PathPrefix(`/v1/admin/ledger`)
