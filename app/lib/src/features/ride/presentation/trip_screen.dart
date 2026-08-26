@@ -340,38 +340,32 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                       // arrow above until a driver is assigned.
                       if (iAmRider && driverLoc == null && trip.isActive)
                         const _SelfLocationWatcher(),
-                      // Back (leave trip) always docks top-left, stacked
-                      // above the offline banner when both are showing —
-                      // previously positioned just above the status/bidding
-                      // sheet's edge instead, which the sheet (painted after
-                      // it, so on top) could cover entirely once dragged
-                      // open past its collapsed size, or — after an attempt
-                      // to track the sheet's live extent instead of a fixed
-                      // offset — could vanish outright from an unrelated
-                      // layout bug in that tracking code. Docking top
-                      // instead of bottom sidesteps the whole class of
-                      // "the draggable sheet might be covering this" bugs:
-                      // the sheet only ever grows from the bottom, so
-                      // nothing here can ever be under it.
-                      SafeArea(
-                        child: Align(
-                          alignment: Alignment.topLeft,
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                MapCircleButton(
-                                  icon: Icons.arrow_back_rounded,
-                                  onTap: () =>
-                                      _leaveTrip(context, ref, tripId),
-                                ),
-                                if (!online) ...[
-                                  const SizedBox(height: 8),
-                                  const OfflineBanner(),
-                                ],
-                              ],
+                      if (!online)
+                        const SafeArea(
+                          child: Align(
+                            alignment: Alignment.topLeft,
+                            child: Padding(
+                              padding: EdgeInsets.all(12),
+                              child: OfflineBanner(),
                             ),
+                          ),
+                        ),
+                      // Bottom-left, just above the sheet's own collapsed
+                      // edge, for one-handed thumb reach — same reasoning
+                      // as the fullscreen-nav button below. The actual bug
+                      // that made this spot unreliable earlier (a wrong
+                      // local trip status hiding trip.isActive-gated
+                      // widgets entirely) is fixed at its root now.
+                      Positioned(
+                        left: 12,
+                        bottom: MediaQuery.of(context).size.height *
+                                _sheetClearance +
+                            12,
+                        child: SafeArea(
+                          top: false,
+                          child: MapCircleButton(
+                            icon: Icons.arrow_back_rounded,
+                            onTap: () => _leaveTrip(context, ref, tripId),
                           ),
                         ),
                       ),
@@ -434,12 +428,17 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                       // its collapsed size can still cover this
                       // temporarily, same as any bottom sheet, but it's
                       // never stuck — drag the sheet back down to reveal it.
+                      // Offset well above the map's own recenter/locate
+                      // button (MapView's `locateButtonBottomOffset`, same
+                      // `_sheetClearance` baseline, same right edge) —
+                      // matching offsets meant the two stacked directly on
+                      // top of each other, confirmed live.
                       if (iAmDriver && trip.isActive)
                         Positioned(
                           right: 12,
                           bottom: MediaQuery.of(context).size.height *
                                   _sheetClearance +
-                              12,
+                              76,
                           child: SafeArea(
                             top: false,
                             child: MapCircleButton(
