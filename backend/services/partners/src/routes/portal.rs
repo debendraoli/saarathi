@@ -271,13 +271,32 @@ async fn list_drivers(
     Ok(Json(rows))
 }
 
+/// Mirrors `saarathi-auth`'s `driver_routes::validate_service_types` — a
+/// driver is exactly one of ride or delivery, never both. Duplicated (not
+/// shared via a crate) because `partners` and `auth` are separate services;
+/// see the same pattern for `audit_record` in `rides`/`merchant`.
+fn validate_driver_service_types(input: Option<Vec<String>>) -> AppResult<Vec<String>> {
+    let types = input.unwrap_or_else(|| vec!["ride".to_string()]);
+    if types.len() != 1 || !matches!(types[0].as_str(), "ride" | "delivery") {
+        return Err(AppError::BadRequest(
+            "service_types must contain exactly one of \"ride\" or \"delivery\"".into(),
+        ));
+    }
+    Ok(types)
+}
+
 #[derive(Deserialize)]
 struct AddDriver {
     phone: String,
     full_name: Option<String>,
     license_number: Option<String>,
+    address: Option<String>,
     vehicle_class: Option<String>,
     plate_number: Option<String>,
+    model: Option<String>,
+    /// "ride" or "delivery" — same single-value field the app KYC form and
+    /// the dashboard walk-in KYC set. Defaults to ride-only when omitted.
+    service_types: Option<Vec<String>>,
 }
 
 async fn add_driver(
@@ -294,6 +313,15 @@ async fn add_driver(
     if phone.is_empty() {
         return Err(AppError::BadRequest("phone is required".into()));
     }
+    if body.full_name.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::BadRequest("full_name is required".into()));
+    }
+    if body.license_number.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::BadRequest("license_number is required".into()));
+    }
+    if body.address.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::BadRequest("address is required".into()));
+    }
     if let Some(c) = &body.vehicle_class {
         if !matches!(c.as_str(), "two_wheeler" | "three_wheeler" | "four_wheeler") {
             return Err(AppError::BadRequest(
@@ -301,6 +329,18 @@ async fn add_driver(
             ));
         }
     }
+    let plate = body.plate_number.as_deref().unwrap_or("").trim();
+    if plate.is_empty() {
+        return Err(AppError::BadRequest("plate_number is required".into()));
+    }
+    if body.model.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::BadRequest("vehicle model is required".into()));
+    }
+    let vehicle_class = body
+        .vehicle_class
+        .as_deref()
+        .ok_or_else(|| AppError::BadRequest("vehicle_class is required".into()))?;
+    let service_types = validate_driver_service_types(body.service_types)?;
 
     let mut tx = st.db.begin().await?;
     // Find or create the driver's user account (promote a plain rider to driver).
@@ -318,31 +358,31 @@ async fn add_driver(
 
     // Ensure a driver profile exists (KYC starts pending; staff approve later).
     let driver_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO drivers (user_id, license_number, kyc_status) VALUES ($1, $2, 'pending') \
+        "INSERT INTO drivers (user_id, license_number, address, kyc_status, service_types) \
+         VALUES ($1, $2, $3, 'pending', $4) \
          ON CONFLICT (user_id) DO UPDATE SET \
-             license_number = COALESCE(EXCLUDED.license_number, drivers.license_number) \
+             license_number = COALESCE(EXCLUDED.license_number, drivers.license_number), \
+             address = COALESCE(EXCLUDED.address, drivers.address), \
+             service_types = EXCLUDED.service_types \
          RETURNING id",
     )
     .bind(user_id)
     .bind(body.license_number)
+    .bind(body.address)
+    .bind(&service_types)
     .fetch_one(&mut *tx)
     .await?;
 
-    // Optional vehicle capture.
-    if let (Some(class), Some(plate)) =
-        (body.vehicle_class.as_deref(), body.plate_number.as_deref())
-    {
-        if !plate.trim().is_empty() {
-            sqlx::query(
-                "INSERT INTO vehicles (driver_id, class, plate_number) VALUES ($1, $2::vehicle_class, $3)",
-            )
-            .bind(driver_id)
-            .bind(class)
-            .bind(plate.trim())
-            .execute(&mut *tx)
-            .await?;
-        }
-    }
+    // Vehicle capture.
+    sqlx::query(
+        "INSERT INTO vehicles (driver_id, class, plate_number, model) VALUES ($1, $2::vehicle_class, $3, $4)",
+    )
+    .bind(driver_id)
+    .bind(vehicle_class)
+    .bind(plate)
+    .bind(body.model.as_deref().map(str::trim))
+    .execute(&mut *tx)
+    .await?;
 
     // Link to the fleet (one active fleet per driver).
     let linked = sqlx::query(

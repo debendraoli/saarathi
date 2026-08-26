@@ -1,7 +1,7 @@
 "use client";
 
 import { BarChart, Donut, Kpi } from "@/components/Charts";
-import { ConfirmModal } from "@/components/Modal";
+import { ConfirmModal, Modal } from "@/components/Modal";
 import { Pagination, usePaged } from "@/components/Toolbar";
 import {
     api,
@@ -36,6 +36,16 @@ export default function PartnerPortalPage() {
   const [invPhone, setInvPhone] = useState("+977");
   const [invRole, setInvRole] = useState("manager");
   const [drvPhone, setDrvPhone] = useState("+977");
+  const [showAddDriver, setShowAddDriver] = useState(false);
+  const [drvFullName, setDrvFullName] = useState("");
+  const [drvLicense, setDrvLicense] = useState("");
+  const [drvAddress, setDrvAddress] = useState("");
+  const [drvVehicleClass, setDrvVehicleClass] = useState<"two_wheeler" | "three_wheeler" | "four_wheeler">(
+    "two_wheeler",
+  );
+  const [drvPlate, setDrvPlate] = useState("");
+  const [drvModel, setDrvModel] = useState("");
+  const [drvServiceType, setDrvServiceType] = useState<"ride" | "delivery">("ride");
     const [rdrPhone, setRdrPhone] = useState("+977");
     const [rdrCap, setRdrCap] = useState("");
   const [topupAmt, setTopupAmt] = useState(5000);
@@ -106,13 +116,38 @@ export default function PartnerPortalPage() {
   async function addDriver() {
     if (!pid) return;
     try {
-      await api.partnerAddDriver(pid, { phone: drvPhone.trim() });
+      await api.partnerAddDriver(pid, {
+        phone: drvPhone.trim(),
+        full_name: drvFullName.trim(),
+        license_number: drvLicense.trim(),
+        address: drvAddress.trim(),
+        vehicle_class: drvVehicleClass,
+        plate_number: drvPlate.trim(),
+        model: drvModel.trim(),
+        service_types: [drvServiceType],
+      });
       setDrvPhone("+977");
+      setDrvFullName("");
+      setDrvLicense("");
+      setDrvAddress("");
+      setDrvVehicleClass("two_wheeler");
+      setDrvPlate("");
+      setDrvModel("");
+      setDrvServiceType("ride");
+      setShowAddDriver(false);
       await loadFleet(pid);
     } catch (e) {
       setError((e as Error).message);
     }
   }
+
+  const addDriverValid =
+    drvPhone.trim() &&
+    drvFullName.trim() &&
+    drvLicense.trim() &&
+    drvAddress.trim() &&
+    drvPlate.trim() &&
+    drvModel.trim();
 
   async function releaseDriver(driverUserId: string) {
     if (!pid) return;
@@ -422,8 +457,7 @@ export default function PartnerPortalPage() {
         <h3 style={{ marginTop: 0 }}>Fleet drivers</h3>
         {canManageDrivers && (
           <div className="row" style={{ marginBottom: 12 }}>
-            <input className="input" style={{ maxWidth: 240 }} value={drvPhone} onChange={(e) => setDrvPhone(e.target.value)} placeholder="driver phone +977…" />
-            <button className="btn primary" onClick={addDriver}>
+            <button className="btn primary" onClick={() => setShowAddDriver(true)}>
               Add driver
             </button>
           </div>
@@ -580,6 +614,63 @@ export default function PartnerPortalPage() {
         confirmLabel="Withdraw"
         busy={busy}
       />
+
+      <Modal open={showAddDriver} onClose={() => setShowAddDriver(false)} title="Add fleet driver">
+        <div className="stack" style={{ gap: 10 }}>
+          <div className="field">
+            <label>Phone (E.164)</label>
+            <input className="input" value={drvPhone} onChange={(e) => setDrvPhone(e.target.value)} placeholder="+9779800000000" />
+          </div>
+          <div className="field">
+            <label>Full name</label>
+            <input className="input" value={drvFullName} onChange={(e) => setDrvFullName(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>License number</label>
+            <input className="input" value={drvLicense} onChange={(e) => setDrvLicense(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Address</label>
+            <input className="input" value={drvAddress} onChange={(e) => setDrvAddress(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Vehicle class</label>
+            <select
+              className="input"
+              value={drvVehicleClass}
+              onChange={(e) => setDrvVehicleClass(e.target.value as typeof drvVehicleClass)}
+            >
+              <option value="two_wheeler">Two-wheeler</option>
+              <option value="three_wheeler">Three-wheeler</option>
+              <option value="four_wheeler">Four-wheeler</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Plate number</label>
+            <input className="input" value={drvPlate} onChange={(e) => setDrvPlate(e.target.value)} placeholder="BA-1-PA-1234" />
+          </div>
+          <div className="field">
+            <label>Model</label>
+            <input className="input" value={drvModel} onChange={(e) => setDrvModel(e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Job type</label>
+            <select
+              className="input"
+              value={drvServiceType}
+              onChange={(e) => setDrvServiceType(e.target.value as typeof drvServiceType)}
+            >
+              <option value="ride">Rides</option>
+              <option value="delivery">Delivery</option>
+            </select>
+          </div>
+          <div className="form-actions">
+            <button className="btn primary" disabled={!addDriverValid} onClick={addDriver}>
+              Add driver
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

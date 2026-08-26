@@ -441,8 +441,11 @@ export interface AddFleetDriver {
   phone: string;
   full_name?: string | null;
   license_number?: string | null;
+  address?: string | null;
   vehicle_class?: VehicleClass | null;
   plate_number?: string | null;
+  model?: string | null;
+  service_types?: string[];
 }
 
 export interface FleetRider {
