@@ -27,7 +27,7 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
   VehicleClass _class = VehicleClass.twoWheeler;
   DateTime? _dob;
   bool _busy = false;
-  final Set<String> _serviceTypes = {'ride'};
+  String _serviceType = 'ride';
 
   @override
   void initState() {
@@ -60,8 +60,7 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
       _plate.text.trim().isNotEmpty &&
       _license.text.trim().isNotEmpty &&
       _address.text.trim().isNotEmpty &&
-      _model.text.trim().isNotEmpty &&
-      _serviceTypes.isNotEmpty;
+      _model.text.trim().isNotEmpty;
 
   Future<void> _submit() async {
     if (!_isValid) return;
@@ -81,7 +80,7 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
               dateOfBirth: _dob == null
                   ? null
                   : '${_dob!.year}-${two(_dob!.month)}-${two(_dob!.day)}',
-              serviceTypes: _serviceTypes,
+              serviceTypes: {_serviceType},
             ),
           );
       await ref.read(authControllerProvider.notifier).refresh();
@@ -155,41 +154,23 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
             const Divider(height: 32),
             Text(l.jobTypesLabel, style: Theme.of(context).textTheme.labelLarge),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                FilterChip(
+            SegmentedButton<String>(
+              segments: [
+                ButtonSegment(
+                  value: 'ride',
+                  icon: const Icon(Icons.directions_car_rounded),
                   label: Text(l.jobTypesRide),
-                  selected: _serviceTypes.contains('ride'),
-                  onSelected: (sel) => setState(() {
-                    if (sel) {
-                      _serviceTypes.add('ride');
-                    } else {
-                      _serviceTypes.remove('ride');
-                    }
-                  }),
                 ),
-                FilterChip(
+                ButtonSegment(
+                  value: 'delivery',
+                  icon: const Icon(Icons.local_shipping_rounded),
                   label: Text(l.jobTypesDelivery),
-                  selected: _serviceTypes.contains('delivery'),
-                  onSelected: (sel) => setState(() {
-                    if (sel) {
-                      _serviceTypes.add('delivery');
-                    } else {
-                      _serviceTypes.remove('delivery');
-                    }
-                  }),
                 ),
               ],
+              selected: {_serviceType},
+              onSelectionChanged: (s) =>
+                  setState(() => _serviceType = s.first),
             ),
-            if (_serviceTypes.isEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  l.jobTypesRequireOne,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ),
             const SizedBox(height: 24),
             FilledButton(
               onPressed: _busy || !_isValid ? null : _submit,

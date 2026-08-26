@@ -31,10 +31,10 @@ If a change would weaken any of the above, stop and flag it.
 
 ## Domain invariants (not legal, but load-bearing)
 
-**Job-type segregation.** There is **one dispatch queue** for both RIDE and DELIVERY, and each driver
-declares which types they accept at KYC (`drivers.service_types`, a non-empty subset of
-`{ride, delivery}`, editable by staff from the dashboard). Dispatch must honour that declaration
-*everywhere*, not just at match time:
+**Job-type segregation.** There is **one dispatch queue** for both RIDE and DELIVERY, but each driver
+declares **exactly one** job type at KYC (`drivers.service_types`, a single-element array constrained
+to `{ride}` or `{delivery}` — never both, by DB `CHECK` and app validation; editable by staff from the
+dashboard). Dispatch must honour that declaration *everywhere*, not just at match time:
 
 - Candidate matching filters on the trip's `trip_type` against the driver's presence `job_types`.
 - **So do the supply counts** — the rider app's "no drivers nearby" booking gate and the merchant's

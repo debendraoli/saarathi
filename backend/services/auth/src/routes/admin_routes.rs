@@ -384,7 +384,7 @@ struct ServiceTypesInput {
     service_types: Vec<String>,
 }
 
-/// Staff override of a driver's declared service types (ride/delivery/both) —
+/// Staff override of a driver's declared service type (ride or delivery) —
 /// the same field the driver themselves sets at KYC (`POST
 /// /v1/driver/register`) and that the app re-reads before every `goOnline`,
 /// so this takes effect the next time the driver comes online.

@@ -96,19 +96,22 @@ struct RegisterInput {
     date_of_birth: Option<NaiveDate>,
     address: Option<String>,
     vehicle: VehicleInput,
-    /// Job types this driver wants to accept — "ride", "delivery", or both.
-    /// Defaults to ride-only when omitted (pre-existing behavior).
+    /// Which single job type this driver wants to accept — "ride" or
+    /// "delivery", never both. Defaults to ride-only when omitted
+    /// (pre-existing behavior).
     service_types: Option<Vec<String>>,
 }
 
-/// Validates and normalizes a driver's requested service types, rejecting
-/// anything outside `{"ride", "delivery"}` or an empty selection.
+/// Validates and normalizes a driver's requested service type. A driver is
+/// exactly one of ride or delivery — not both, so utilization pressure
+/// falls on getting more drivers into whichever queue is thin, not on
+/// double-booking one driver's attention across both.
 pub(crate) fn validate_service_types(input: Option<Vec<String>>) -> AppResult<Vec<String>> {
     let types = input.unwrap_or_else(|| vec!["ride".to_string()]);
-    if types.is_empty() || types.iter().any(|t| t != "ride" && t != "delivery") {
+    if types.len() != 1 || !matches!(types[0].as_str(), "ride" | "delivery") {
         return Err(AppError::bad(
             ErrorCode::Validation,
-            "service_types must be a non-empty subset of [\"ride\", \"delivery\"]",
+            "service_types must contain exactly one of \"ride\" or \"delivery\"",
         ));
     }
     Ok(types)

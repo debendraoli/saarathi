@@ -340,7 +340,6 @@
   "jobTypesRide": "Rides",
   "jobTypesDelivery": "Delivery",
   "jobTypesLabel": "What kind of jobs do you want?",
-  "jobTypesRequireOne": "Select at least one job type",
   "newJobOffer": "New job offer",
   "offerExpired": "This offer expired — a new one may already be on its way.",
   "notificationTargetGone": "This no longer leads anywhere — it may have expired.",

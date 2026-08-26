@@ -161,17 +161,7 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
     }
   }
 
-  function toggleServiceType(type: string) {
-    setServiceTypesDraft((cur) =>
-      cur.includes(type) ? cur.filter((t) => t !== type) : [...cur, type],
-    );
-  }
-
   async function saveServiceTypes() {
-    if (serviceTypesDraft.length === 0) {
-      setError("Select at least one job type.");
-      return;
-    }
     setServiceTypesBusy(true);
     setError(null);
     try {
@@ -325,18 +315,16 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
             </div>
           </div>
 
-          <h4 style={{ marginBottom: 8 }}>Job types</h4>
+          <h4 style={{ marginBottom: 8 }}>Job type</h4>
           <div className="row">
-            {["ride", "delivery"].map((type) => (
-              <label key={type} className="row" style={{ gap: 6 }}>
-                <input
-                  type="checkbox"
-                  checked={serviceTypesDraft.includes(type)}
-                  onChange={() => toggleServiceType(type)}
-                />
-                {type === "ride" ? "Rides" : "Delivery"}
-              </label>
-            ))}
+            <select
+              className="input"
+              value={serviceTypesDraft[0] ?? "ride"}
+              onChange={(e) => setServiceTypesDraft([e.target.value])}
+            >
+              <option value="ride">Rides</option>
+              <option value="delivery">Delivery</option>
+            </select>
             <button
               className="btn ghost"
               disabled={

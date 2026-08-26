@@ -244,14 +244,14 @@ flowchart LR
 - **Re-verification** on document expiry and on the standard's periodic cycle.
 - Rejections always carry a reason the driver sees, with a re-submit path.
 - **Required identity fields** — name, licence number, address, vehicle plate and model — are validated **server-side on both intake paths** (the driver's in-app form and the staff walk-in form), so neither can produce a half-filled record. Make/colour/year and date of birth remain optional.
-- **Job types** (rides / delivery / both) are captured at registration and stored on the driver row, not inferred. See §5.5.1.
+- **Job type** (rides *or* delivery — exactly one) is captured at registration and stored on the driver row, not inferred. See §5.5.1.
 
 #### 5.5.1 Job-type declaration & correction
 
-`drivers.service_types` is the **persisted source of truth** for which queues a driver belongs to. Its shape and lifecycle:
+`drivers.service_types` is the **persisted source of truth** for which one queue a driver belongs to. Its shape and lifecycle:
 
-- Set at registration (in-app or walk-in); constrained to a non-empty subset of `{ride, delivery}` by both a server-side check and a DB `CHECK` constraint. Existing rows default to `{ride}`, so the migration can't silently drop a working driver out of the ride queue.
-- Editable afterwards by staff from the driver's dashboard page — the correction path for "the field agent ticked the wrong box" and for a driver who later wants to add or drop a vertical.
+- Set at registration (in-app or walk-in); constrained to **exactly one** of `{ride, delivery}` by both a server-side check and a DB `CHECK` constraint (`array_length(service_types, 1) = 1`) — a driver in both queues at once is not a valid state. Stored as a single-element array rather than a plain column, so a future re-introduction of multi-select wouldn't need a column-type migration; the exactly-one rule lives in the constraint and the app-layer validator, not the column shape. Existing rows default to `{ride}`.
+- Editable afterwards by staff from the driver's dashboard page — the correction path for "the field agent ticked the wrong box" and for a driver who later wants to switch verticals entirely.
 - The driver app **re-reads it on every go-online**, so a dashboard change takes effect on the driver's next shift with no separate push or sync mechanism to keep alive.
 - Dispatch reads it via the driver's live presence record, not the DB, on the hot path — see §5.5.2.
 
@@ -321,7 +321,7 @@ erDiagram
       uuid id
       uuid user_id
       enum kyc_status
-      set service_types "RIDE|DELIVERY, non-empty"
+      set service_types "RIDE|DELIVERY, exactly one"
       text license_number
       text address
     }
@@ -353,7 +353,7 @@ erDiagram
 **Why this shape:**
 
 - **Trip and Order share a ledger** → unified compliance + economics.
-- **`DRIVER.service_types` is a set, not an enum** → a driver is normally in *both* queues; single-vertical is the narrowing case, not the default. Matching `TRIP.type` against it is the whole segregation mechanism (§5.5.2).
+- **`DRIVER.service_types` holds exactly one value** → every driver is single-vertical; the fleet covers both job types by having drivers in both queues, not by any driver serving both. Matching `TRIP.type` against it is the whole segregation mechanism (§5.5.2).
 - **Documents carry expiry** → drives onboarding reminders ([04](04-operational-procedures.md)).
 - **QR sticker tied to vehicle** with validity → safety + legal verification.
 - **Driver wallet** models the cash/digital owe-vs-owed balance.

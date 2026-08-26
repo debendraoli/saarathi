@@ -17,7 +17,7 @@
 
 > **Core design principle:** one driver app, one dispatch engine, **two job types** (RIDE, DELIVERY). This is the structural reason a super app beats single-vertical here.
 >
-> Each driver **declares which job types they accept at KYC** (rides, delivery, or both) — see [§3.3](#33-driver-ux-decisions). Dispatch honours that declaration strictly, so a delivery-only driver never sees a ride request and vice versa. Opting into **both** is the default and the one we push, because utilization is survival in a thin market.
+> Each driver **declares exactly one job type at KYC — rides or delivery, never both** — see [§3.3](#33-driver-ux-decisions). Dispatch honours that declaration strictly: a ride driver never sees a delivery job and vice versa. "Two job types" describes the *fleet* and the *dispatch engine*, which serve both; each individual driver sits in one queue.
 
 ---
 
@@ -109,7 +109,7 @@ Side-states: `NO_DRIVER_FOUND`, `CANCELLED_BY_RIDER`, `CANCELLED_BY_DRIVER`, `SO
 ```mermaid
 stateDiagram-v2
     [*] --> Registered: Phone OTP + basic info
-    Registered --> Declared: Name, license no., address, vehicle (plate + model) + job types accepted (rides / delivery / both)
+    Registered --> Declared: Name, license no., address, vehicle (plate + model) + job type (rides or delivery)
     Declared --> KYC_Pending: Upload license, bluebook, insurance, tax, PAN, driver photo, vehicle photo
     KYC_Pending --> Training: Background check passes
     KYC_Pending --> Rejected: Fails verification
@@ -141,8 +141,8 @@ flowchart TD
 
 ### 3.3 Driver UX decisions
 
-- **Job types are declared once, at KYC:** the driver picks rides, delivery, or **both** on the registration form. It is a **persisted driver attribute** (`drivers.service_types`), not a per-session toggle — so it survives reinstalls, and the driver can't accidentally strand themselves outside the queue they meant to be in. Ops can correct it later from the dashboard ([05 §5.5.1](05-technical-architecture.md)); the app re-reads it every time the driver goes online, so an ops change lands on their next shift with no separate sync step.
-- **Push "both" for utilization:** a driver in only one queue is idle whenever the other queue has the demand. Both is the default selection, and the one field agents should be steering drivers toward — **utilization is survival in a thin market**. Single-vertical is there for the driver who genuinely only wants one (a dedicated merchant courier, or a ride driver who won't carry cargo).
+- **Job type is declared once, at KYC — exactly one:** the driver picks rides *or* delivery on the registration form, not both. It is a **persisted driver attribute** (`drivers.service_types`), not a per-session toggle — so it survives reinstalls, and the driver can't accidentally strand themselves outside the queue they meant to be in. Ops can correct it later from the dashboard ([05 §5.5.1](05-technical-architecture.md)); the app re-reads it every time the driver goes online, so an ops change lands on their next shift with no separate sync step.
+- **Utilization comes from fleet mix, not per-driver dual-booking:** because each driver sits in exactly one queue, "one driver, many job types" means the *fleet* covers both verticals, not that any individual driver is pulled between two queues at once. Steering the right *proportion* of new drivers toward the thinner queue (rides vs. delivery) is how Ops keeps both liquid — see the intake note in [04 §1.1](04-operational-procedures.md).
 - **Earnings clarity:** Show **net** earning per job up front (after 10% + 1% fund) — drivers trust transparency, and inDrive won emerging markets partly on this.
 - **12-hour cap enforcement:** App must lock new jobs after 12h online (legal anti-fatigue rule).
 - **Compliance nudges:** Dashboard warns before license/fitness/insurance expiry, and before QR sticker's 1-year renewal.
@@ -257,7 +257,7 @@ flowchart TD
 ## 8. Flow-level design principles (carry into build)
 
 1. **Cash-first, digital-nudged** across every vertical.
-2. **One driver, one dispatch, many job types** — utilization is survival. Drivers declare their job types at KYC and dispatch enforces that declaration exactly; steer them toward accepting both.
+2. **One fleet, one dispatch, many job types** — utilization is survival. Each driver declares exactly one job type at KYC (rides or delivery) and dispatch enforces that declaration exactly; balancing how many new drivers go into each queue is how the fleet, not any one driver, covers both.
 3. **Transparent metered pricing** within legal caps (not haggling).
 4. **OTP + QR verification** to fight fraud and offline-ride leakage.
 5. **Offline-tolerant** clients (cache + reconcile) for patchy connectivity.

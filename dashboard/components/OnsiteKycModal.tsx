@@ -59,7 +59,7 @@ export function OnsiteKycModal({
   const [plate, setPlate] = useState("");
   const [make, setMake] = useState("");
   const [model, setModel] = useState("");
-  const [serviceTypes, setServiceTypes] = useState<string[]>(["ride"]);
+  const [serviceType, setServiceType] = useState<"ride" | "delivery">("ride");
 
   const [driver, setDriver] = useState<Driver | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +80,7 @@ export function OnsiteKycModal({
     setPlate("");
     setMake("");
     setModel("");
-    setServiceTypes(["ride"]);
+    setServiceType("ride");
     setDriver(null);
     setError(null);
     setDocFile(null);
@@ -104,7 +104,7 @@ export function OnsiteKycModal({
         license_number: license || null,
         address: address || null,
         vehicle: { class: vclass, plate_number: plate.trim(), make: make || null, model: model || null },
-        service_types: serviceTypes,
+        service_types: [serviceType],
       };
       setDriver(await api.onboardDriver(input));
     } catch (e) {
@@ -186,24 +186,16 @@ export function OnsiteKycModal({
           <input className="input" value={model} onChange={(e) => setModel(e.target.value)} disabled={!!driver} />
         </div>
         <div className="field">
-          <label>Job types</label>
-          <div className="row">
-            {["ride", "delivery"].map((type) => (
-              <label key={type} className="row" style={{ gap: 6 }}>
-                <input
-                  type="checkbox"
-                  checked={serviceTypes.includes(type)}
-                  disabled={!!driver}
-                  onChange={() =>
-                    setServiceTypes((cur) =>
-                      cur.includes(type) ? cur.filter((t) => t !== type) : [...cur, type],
-                    )
-                  }
-                />
-                {type === "ride" ? "Rides" : "Delivery"}
-              </label>
-            ))}
-          </div>
+          <label>Job type</label>
+          <select
+            className="input"
+            value={serviceType}
+            onChange={(e) => setServiceType(e.target.value as "ride" | "delivery")}
+            disabled={!!driver}
+          >
+            <option value="ride">Rides</option>
+            <option value="delivery">Delivery</option>
+          </select>
         </div>
       </div>
       {!driver ? (
@@ -216,8 +208,7 @@ export function OnsiteKycModal({
               !license.trim() ||
               !address.trim() ||
               !plate.trim() ||
-              !model.trim() ||
-              serviceTypes.length === 0
+              !model.trim()
             }
             onClick={onboard}
           >
