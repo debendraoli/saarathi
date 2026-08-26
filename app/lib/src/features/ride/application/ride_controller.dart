@@ -196,9 +196,21 @@ class TripStatusUpdater {
   /// directly from a swipe control or a cancel button. [reason] is only
   /// meaningful for `status == 'cancelled'`.
   void update(String status, {String? reason}) {
-    _ref.read(optimisticTripStatusProvider(tripId).notifier).state = TripStatus
-        .values
-        .firstWhere((s) => s.name == status, orElse: () => TripStatus.unknown);
+    // TripStatus.fromWire, not a naive `s.name == status` match — the
+    // latter compares against Dart's own camelCase enum identifier
+    // (`TripStatus.inProgress.name == "inProgress"`), which never matches
+    // the snake_case wire string this method is actually called with
+    // (`'in_progress'`). That silently set the optimistic override to
+    // `TripStatus.unknown` on every "Start trip" tap — which every
+    // status-gated widget on this screen (the next swipe, the cancel
+    // button, the fullscreen-nav button, `trip.isActive` itself) treats as
+    // "hide" — and it never self-corrected: the real poll's *correct*
+    // status doesn't match the *wrong* optimistic one either, so the
+    // override-clearing listener below never fired. Confirmed live as
+    // "all the buttons are gone" after starting a trip, across several
+    // separate reports that looked like unrelated layout bugs.
+    _ref.read(optimisticTripStatusProvider(tripId).notifier).state =
+        TripStatus.fromWire(status);
     _pending = status;
     _pendingReason = reason;
     _connSub ??= _ref.listen(connectivityProvider, (prev, next) {
