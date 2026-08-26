@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../core/foreground/driver_foreground_service.dart';
 import '../../../core/location.dart';
+import '../../../core/network/api_client.dart' show ApiException;
 import '../../../core/offline/connectivity.dart';
 import '../../../core/prefs.dart';
 import '../../../shared/request_ring.dart';
@@ -44,6 +45,8 @@ class DriverStatus {
 
 class DriverController extends Notifier<DriverStatus> {
   Timer? _heartbeat;
+  Timer? _resumeRetryTimer;
+  int _resumeAttempt = 0;
 
   /// Whether the driver was online the last time the app had a chance to
   /// record it — set the instant `goOnline()` succeeds, cleared the instant
@@ -59,7 +62,10 @@ class DriverController extends Notifier<DriverStatus> {
 
   @override
   DriverStatus build() {
-    ref.onDispose(() => _heartbeat?.cancel());
+    ref.onDispose(() {
+      _heartbeat?.cancel();
+      _resumeRetryTimer?.cancel();
+    });
     // A connectivity drop while online almost certainly lets the backend's
     // presence TTL (~60s) lapse before the driver even notices — without
     // this they'd stay showing "online" locally, silently receive no more
@@ -71,43 +77,65 @@ class DriverController extends Notifier<DriverStatus> {
       final wasOffline = prev?.valueOrNull == false;
       final backOnline = next.valueOrNull ?? false;
       if (wasOffline && backOnline && state.online) {
-        _resumeOnlineAfterReconnect();
+        _resumeAttempt = 0;
+        _attemptResumePresence();
       }
     });
     // Same idea, for the other way presence lapses: the app itself getting
     // killed and relaunched, not just a network blip while it stays alive.
-    // Fire-and-forget — this shouldn't hold up the very first frame.
-    unawaited(_resumeOnlineAfterRelaunch());
+    // Trust disk over a fresh round trip to the backend — show online
+    // immediately (the same optimistic-then-reconcile pattern this app
+    // already uses for trip status/merchant open toggles) instead of
+    // leaving the driver on a bare offline toggle for however long the
+    // location fix + network call take. Fire-and-forget: shouldn't hold up
+    // the very first frame.
+    if (ref.read(sharedPreferencesProvider).getBool(_wasOnlineKey) ?? false) {
+      state = state.copyWith(online: true);
+      unawaited(_attemptResumePresence());
+    }
     return const DriverStatus();
   }
 
-  Future<void> _resumeOnlineAfterRelaunch() async {
-    final prefs = ref.read(sharedPreferencesProvider);
-    if (!(prefs.getBool(_wasOnlineKey) ?? false)) return;
-    try {
-      await goOnline();
-    } catch (_) {
-      // No location permission, no network yet at launch, etc. — the
-      // driver just lands on the home screen showing offline and can
-      // toggle manually, same as any other failed goOnline() attempt.
-    }
-  }
-
-  Future<void> _resumeOnlineAfterReconnect() async {
+  /// Re-registers presence (location fetch + `POST online` + heartbeat
+  /// restart) without ever flashing `busy` — used to reconcile the backend
+  /// after `state.online` was already set optimistically (relaunch) or was
+  /// never actually unset locally (a mid-session connectivity drop).
+  /// Retries with backoff on a network failure; a genuine rejection (e.g.
+  /// the account itself no longer being allowed online) instead reverts to
+  /// actually offline, since silently staying "online" forever against a
+  /// backend that's refused it would just strand the driver with no offers
+  /// and no visible reason why.
+  Future<void> _attemptResumePresence() async {
+    _resumeRetryTimer?.cancel();
     try {
       final at = await currentLatLng();
       state = state.copyWith(lastLocation: at);
       await _repo.goOnline(at, state.jobTypes);
-      // Already `online` locally throughout — this just re-registers
-      // presence server-side and restarts the heartbeat a long-enough
-      // outage would have let lapse, without ever flashing a busy state.
+      await ref.read(sharedPreferencesProvider).setBool(_wasOnlineKey, true);
+      _resumeAttempt = 0;
       _heartbeat?.cancel();
       _heartbeat = Timer.periodic(const Duration(seconds: 20), (_) => _beat());
+      await DriverForegroundService.start();
+    } on ApiException catch (e) {
+      if (e.isNetwork) {
+        _scheduleResumeRetry();
+      } else {
+        state = state.copyWith(online: false);
+        await ref.read(sharedPreferencesProvider).setBool(_wasOnlineKey, false);
+      }
     } catch (_) {
-      // Another reconnect edge (or the driver manually toggling) gets
-      // another chance; a `busy` UI signal isn't warranted for a resume the
-      // driver never asked for and doesn't need to see fail.
+      // No location permission, GPS off, etc. — worth another try; the
+      // connectivity-regain listener above also retries independently.
+      _scheduleResumeRetry();
     }
+  }
+
+  void _scheduleResumeRetry() {
+    _resumeRetryTimer?.cancel();
+    final attempt = _resumeAttempt++;
+    final delaySecs = attempt >= 4 ? 30 : (1 << (attempt + 1)); // 2,4,8,16,30…
+    _resumeRetryTimer =
+        Timer(Duration(seconds: delaySecs), _attemptResumePresence);
   }
 
   DriverRepository get _repo => ref.read(driverRepositoryProvider);
@@ -115,6 +143,7 @@ class DriverController extends Notifier<DriverStatus> {
   Future<void> toggleOnline() => state.online ? goOffline() : goOnline();
 
   Future<void> goOnline() async {
+    _resumeRetryTimer?.cancel();
     state = state.copyWith(busy: true);
     try {
       final at = await currentLatLng();
@@ -134,6 +163,7 @@ class DriverController extends Notifier<DriverStatus> {
   }
 
   Future<void> goOffline() async {
+    _resumeRetryTimer?.cancel();
     state = state.copyWith(busy: true);
     _heartbeat?.cancel();
     await DriverForegroundService.stop();
