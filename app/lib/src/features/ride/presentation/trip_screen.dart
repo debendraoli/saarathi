@@ -426,52 +426,62 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                       // `_sheetClearance` minimum, since the sheet paints on
                       // top of these buttons and dragging it open past its
                       // minimum previously covered both entirely.
-                      AnimatedBuilder(
-                        animation: _sheetController,
-                        builder: (context, _) {
-                          final extent = _sheetController.isAttached
-                              ? _sheetController.size
-                              : _sheetClearance;
-                          final base =
-                              MediaQuery.of(context).size.height * extent;
-                          return Stack(
-                            children: [
-                              Positioned(
-                                left: 12,
-                                bottom: base + 12,
-                                child: SafeArea(
-                                  top: false,
-                                  child: MapCircleButton(
-                                    icon: Icons.arrow_back_rounded,
-                                    onTap: () =>
-                                        _leaveTrip(context, ref, tripId),
-                                  ),
-                                ),
-                              ),
-                              if (iAmDriver && trip.isActive)
+                      Positioned.fill(
+                        // A Stack with only Positioned children (both below)
+                        // has no non-positioned child to size itself from —
+                        // it collapses to zero size and its Positioned
+                        // children render nowhere. Positioned.fill here
+                        // gives the AnimatedBuilder's returned Stack the
+                        // outer stack's actual full bounds to position
+                        // within (confirmed live: without this, both
+                        // buttons rendered nowhere at all).
+                        child: AnimatedBuilder(
+                          animation: _sheetController,
+                          builder: (context, _) {
+                            final extent = _sheetController.isAttached
+                                ? _sheetController.size
+                                : _sheetClearance;
+                            final base =
+                                MediaQuery.of(context).size.height * extent;
+                            return Stack(
+                              children: [
                                 Positioned(
-                                  right: 12,
-                                  bottom: base + 76,
+                                  left: 12,
+                                  bottom: base + 12,
                                   child: SafeArea(
                                     top: false,
                                     child: MapCircleButton(
-                                      icon: Icons.fullscreen_rounded,
-                                      tooltip: l.navFullscreen,
-                                      onTap: () => context.push(
-                                        '${Routes.tripNavigate}/$tripId/navigate',
-                                        extra: NavigationScreenArgs(
-                                          target: routeTarget,
-                                          vehicleClass:
-                                              trip.vehicleClass ??
-                                                  'two_wheeler',
+                                      icon: Icons.arrow_back_rounded,
+                                      onTap: () =>
+                                          _leaveTrip(context, ref, tripId),
+                                    ),
+                                  ),
+                                ),
+                                if (iAmDriver && trip.isActive)
+                                  Positioned(
+                                    right: 12,
+                                    bottom: base + 76,
+                                    child: SafeArea(
+                                      top: false,
+                                      child: MapCircleButton(
+                                        icon: Icons.fullscreen_rounded,
+                                        tooltip: l.navFullscreen,
+                                        onTap: () => context.push(
+                                          '${Routes.tripNavigate}/$tripId/navigate',
+                                          extra: NavigationScreenArgs(
+                                            target: routeTarget,
+                                            vehicleClass:
+                                                trip.vehicleClass ??
+                                                    'two_wheeler',
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                            ],
-                          );
-                        },
+                              ],
+                            );
+                          },
+                        ),
                       ),
                       trip.isBidding && trip.status == TripStatus.requested
                           ? BiddingSheet(
