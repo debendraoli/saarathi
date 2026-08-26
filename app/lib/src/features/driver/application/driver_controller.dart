@@ -87,13 +87,18 @@ class DriverController extends Notifier<DriverStatus> {
     // immediately (the same optimistic-then-reconcile pattern this app
     // already uses for trip status/merchant open toggles) instead of
     // leaving the driver on a bare offline toggle for however long the
-    // location fix + network call take. Fire-and-forget: shouldn't hold up
-    // the very first frame.
-    if (ref.read(sharedPreferencesProvider).getBool(_wasOnlineKey) ?? false) {
-      state = state.copyWith(online: true);
+    // location fix + network call take. Baked straight into the returned
+    // state rather than assigned after — `state` isn't readable/writable
+    // until `build()` itself returns ("Bad state: Tried to read the state
+    // of an uninitialized provider", reproduced live). The reconcile call
+    // is fire-and-forget and only touches `state` later, once this build()
+    // has actually returned, so that part's fine as-is.
+    final wasOnline =
+        ref.read(sharedPreferencesProvider).getBool(_wasOnlineKey) ?? false;
+    if (wasOnline) {
       unawaited(_attemptResumePresence());
     }
-    return const DriverStatus();
+    return DriverStatus(online: wasOnline);
   }
 
   /// Re-registers presence (location fetch + `POST online` + heartbeat
