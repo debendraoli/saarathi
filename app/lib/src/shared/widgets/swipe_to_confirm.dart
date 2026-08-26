@@ -101,6 +101,21 @@ class _SwipeToConfirmState extends State<SwipeToConfirm>
       _drag = 0;
       _crossedThreshold = false;
     }
+    // A changed label means this control now represents a genuinely
+    // different action than whatever was just confirmed (e.g. the trip
+    // status moved on and the caller is now offering "Start trip" instead
+    // of "I've arrived") — reset unconditionally rather than relying only
+    // on the caller's own busy-flip timing, which a caller driving this
+    // optimistically (status applied locally before the request that makes
+    // it real even resolves) can't always guarantee lines up with this
+    // widget's own rebuild — confirmed live as a swipe staying stuck on
+    // its previous action's checkmark, label hidden, refusing all further
+    // input, even though the underlying transition had already succeeded.
+    if (widget.label != oldWidget.label && !_dragging) {
+      _confirmed = false;
+      _drag = 0;
+      _crossedThreshold = false;
+    }
   }
 
   @override
