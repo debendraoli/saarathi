@@ -406,44 +406,52 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                           trip.status != TripStatus.inProgress &&
                           ref.watch(riderShareLocationProvider(tripId)))
                         RiderLocationPublisher(tripId: tripId),
-                      // External Google Maps hand-off and the in-app
-                      // fullscreen nav button both dock top-right, stacked —
-                      // same "never under the draggable sheet" reasoning as
-                      // the back button above; previously the fullscreen
-                      // button specifically was positioned just above the
-                      // sheet's edge and could end up covered by it, or
-                      // (after a fix attempt that tracked the sheet's live
-                      // extent instead) disappear entirely from a layout bug
-                      // in that tracking code.
+                      // External Google Maps hand-off docks top-right — a
+                      // rare, deliberate action, unlike fullscreen nav below
+                      // which benefits from being thumb-reachable during an
+                      // active trip.
                       if (iAmDriver && trip.isActive)
                         SafeArea(
                           child: Align(
                             alignment: Alignment.topRight,
                             child: Padding(
                               padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  MapCircleButton(
-                                    icon: Icons.navigation_rounded,
-                                    iconColor: const Color(0xFF4285F4),
-                                    onTap: () =>
-                                        _launchExternalNavigation(routeTarget),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  MapCircleButton(
-                                    icon: Icons.fullscreen_rounded,
-                                    tooltip: l.navFullscreen,
-                                    onTap: () => context.push(
-                                      '${Routes.tripNavigate}/$tripId/navigate',
-                                      extra: NavigationScreenArgs(
-                                        target: routeTarget,
-                                        vehicleClass:
-                                            trip.vehicleClass ?? 'two_wheeler',
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                              child: MapCircleButton(
+                                icon: Icons.navigation_rounded,
+                                iconColor: const Color(0xFF4285F4),
+                                onTap: () =>
+                                    _launchExternalNavigation(routeTarget),
+                              ),
+                            ),
+                          ),
+                        ),
+                      // Bottom-right, just above the sheet's own collapsed
+                      // edge, for one-handed thumb reach during an active
+                      // trip — the actual bug that made this spot
+                      // unreliable earlier (a wrong local trip status
+                      // hiding trip.isActive-gated widgets entirely) is
+                      // fixed at its root now; dragging the sheet open past
+                      // its collapsed size can still cover this
+                      // temporarily, same as any bottom sheet, but it's
+                      // never stuck — drag the sheet back down to reveal it.
+                      if (iAmDriver && trip.isActive)
+                        Positioned(
+                          right: 12,
+                          bottom: MediaQuery.of(context).size.height *
+                                  _sheetClearance +
+                              12,
+                          child: SafeArea(
+                            top: false,
+                            child: MapCircleButton(
+                              icon: Icons.fullscreen_rounded,
+                              tooltip: l.navFullscreen,
+                              onTap: () => context.push(
+                                '${Routes.tripNavigate}/$tripId/navigate',
+                                extra: NavigationScreenArgs(
+                                  target: routeTarget,
+                                  vehicleClass:
+                                      trip.vehicleClass ?? 'two_wheeler',
+                                ),
                               ),
                             ),
                           ),
