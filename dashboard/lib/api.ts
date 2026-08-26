@@ -944,6 +944,8 @@ export interface SupportThread {
   last_message: string;
   last_at: string;
   unread: number;
+  last_trip_id: string | null;
+  last_order_id: string | null;
 }
 
 export interface SupportMessage {
@@ -951,6 +953,7 @@ export interface SupportMessage {
   sender_role: "user" | "staff";
   body: string;
   trip_id: string | null;
+  order_id: string | null;
   created_at: string;
 }
 

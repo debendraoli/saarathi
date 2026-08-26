@@ -175,6 +175,13 @@ struct SupportThread {
     last_message: String,
     last_at: DateTime<Utc>,
     unread: i64,
+    /// The most recent message's own reference, if it had one — a quick
+    /// "what's this about" hint in the inbox list before staff even opens
+    /// the thread. Not necessarily *every* message's reference (a thread
+    /// can drift across several rides/orders over time); see each
+    /// message's own `trip_id`/`order_id` for that.
+    last_trip_id: Option<Uuid>,
+    last_order_id: Option<Uuid>,
 }
 
 async fn list_threads(
@@ -185,6 +192,7 @@ async fn list_threads(
         "SELECT DISTINCT ON (m.user_id) \
                 m.user_id, u.full_name AS user_name, u.phone AS user_phone, \
                 m.body AS last_message, m.created_at AS last_at, \
+                m.trip_id AS last_trip_id, m.order_id AS last_order_id, \
                 (SELECT count(*) FROM support_messages um \
                    WHERE um.user_id = m.user_id AND um.sender_role = 'user' \
                      AND um.read_by_staff = false) AS unread \

@@ -92,6 +92,11 @@ export default function SupportPage() {
                   <strong>{t.user_name || t.user_phone || t.user_id.slice(0, 8)}</strong>
                   {t.unread > 0 && <span className="badge rejected">{t.unread}</span>}
                 </div>
+                {(t.last_trip_id || t.last_order_id) && (
+                  <div style={{ marginTop: 4 }}>
+                    <ReferenceBadge tripId={t.last_trip_id} orderId={t.last_order_id} />
+                  </div>
+                )}
                 <div className="subtle" style={{ fontSize: 13, marginTop: 4 }}>
                   {t.last_message.length > 60 ? `${t.last_message.slice(0, 60)}…` : t.last_message}
                 </div>
@@ -139,6 +144,11 @@ export default function SupportPage() {
                       padding: "8px 12px",
                     }}
                   >
+                    {(m.trip_id || m.order_id) && (
+                      <div style={{ marginBottom: 4 }}>
+                        <ReferenceBadge tripId={m.trip_id} orderId={m.order_id} />
+                      </div>
+                    )}
                     <div>{m.body}</div>
                     <div style={{ fontSize: 10, opacity: 0.7, marginTop: 4 }}>
                       {new Date(m.created_at).toLocaleTimeString()}
@@ -165,4 +175,16 @@ export default function SupportPage() {
       </div>
     </div>
   );
+}
+
+// What a message/thread is about — a ride or an order, whichever's set (a
+// thread carries one or the other, never both, per the mobile app's own
+// "Get help" entry points). No detail page to link to yet on this
+// dashboard (no /rides/[id] or /orders/[id]), so this is plain text for
+// now — enough for staff to know what they're looking at and to
+// cross-reference by id elsewhere.
+function ReferenceBadge({ tripId, orderId }: { tripId: string | null; orderId: string | null }) {
+  const label = tripId ? `Ride #${tripId.slice(0, 8)}` : orderId ? `Order #${orderId.slice(0, 8)}` : null;
+  if (!label) return null;
+  return <span className="badge submitted">{label}</span>;
 }
