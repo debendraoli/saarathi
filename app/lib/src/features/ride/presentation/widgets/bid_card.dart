@@ -95,6 +95,7 @@ class BidCard extends StatelessWidget {
               label: AppL10n.of(context).accept,
               busy: busy,
               onConfirmed: onAccept,
+              color: Colors.green.shade600,
             ),
           ],
         ),

@@ -80,23 +80,6 @@ class _TripScreenState extends ConsumerState<TripScreen> {
   static const _routeRequeryMeters = 25.0;
   LatLng? _routeQueryPoint;
 
-  // Shared with BiddingSheet/_StatusSheet's own DraggableScrollableSheet so
-  // the back/fullscreen-nav buttons below (positioned just above the
-  // sheet's *collapsed* edge) can track its *live* extent instead. Without
-  // this they were positioned using the sheet's fixed minimum size
-  // (`_sheetClearance`) regardless of how far the user had actually dragged
-  // it open — since the sheet paints after (on top of) these buttons in the
-  // Stack, dragging it past its collapsed size silently covered both
-  // buttons entirely, confirmed live as "no fullscreen button for
-  // navigation" after the sheet ended up expanded.
-  final _sheetController = DraggableScrollableController();
-
-  @override
-  void dispose() {
-    _sheetController.dispose();
-    super.dispose();
-  }
-
   LatLng _throttledRoutePoint(LatLng liveLoc) {
     final last = _routeQueryPoint;
     if (last == null ||
@@ -357,16 +340,41 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                       // arrow above until a driver is assigned.
                       if (iAmRider && driverLoc == null && trip.isActive)
                         const _SelfLocationWatcher(),
-                      if (!online)
-                        const SafeArea(
-                          child: Align(
-                            alignment: Alignment.topLeft,
-                            child: Padding(
-                              padding: EdgeInsets.all(12),
-                              child: OfflineBanner(),
+                      // Back (leave trip) always docks top-left, stacked
+                      // above the offline banner when both are showing —
+                      // previously positioned just above the status/bidding
+                      // sheet's edge instead, which the sheet (painted after
+                      // it, so on top) could cover entirely once dragged
+                      // open past its collapsed size, or — after an attempt
+                      // to track the sheet's live extent instead of a fixed
+                      // offset — could vanish outright from an unrelated
+                      // layout bug in that tracking code. Docking top
+                      // instead of bottom sidesteps the whole class of
+                      // "the draggable sheet might be covering this" bugs:
+                      // the sheet only ever grows from the bottom, so
+                      // nothing here can ever be under it.
+                      SafeArea(
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                MapCircleButton(
+                                  icon: Icons.arrow_back_rounded,
+                                  onTap: () =>
+                                      _leaveTrip(context, ref, tripId),
+                                ),
+                                if (!online) ...[
+                                  const SizedBox(height: 8),
+                                  const OfflineBanner(),
+                                ],
+                              ],
                             ),
                           ),
                         ),
+                      ),
                       // Own-position/heading only starts updating once the
                       // first GPS fix lands — genuinely variable timing
                       // (near-instant warm, several seconds cold). Without
@@ -398,99 +406,51 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                           trip.status != TripStatus.inProgress &&
                           ref.watch(riderShareLocationProvider(tripId)))
                         RiderLocationPublisher(tripId: tripId),
-                      // Hands the driver off to their own Google Maps app for
-                      // real turn-by-turn (driving instructions, live
-                      // traffic) — colored in Google's own blue so it reads
-                      // at a glance as "leaves the app", distinct from the
-                      // in-app fullscreen button. Stays up top: it's a rare,
-                      // deliberate action, unlike back/fullscreen below which
-                      // benefit from being thumb-reachable.
+                      // External Google Maps hand-off and the in-app
+                      // fullscreen nav button both dock top-right, stacked —
+                      // same "never under the draggable sheet" reasoning as
+                      // the back button above; previously the fullscreen
+                      // button specifically was positioned just above the
+                      // sheet's edge and could end up covered by it, or
+                      // (after a fix attempt that tracked the sheet's live
+                      // extent instead) disappear entirely from a layout bug
+                      // in that tracking code.
                       if (iAmDriver && trip.isActive)
                         SafeArea(
                           child: Align(
                             alignment: Alignment.topRight,
                             child: Padding(
                               padding: const EdgeInsets.all(12),
-                              child: MapCircleButton(
-                                icon: Icons.navigation_rounded,
-                                iconColor: const Color(0xFF4285F4),
-                                onTap: () =>
-                                    _launchExternalNavigation(routeTarget),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  MapCircleButton(
+                                    icon: Icons.navigation_rounded,
+                                    iconColor: const Color(0xFF4285F4),
+                                    onTap: () =>
+                                        _launchExternalNavigation(routeTarget),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  MapCircleButton(
+                                    icon: Icons.fullscreen_rounded,
+                                    tooltip: l.navFullscreen,
+                                    onTap: () => context.push(
+                                      '${Routes.tripNavigate}/$tripId/navigate',
+                                      extra: NavigationScreenArgs(
+                                        target: routeTarget,
+                                        vehicleClass:
+                                            trip.vehicleClass ?? 'two_wheeler',
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
                         ),
-                      // Back (leave trip) and fullscreen nav both dock just
-                      // above the status/bidding sheet's *live* top edge —
-                      // tracked via `_sheetController` instead of the fixed
-                      // `_sheetClearance` minimum, since the sheet paints on
-                      // top of these buttons and dragging it open past its
-                      // minimum previously covered both entirely.
-                      Positioned.fill(
-                        // A Stack with only Positioned children (both below)
-                        // has no non-positioned child to size itself from —
-                        // it collapses to zero size and its Positioned
-                        // children render nowhere. Positioned.fill here
-                        // gives the AnimatedBuilder's returned Stack the
-                        // outer stack's actual full bounds to position
-                        // within (confirmed live: without this, both
-                        // buttons rendered nowhere at all).
-                        child: AnimatedBuilder(
-                          animation: _sheetController,
-                          builder: (context, _) {
-                            final extent = _sheetController.isAttached
-                                ? _sheetController.size
-                                : _sheetClearance;
-                            final base =
-                                MediaQuery.of(context).size.height * extent;
-                            return Stack(
-                              children: [
-                                Positioned(
-                                  left: 12,
-                                  bottom: base + 12,
-                                  child: SafeArea(
-                                    top: false,
-                                    child: MapCircleButton(
-                                      icon: Icons.arrow_back_rounded,
-                                      onTap: () =>
-                                          _leaveTrip(context, ref, tripId),
-                                    ),
-                                  ),
-                                ),
-                                if (iAmDriver && trip.isActive)
-                                  Positioned(
-                                    right: 12,
-                                    bottom: base + 76,
-                                    child: SafeArea(
-                                      top: false,
-                                      child: MapCircleButton(
-                                        icon: Icons.fullscreen_rounded,
-                                        tooltip: l.navFullscreen,
-                                        onTap: () => context.push(
-                                          '${Routes.tripNavigate}/$tripId/navigate',
-                                          extra: NavigationScreenArgs(
-                                            target: routeTarget,
-                                            vehicleClass:
-                                                trip.vehicleClass ??
-                                                    'two_wheeler',
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
                       trip.isBidding && trip.status == TripStatus.requested
-                          ? BiddingSheet(
-                              trip: trip, sheetController: _sheetController)
-                          : _StatusSheet(
-                              trip: trip,
-                              driverLoc: driverLoc,
-                              sheetController: _sheetController,
-                            ),
+                          ? BiddingSheet(trip: trip)
+                          : _StatusSheet(trip: trip, driverLoc: driverLoc),
                     ],
                   );
                 },
@@ -641,14 +601,9 @@ Future<void> showCancelReasonSheet(
 }
 
 class _StatusSheet extends ConsumerWidget {
-  const _StatusSheet({
-    required this.trip,
-    this.driverLoc,
-    required this.sheetController,
-  });
+  const _StatusSheet({required this.trip, this.driverLoc});
   final Trip trip;
   final LatLng? driverLoc;
-  final DraggableScrollableController sheetController;
 
   /// Short status line only — the route (pickup/destination), live ETA, and
   /// fare each get their own dedicated row now instead of being crammed into
@@ -719,7 +674,6 @@ class _StatusSheet extends ConsumerWidget {
     final driverDetail = !iAmDriver ? participants.valueOrNull?.driver : null;
 
     return DraggableScrollableSheet(
-      controller: sheetController,
       initialChildSize: 0.32,
       minChildSize: 0.32,
       maxChildSize: 0.85,

@@ -19,9 +19,8 @@ import 'bid_card.dart';
 /// `bid` frame, but the poll is the source of truth so a missed frame can't
 /// leave the list stale).
 class BiddingSheet extends ConsumerStatefulWidget {
-  const BiddingSheet({super.key, required this.trip, required this.sheetController});
+  const BiddingSheet({super.key, required this.trip});
   final Trip trip;
-  final DraggableScrollableController sheetController;
 
   @override
   ConsumerState<BiddingSheet> createState() => _BiddingSheetState();
@@ -123,7 +122,6 @@ class _BiddingSheetState extends ConsumerState<BiddingSheet> {
     if (bids.isNotEmpty && _showNudge) _showNudge = false;
 
     return DraggableScrollableSheet(
-      controller: widget.sheetController,
       initialChildSize: 0.42,
       minChildSize: 0.3,
       maxChildSize: 0.85,

@@ -299,13 +299,35 @@ class _OnlineCard extends StatelessWidget {
                   color: onStatusContainer,
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  online ? l.youAreOnline : l.youAreOffline,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: onStatusContainer,
-                      ),
+                Expanded(
+                  child: Text(
+                    online ? l.youAreOnline : l.youAreOffline,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: onStatusContainer,
+                        ),
+                  ),
                 ),
+                // A toggle reads as the actual on/off state at a glance
+                // (matches the icon/text above it) — a button labeled "Go
+                // offline" while already online asked the driver to read an
+                // instruction rather than just see where they stood.
+                if (busy)
+                  SizedBox(
+                    height: 24,
+                    width: 24,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.4, color: onStatusContainer),
+                  )
+                else
+                  Switch(
+                    value: online,
+                    onChanged: (_) => onToggle(),
+                    activeThumbColor: Colors.white,
+                    activeTrackColor: Colors.green.shade600,
+                    inactiveThumbColor: Colors.white,
+                    inactiveTrackColor: Colors.red.shade300,
+                  ),
               ],
             ),
             const SizedBox(height: 6),
@@ -313,23 +335,7 @@ class _OnlineCard extends StatelessWidget {
               online ? l.onlineBody : l.offlineBody,
               style: TextStyle(color: onStatusContainer),
             ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: busy ? null : onToggle,
-              style: FilledButton.styleFrom(
-                backgroundColor: online
-                    ? Colors.red.shade600
-                    : (dark ? Colors.green.shade400 : Colors.green.shade600),
-                foregroundColor: Colors.white,
-              ),
-              child: busy
-                  ? const SizedBox(
-                      height: 22,
-                      width: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.4),
-                    )
-                  : Text(online ? l.goOffline : l.goOnline),
-            ),
+            const SizedBox(height: 10),
             TextButton.icon(
               onPressed: () async {
                 await DriverForegroundService.requestBatteryExclusion();
@@ -826,6 +832,7 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                       busy: _busy || expired,
                       onConfirmed: () =>
                           _placeBid(offer.askFare ?? offer.finalFare),
+                      color: Colors.green.shade600,
                     ),
                   ],
                 ),
@@ -856,6 +863,7 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                       label: l.accept,
                       busy: _busy || expired,
                       onConfirmed: _accept,
+                      color: Colors.green.shade600,
                     ),
                   ),
                 ],
