@@ -2,6 +2,7 @@
 
 import { NotificationBell } from "@/components/NotificationBell";
 import { api, auth, places, rides, type User } from "@/lib/api";
+import { subscribeStaffNotifications } from "@/lib/staffSocket";
 import {
     BarChart3,
     Briefcase,
@@ -140,7 +141,10 @@ function activeHref(pathname: string, driverListFrom: string | null): string | n
   return best;
 }
 
-const COUNT_POLL_MS = 30_000;
+// Now just a safety net for the rare count change that isn't accompanied by
+// a staff notification — live push (see subscribeStaffNotifications below)
+// handles the common case immediately, so this no longer needs to be tight.
+const COUNT_POLL_MS = 120_000;
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -190,9 +194,17 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       });
     }
     loadCounts();
+    // Refetch immediately on any live-pushed staff notification instead of
+    // waiting up to COUNT_POLL_MS to notice — most count-affecting events
+    // (a new SOS, a KYC submission, a complaint) already notify staff, so
+    // this is the common case now. The interval stays as a long-interval
+    // safety net for the rarer count change that isn't itself accompanied
+    // by a notification, not the primary mechanism anymore.
+    const unsubscribe = subscribeStaffNotifications(() => loadCounts());
     const t = setInterval(loadCounts, COUNT_POLL_MS);
     return () => {
       active = false;
+      unsubscribe();
       clearInterval(t);
     };
   }, [ready]);

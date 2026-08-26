@@ -1,11 +1,11 @@
 "use client";
 
 import { api, type AppNotification } from "@/lib/api";
+import { subscribeStaffNotifications } from "@/lib/staffSocket";
 import { Bell, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-const POLL_MS = 20_000;
 const TOAST_MS = 7_000;
 const TOAST_EXIT_MS = 300;
 
@@ -18,9 +18,6 @@ export function NotificationBell() {
   const [items, setItems] = useState<AppNotification[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const ref = useRef<HTMLDivElement>(null);
-  // null until the first poll lands — that first batch is "already there",
-  // not new arrivals, so it must never itself trigger toasts.
-  const seenIds = useRef<Set<string> | null>(null);
 
   function dismissToast(id: string) {
     setToasts((prev) => prev.map((t) => (t.n.id === id ? { ...t, leaving: true } : t)));
@@ -29,32 +26,38 @@ export function NotificationBell() {
     }, TOAST_EXIT_MS);
   }
 
+  // One-time fetch for the existing inbox/unread baseline — the socket only
+  // ever pushes new arrivals from here on, it has no history of its own.
+  // Merged rather than replaced: a notification the socket already pushed
+  // while this fetch was in flight must not get silently dropped by an
+  // overwrite that raced it (the socket subscription below starts at the
+  // same time as this fetch, not after it).
   async function load() {
     try {
       const res = await api.notifications();
       setUnread(res.unread);
-      setItems(res.items);
-      if (seenIds.current === null) {
-        seenIds.current = new Set(res.items.map((n) => n.id));
-      } else {
-        const fresh = res.items.filter((n) => !seenIds.current!.has(n.id));
-        if (fresh.length) {
-          for (const n of fresh) seenIds.current!.add(n.id);
-          setToasts((prev) => [...prev, ...fresh.map((n) => ({ n, leaving: false }))]);
-          for (const n of fresh) {
-            setTimeout(() => dismissToast(n.id), TOAST_MS);
-          }
-        }
-      }
+      setItems((prev) => {
+        const byId = new Map(res.items.map((n) => [n.id, n]));
+        for (const n of prev) if (!byId.has(n.id)) byId.set(n.id, n);
+        return [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
+      });
     } catch {
-      // best-effort — a failed poll just tries again next tick
+      // best-effort — the socket subscription below still works even if
+      // this initial fetch fails; it just starts from an empty list.
     }
   }
 
   useEffect(() => {
     load();
-    const t = setInterval(load, POLL_MS);
-    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    return subscribeStaffNotifications((n) => {
+      setItems((prev) => [n, ...prev]);
+      setUnread((u) => u + 1);
+      setToasts((prev) => [...prev, { n, leaving: false }]);
+      setTimeout(() => dismissToast(n.id), TOAST_MS);
+    });
   }, []);
 
   useEffect(() => {
