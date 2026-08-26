@@ -107,6 +107,12 @@ class _TripScreenState extends ConsumerState<TripScreen> {
     // itself (see `_leaveTrip`/`showCancelReasonSheet`), and re-triggering
     // here too would just double-navigate.
     ref.listen(effectiveTripProvider(tripId), (prev, next) {
+      // This screen can be mid-teardown (e.g. popped right as the trip's
+      // own state updates) when this fires — `ref.read`/`context` below are
+      // unsafe to touch on a deactivated widget past this point. Same bug
+      // class already fixed once on `_DriverLocationPublisherState`'s own
+      // listeners; this top-level one just wasn't guarded yet.
+      if (!mounted) return;
       final trip = next.valueOrNull;
       final prevTrip = prev?.valueOrNull;
       if (trip == null || prevTrip == null) return;

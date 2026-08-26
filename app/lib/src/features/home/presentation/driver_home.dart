@@ -146,6 +146,11 @@ class _OnlineBoard extends ConsumerWidget {
     // navigates itself (see `_OfferCard`), so this only ever fires for the
     // bid case in practice, but it's a harmless no-op either way.
     ref.listen(driverActiveTripProvider, (prev, next) {
+      // `DriverHome` is a stateless `ConsumerWidget` — no `State.mounted` to
+      // check, but `context.mounted` is the same guard for this same
+      // deactivated-widget race found on other `ref.listen` callbacks this
+      // session (this one calls `ref.read`/`context.go` below).
+      if (!context.mounted) return;
       final trip = next.valueOrNull;
       if (trip == null) return;
       // Keyed off `lastAutoNavigatedTripProvider`, not the previous poll
