@@ -91,6 +91,21 @@ pub async fn index_place(es_url: &str, id: Uuid, category: &str, name: &str, lat
         .unwrap_or_else(|| json!({ "country_a": ["NPL"] }));
     let doc = json!({
         "name": { "default": name },
+        // Pelias's real import pipeline (via `pelias/model`) submits this
+        // alongside `name` for every OSM-imported doc — it's `phrase`, not
+        // `name`, that `/v1/autocomplete` actually queries (edge-ngram
+        // analyzed for as-you-type matching; `/v1/search` queries `name`
+        // instead, which is why a doc missing this field is indexed fine,
+        // directly fetchable by `_id`, and even found by `/v1/search`, but
+        // never appears in the app's autocomplete search box). Confirmed
+        // against this deployment's real index mapping: `phrase` has its
+        // own per-language field definitions (so it's genuinely populated
+        // at write time, not derived), and the mapping's `_source.excludes`
+        // deliberately strips it back out of stored `_source` for every
+        // doc — which is why it won't show up reading existing OSM-imported
+        // docs back either, real or contributed. This write path bypasses
+        // `pelias/model` entirely, so nothing else populates it here.
+        "phrase": { "default": name },
         "center_point": { "lat": lat, "lon": lng },
         // rides' /v1/geo/search filters results to Nepal by checking
         // exactly this field — omitting it would mean Pelias indexes the
