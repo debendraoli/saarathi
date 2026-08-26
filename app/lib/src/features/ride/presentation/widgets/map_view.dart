@@ -197,6 +197,15 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   late final MapController _controller = widget.controller ?? MapController();
   bool _locating = false;
 
+  // Set at the very start of dispose(), checked before every stop()/mutation
+  // on the animation controllers below — reproduced live: "AnimationController
+  // .stop() called after AnimationController.dispose()" despite deactivate()
+  // (which calls those stop()s) supposedly always running strictly before
+  // dispose() runs. Whatever the exact Flutter-internal path that let that
+  // ordering invert, this flag is authoritative regardless of it and closes
+  // the crash outright rather than chasing the precise mechanism further.
+  bool _disposed = false;
+
   // Persistent, created once and reused for the whole widget lifetime — see
   // [_retargetNavAnimation]'s doc comment for why this doesn't dispose and
   // recreate a controller on every retarget the way [_animateCamera]
@@ -296,6 +305,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   @override
   void didUpdateWidget(covariant MapView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_disposed) return;
     final target = widget.navigationTarget;
     if (target != null) {
       final prev = oldWidget.navigationTarget;
@@ -412,6 +422,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   }
 
   void _animateTo(DriverPosition target) {
+    if (_disposed) return;
     final toRotationRaw =
         _mapRotationFor(target.heading) ?? _controller.camera.rotation;
     final toCenter = _lookAheadCenter(target);
@@ -823,17 +834,27 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
     // (not `dispose()` — deactivation can theoretically be followed by
     // reactivation elsewhere in the tree) silences the Ticker immediately;
     // `dispose()` below still does the real cleanup once removal is final.
-    _navAnimCtrl?.stop();
-    _fitAnim?.stop();
-    _routeAnim?.stop();
-    for (final anim in _pinAnims.values) {
-      anim.stop();
+    //
+    // Guarded on `_disposed` too — reproduced live: "AnimationController
+    // .stop() called after AnimationController.dispose()", meaning
+    // deactivate() ran again (or ran late) after dispose() had already torn
+    // these controllers down. Shouldn't happen per Flutter's own lifecycle
+    // contract, but `_disposed` makes it structurally impossible regardless
+    // of the exact mechanism.
+    if (!_disposed) {
+      _navAnimCtrl?.stop();
+      _fitAnim?.stop();
+      _routeAnim?.stop();
+      for (final anim in _pinAnims.values) {
+        anim.stop();
+      }
     }
     super.deactivate();
   }
 
   @override
   void dispose() {
+    _disposed = true;
     _navAnimCtrl?.dispose();
     _fitAnim?.dispose();
     _routeAnim?.dispose();
