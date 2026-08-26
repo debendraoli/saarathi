@@ -107,26 +107,34 @@ class _TripScreenState extends ConsumerState<TripScreen> {
     // itself (see `_leaveTrip`/`showCancelReasonSheet`), and re-triggering
     // here too would just double-navigate.
     ref.listen(effectiveTripProvider(tripId), (prev, next) {
-      // This screen can be mid-teardown (e.g. popped right as the trip's
-      // own state updates) when this fires — `ref.read`/`context` below are
-      // unsafe to touch on a deactivated widget past this point. Same bug
-      // class already fixed once on `_DriverLocationPublisherState`'s own
-      // listeners; this top-level one just wasn't guarded yet.
-      if (!mounted) return;
       final trip = next.valueOrNull;
       final prevTrip = prev?.valueOrNull;
       if (trip == null || prevTrip == null) return;
-      final myId = ref.read(authControllerProvider).user?.id;
-      final iAmRider = myId != null && myId == trip.riderId;
-      if (!iAmRider) return;
       final justCancelled = trip.status == TripStatus.cancelled &&
           prevTrip.status != TripStatus.cancelled;
       if (!justCancelled || trip.cancelledByRole != 'driver') return;
-      Haptics.warning();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l.driverCancelledNotice)),
-      );
-      context.go(Routes.whereTo);
+      // Deferred to the next frame, not just guarded with `if (!mounted)`
+      // right here — `mounted` stays true through Flutter's `deactivate()`
+      // (this screen can be mid-teardown, e.g. popped right as the trip's
+      // own state updates, when this listener fires), and the specific
+      // assertion `ref.read`/`context` trip below checks a *stricter*
+      // "active" lifecycle state that deactivate() already exits. Confirmed
+      // live: the `if (!mounted) return;` version still crashed at the
+      // exact same line. Deferring past this frame's build gives Flutter
+      // time to resolve deactivation to either fully disposed (caught by
+      // `mounted` below, correctly this time) or reactivated (safe either
+      // way).
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final myId = ref.read(authControllerProvider).user?.id;
+        final iAmRider = myId != null && myId == trip.riderId;
+        if (!iAmRider) return;
+        Haptics.warning();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l.driverCancelledNotice)),
+        );
+        context.go(Routes.whereTo);
+      });
     });
 
     // This screen is reached via context.go (replacing the stack, so a

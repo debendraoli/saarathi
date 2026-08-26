@@ -81,18 +81,21 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // rider/driver switch spuriously reappear for an already-approved
     // driver, since an error was being read the same as "not yet approved".
     ref.listen(connectivityProvider, (prev, next) {
-      // Same deactivated-widget race already found and fixed on other
-      // `ref.listen` callbacks this session — this one only touches other
-      // providers via `ref.invalidate` (no `context`), but that still
-      // resolves through this widget's own Element, so it's not exempt.
-      if (!mounted) return;
-      if (prev?.valueOrNull == false && next.valueOrNull == true) {
+      if (prev?.valueOrNull != false || next.valueOrNull != true) return;
+      // Deferred, not just `if (!mounted) return` right here — confirmed
+      // live elsewhere this session that `mounted` alone doesn't catch this:
+      // it stays true through Flutter's `deactivate()`, but touching
+      // providers through this widget's own Element during that window
+      // (even via `ref.invalidate`, no direct `context` use) still throws.
+      // Deferring past this frame's build resolves it either way.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         ref.invalidate(myTripsProvider);
         ref.invalidate(inboxProvider);
         ref.invalidate(savedPlacesProvider);
         ref.invalidate(driverKycProvider);
         ref.invalidate(myMerchantsProvider);
-      }
+      });
     });
     final online = ref.watch(connectivityProvider).valueOrNull ?? true;
     final gpsOff = ref.watch(locationServiceProvider).valueOrNull == false;

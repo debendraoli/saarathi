@@ -146,36 +146,40 @@ class _OnlineBoard extends ConsumerWidget {
     // navigates itself (see `_OfferCard`), so this only ever fires for the
     // bid case in practice, but it's a harmless no-op either way.
     ref.listen(driverActiveTripProvider, (prev, next) {
-      // `DriverHome` is a stateless `ConsumerWidget` — no `State.mounted` to
-      // check, but `context.mounted` is the same guard for this same
-      // deactivated-widget race found on other `ref.listen` callbacks this
-      // session (this one calls `ref.read`/`context.go` below).
-      if (!context.mounted) return;
       final trip = next.valueOrNull;
       if (trip == null) return;
-      // Keyed off `lastAutoNavigatedTripProvider`, not the previous poll
-      // value — the latter resets to null every time this widget remounts
-      // (e.g. the driver backs out of the trip screen to home), which would
-      // re-fire the push for the very same, still-accepted trip in a loop.
-      final already = ref.read(lastAutoNavigatedTripProvider);
-      if (trip.id == already) return;
-      ref.read(lastAutoNavigatedTripProvider.notifier).state = trip.id;
-      // `context.go`, not `context.push` — TripScreen's own PopScope assumes
-      // it was reached this way (replacing the stack, nothing underneath
-      // for back to reveal), and the driver should stay locked into it
-      // until the trip actually finishes, not be able to swipe/back their
-      // way to a home screen that still shows a job they haven't dealt with.
-      //
-      // Deferred to the next frame, not called straight from this listener:
-      // `ref.listen` can fire mid-build (e.g. right as `driverControllerProvider`
-      // flips to online, in the same pass that produces this rebuild), and
-      // navigating — which mutates the element tree — while a build is
-      // still in progress is exactly what corrupts it. Reproduced live as a
-      // `_dependents.isEmpty` assertion crash immediately after going online
-      // with a trip already waiting. Post-frame guarantees the current build
-      // has fully settled first.
+      // Deferred to the next frame in full, not called straight from this
+      // listener — `ref.listen` can fire mid-build (e.g. right as
+      // `driverControllerProvider` flips to online, in the same pass that
+      // produces this rebuild), and touching `ref`/`context` — including
+      // `ref.read`/state-writes, not just `context.go` — while a build is
+      // still in progress, or while this widget is mid-`deactivate()`, is
+      // exactly what corrupts the element tree. Reproduced live as both a
+      // `_dependents.isEmpty` crash (going online with a trip already
+      // waiting) and a "Looking up a deactivated widget's ancestor is
+      // unsafe" crash (an earlier, narrower version of this fix that only
+      // guarded the `context.go` call, not the reads above it, still hit
+      // this). `context.mounted` alone doesn't catch it either — it stays
+      // true through `deactivate()`; the check only becomes meaningful once
+      // deferred past this frame, when Flutter has resolved deactivation to
+      // either fully disposed or reactivated.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) context.go('${Routes.trip}/${trip.id}');
+        if (!context.mounted) return;
+        // Keyed off `lastAutoNavigatedTripProvider`, not the previous poll
+        // value — the latter resets to null every time this widget remounts
+        // (e.g. the driver backs out of the trip screen to home), which
+        // would re-fire the push for the very same, still-accepted trip in
+        // a loop.
+        final already = ref.read(lastAutoNavigatedTripProvider);
+        if (trip.id == already) return;
+        ref.read(lastAutoNavigatedTripProvider.notifier).state = trip.id;
+        // `context.go`, not `context.push` — TripScreen's own PopScope
+        // assumes it was reached this way (replacing the stack, nothing
+        // underneath for back to reveal), and the driver should stay locked
+        // into it until the trip actually finishes, not be able to swipe/
+        // back their way to a home screen that still shows a job they
+        // haven't dealt with.
+        context.go('${Routes.trip}/${trip.id}');
       });
     });
 
