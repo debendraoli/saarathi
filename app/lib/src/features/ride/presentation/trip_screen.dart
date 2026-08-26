@@ -175,6 +175,19 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                       ? (localDriverPos ?? remoteDriverPos)
                       : remoteDriverPos;
                   final driverLoc = driverPos?.point;
+                  // The driver's own screen only, pre-pickup: if the rider
+                  // has opted in (`RiderLocationPublisher`, gated on their
+                  // own `riderShareLocationProvider` toggle), route toward
+                  // where they actually are right now instead of the pickup
+                  // point they originally selected — useful when they're
+                  // walking to a meeting point or the pin itself is
+                  // imprecise. Once pickup happens the rider's in the
+                  // vehicle, so this stops mattering.
+                  final riderLivePos = iAmDriver &&
+                          trip.status != TripStatus.inProgress &&
+                          trip.status != TripStatus.completed
+                      ? ref.watch(tripRiderPositionProvider(tripId)).valueOrNull
+                      : null;
                   // While the driver's en route (either leg), the polyline
                   // should be the live remaining path from their current
                   // position, not the static original pickup→destination
@@ -183,7 +196,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                   final liveRouting = driverLoc != null && trip.isActive;
                   final routeTarget = trip.status == TripStatus.inProgress
                       ? trip.dest
-                      : trip.origin;
+                      : (riderLivePos?.point ?? trip.origin);
                   final freshRoute = ref
                       .watch(routeGeometryProvider(
                         RouteQuery(
@@ -211,9 +224,10 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                       : null;
                   final fixedPins = [
                     MapPin(
-                      trip.origin,
+                      riderLivePos?.point ?? trip.origin,
                       Icons.emoji_people_rounded,
                       Theme.of(context).colorScheme.primary,
+                      heading: riderLivePos?.heading,
                     ),
                     MapPin(
                       trip.dest,
@@ -334,6 +348,14 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                       // Invisible: the driver streams position during an active trip.
                       if (iAmDriver && trip.isActive)
                         _DriverLocationPublisher(tripId: tripId),
+                      // Invisible: the rider streams their own position once
+                      // they've opted in, until pickup (see riderLivePos
+                      // above for why it stops mattering after that).
+                      if (iAmRider &&
+                          trip.isActive &&
+                          trip.status != TripStatus.inProgress &&
+                          ref.watch(riderShareLocationProvider(tripId)))
+                        RiderLocationPublisher(tripId: tripId),
                       // Hands the driver off to their own Google Maps app for
                       // real turn-by-turn (driving instructions, live
                       // traffic) — colored in Google's own blue so it reads
@@ -700,6 +722,16 @@ class _StatusSheet extends ConsumerWidget {
                 RouteSummary(pickup: originLabelAsync, dest: destLabelAsync),
                 const SizedBox(height: 10),
                 EtaFareRow(trip: trip, driverLoc: driverLoc),
+              ],
+              // Rider-only, and only while pickup hasn't happened yet — once
+              // they're in the vehicle the driver already knows where they
+              // are. See RiderLocationPublisher for what toggling this on
+              // actually does.
+              if (!iAmDriver &&
+                  trip.status != TripStatus.inProgress &&
+                  !done) ...[
+                const SizedBox(height: 10),
+                _ShareLocationToggle(tripId: trip.id),
               ],
               if (counterpart != null) ...[
                 const SizedBox(height: 14),
@@ -1293,6 +1325,62 @@ class _Avatar extends StatelessWidget {
 /// opens the masked-in-app-vs-direct-dial picker; direct dial is unavailable
 /// (button hidden) until `phone` is non-null (trip not yet active, or
 /// already finished).
+/// Rider-only toggle: when on, [RiderLocationPublisher] starts posting their
+/// live GPS so the driver sees it instead of the static pickup pin (see that
+/// class's doc comment). Purely local UI state (`riderShareLocationProvider`)
+/// — nothing is persisted, so this always starts off for a fresh trip.
+class _ShareLocationToggle extends ConsumerWidget {
+  const _ShareLocationToggle({required this.tripId});
+  final String tripId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppL10n.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final sharing = ref.watch(riderShareLocationProvider(tripId));
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => ref
+          .read(riderShareLocationProvider(tripId).notifier)
+          .update((v) => !v),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Icon(
+              sharing ? Icons.share_location_rounded : Icons.location_off_rounded,
+              color: sharing ? scheme.primary : scheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(l.shareLiveLocation,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  Text(
+                    l.shareLiveLocationBody,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            Switch(
+              value: sharing,
+              onChanged: (v) => ref
+                  .read(riderShareLocationProvider(tripId).notifier)
+                  .state = v,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CounterpartRow extends StatelessWidget {
   const _CounterpartRow({
     required this.person,
@@ -1822,6 +1910,112 @@ class _DriverLocationPublisherState
     // or the driver going idle) — the local nav camera should show nothing
     // until a fresh trip actually starts reporting again.
     ref.read(localDriverPositionProvider.notifier).state = null;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+/// Invisible: posts the rider's own live GPS to the trip channel (via the
+/// same role-agnostic `POST .../location` endpoint [_DriverLocationPublisher]
+/// already uses) once they've opted in via [riderShareLocationProvider] —
+/// lets the driver see exactly where the rider is instead of only the
+/// static pickup pin they selected, useful when the rider is walking to a
+/// meeting point or the pin itself is imprecise. Deliberately simpler than
+/// [_DriverLocationPublisher]: no compass blend (a walking rider doesn't
+/// need a vehicle-accurate heading) and no dedicated retry-with-backoff
+/// queue (this is a supplementary display signal, not the trip's
+/// authoritative tracking — a missed post is just caught by the next
+/// moved-30m fix or the keep-alive tick, no need to chase down one specific
+/// failed point the way the driver's own position-of-record does).
+class RiderLocationPublisher extends ConsumerStatefulWidget {
+  const RiderLocationPublisher({super.key, required this.tripId});
+  final String tripId;
+
+  @override
+  ConsumerState<RiderLocationPublisher> createState() =>
+      _RiderLocationPublisherState();
+}
+
+class _RiderLocationPublisherState
+    extends ConsumerState<RiderLocationPublisher> {
+  // A walking rider moves much slower than a vehicle and precision matters
+  // more for a meetup point — tighter than the driver publisher's 100m.
+  static const _postDistanceMeters = 30.0;
+  static const _postKeepAlive = Duration(seconds: 20);
+  static const _distance = Distance();
+
+  StreamSubscription<Position>? _sub;
+  Timer? _keepAliveTimer;
+  Timer? _streamRestartTimer;
+  Position? _latest;
+  Position? _lastPosted;
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+    _keepAliveTimer = Timer.periodic(_postKeepAlive, (_) {
+      final pos = _latest;
+      if (pos != null) _post(pos);
+    });
+  }
+
+  Future<void> _start() async {
+    if (!await ensureLocationPermission() ||
+        !await Geolocator.isLocationServiceEnabled()) {
+      return;
+    }
+    if (!mounted) return;
+    _sub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+      ),
+    ).listen(_onPosition, onError: (_) => _restartStream(), onDone: _restartStream);
+  }
+
+  void _onPosition(Position pos) {
+    _latest = pos;
+    final last = _lastPosted;
+    final moved = last == null ||
+        _distance.as(LengthUnit.Meter, LatLng(last.latitude, last.longitude),
+                LatLng(pos.latitude, pos.longitude)) >=
+            _postDistanceMeters;
+    if (moved) _post(pos);
+  }
+
+  Future<void> _post(Position pos) async {
+    _lastPosted = pos;
+    try {
+      await ref.read(rideRepositoryProvider).postLocation(
+            widget.tripId,
+            pos.latitude,
+            pos.longitude,
+            heading: pos.heading,
+            speed: pos.speed,
+          );
+    } catch (_) {
+      // Best-effort — see the class doc comment for why no retry queue.
+    }
+  }
+
+  void _restartStream() {
+    _sub?.cancel();
+    _sub = null;
+    if (!mounted) return;
+    _streamRestartTimer?.cancel();
+    _streamRestartTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) _start();
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _keepAliveTimer?.cancel();
+    _streamRestartTimer?.cancel();
     super.dispose();
   }
 

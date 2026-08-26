@@ -218,6 +218,8 @@
   "sos": "SOS",
   "sosConfirm": "Send an emergency alert to the control room and share your live location?",
   "cancelRide": "Cancel ride",
+  "shareLiveLocation": "Share my live location",
+  "shareLiveLocationBody": "Let the driver see exactly where you are, instead of just your pickup pin",
   "rateTrip": "Rate your trip",
   "tipOptional": "Add a tip (optional)",
   "submit": "Submit",
