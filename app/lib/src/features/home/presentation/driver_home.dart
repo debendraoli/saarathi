@@ -764,7 +764,10 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                 FareStepper(
                   amount: _counterAmount ?? _counterFloor(offer.askFare),
                   min: _counterFloor(offer.askFare),
-                  max: _counterFloor(offer.askFare) * 1.5,
+                  // Matches the backend's own BID_COUNTER_MAX_RATIO (still
+                  // clamped there to the legal per-km ceiling regardless of
+                  // this client-side max) — keep the two in sync.
+                  max: _counterFloor(offer.askFare) * 2.0,
                   onChanged: (v) => setState(() => _counterAmount = v),
                 ),
                 const SizedBox(height: 10),

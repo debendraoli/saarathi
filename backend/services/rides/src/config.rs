@@ -97,7 +97,7 @@ impl Config {
             presence_ttl_secs: int_env("DISPATCH_PRESENCE_TTL_SECS", 60),
             bargain_floor_ratio: dec_env("BARGAIN_FLOOR_RATIO", "0.5"),
             bid_ttl_secs: int_env("BID_TTL_SECS", 60),
-            bid_counter_max_ratio: dec_env("BID_COUNTER_MAX_RATIO", "1.5"),
+            bid_counter_max_ratio: dec_env("BID_COUNTER_MAX_RATIO", "2.0"),
             vat_rate: dec_env("VAT_RATE", "0.13"),
             delivery_base_fare: dec_env("DELIVERY_BASE_FARE", "30"),
             delivery_per_km: dec_env("DELIVERY_PER_KM", "15"),
