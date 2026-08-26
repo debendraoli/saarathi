@@ -122,8 +122,16 @@ class MerchantRepository {
     return CustomerOrder.fromJson(order, items: items);
   }
 
-  Future<void> advance(String orderId, String status) async {
-    await _api.post('/v1/orders/$orderId/status', body: {'status': status});
+  /// Returns true when marking an order 'ready' found no couriers nearby at
+  /// that moment (the backend still attempts dispatch regardless — its own
+  /// progressive-widening search may still find one — this is a heads-up
+  /// for the merchant, not a block).
+  Future<bool> advance(String orderId, String status) async {
+    final res = await _api.post(
+      '/v1/orders/$orderId/status',
+      body: {'status': status},
+    ) as Map<String, dynamic>;
+    return res['no_couriers_nearby'] == true;
   }
 
   Future<MerchantAnalytics> analytics(String merchantId) async {

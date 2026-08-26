@@ -152,10 +152,15 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     RequestRing.stop();
     setState(() => _busy = true);
     try {
-      await ref
+      final noCouriersNearby = await ref
           .read(merchantRepositoryProvider)
           .advance(widget.order.id, status);
       refreshMerchantOrders(ref, widget.merchantId);
+      if (noCouriersNearby && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppL10n.of(context).noCouriersNearbyWarning)),
+        );
+      }
     } catch (_) {
       Haptics.error();
       if (mounted) {

@@ -11,16 +11,21 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Trip, TRIP_COLS};
 use crate::routing::{LatLng, RouteProfile};
 use crate::state::AppState;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
-use axum::{routing::post, Json, Router};
+use axum::{
+    routing::{get, post},
+    Json, Router,
+};
 use rust_decimal::Decimal;
 use saarathi_core::money::Money;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/v1/internal/delivery-trips", post(create_delivery_trip))
+    Router::new()
+        .route("/v1/internal/delivery-trips", post(create_delivery_trip))
+        .route("/v1/internal/nearby-drivers", get(nearby_drivers))
 }
 
 fn check_internal_secret(st: &AppState, headers: &HeaderMap) -> AppResult<()> {
@@ -105,4 +110,32 @@ async fn create_delivery_trip(
     });
 
     Ok(Json(CreateDeliveryTripResponse { trip_id: trip.id }))
+}
+
+#[derive(Deserialize)]
+struct NearbyDriversQuery {
+    lat: f64,
+    lng: f64,
+}
+
+#[derive(Serialize)]
+struct NearbyDriversResponse {
+    count: usize,
+}
+
+/// Lets `saarathi-merchant` warn a merchant marking an order "ready" (the
+/// moment a courier is actually needed — see `spawn_courier`) when no
+/// courier is likely to be dispatched soon, using the exact same "nearby"
+/// definition the app's own ride-booking gate and the supply-surge signal
+/// already use.
+async fn nearby_drivers(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<NearbyDriversQuery>,
+) -> AppResult<Json<NearbyDriversResponse>> {
+    check_internal_secret(&st, &headers)?;
+    let count = crate::dispatch::nearby_count(&st, q.lng, q.lat, st.config.dispatch_max_radius_km)
+        .await
+        .unwrap_or(0);
+    Ok(Json(NearbyDriversResponse { count }))
 }

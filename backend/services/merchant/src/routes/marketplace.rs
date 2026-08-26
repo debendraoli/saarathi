@@ -734,11 +734,20 @@ async fn update_order_status(
     notify_status_change(&st, id, merchant_id, customer_id, is_merchant, &body.status, refunding).await;
 
     // On 'ready', spawn the courier delivery trip via rides' internal API.
+    // A confirmed zero nearby couriers doesn't block this — dispatch's own
+    // progressive-widening search still runs and a courier may come online
+    // during it — it's surfaced to the merchant as a heads-up, not a hard
+    // stop, since the order is already made and prep already happened.
+    let mut resp = order_json(&st, id, claims.sub, claims.is_staff()).await?;
     if body.status == "ready" {
-        spawn_courier(&st, id).await?;
+        if let Some(0) = spawn_courier(&st, id).await? {
+            if let Value::Object(map) = &mut resp.0 {
+                map.insert("no_couriers_nearby".into(), Value::Bool(true));
+            }
+        }
     }
 
-    order_json(&st, id, claims.sub, claims.is_staff()).await
+    Ok(resp)
 }
 
 /// Tell whichever side of the order didn't just act: the merchant driving the
@@ -827,7 +836,37 @@ struct CreateDeliveryTripResponse {
 /// which is fine — it happens once, not on a hot path. A failed attempt
 /// rolls the transaction back without writing `trip_id`, so a genuine retry
 /// (merchant re-marks the order `ready`) still goes through cleanly.
-pub(crate) async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()> {
+/// Best-effort: `None` if the check itself failed (internal endpoint down,
+/// network hiccup) rather than a genuine zero-count — callers should treat
+/// that as "unknown, don't warn" rather than "confirmed no couriers", same
+/// "a probe failing isn't the answer" convention as everywhere else this
+/// pattern shows up (e.g. `presence::is_online` degrading to "treat as
+/// offline" on a Redis outage, not "confirmed offline").
+async fn nearby_courier_count(st: &AppState, lat: f64, lng: f64) -> Option<usize> {
+    let resp = st
+        .http
+        .get(format!(
+            "{}/v1/internal/nearby-drivers",
+            st.config.rides_service_url
+        ))
+        .header("x-internal-secret", &st.config.internal_service_secret)
+        .query(&[("lat", lat), ("lng", lng)])
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<serde_json::Value>()
+        .await
+        .ok()?;
+    resp.get("count")?.as_u64().map(|n| n as usize)
+}
+
+/// Returns the nearby-courier count at the merchant's own location right as
+/// dispatch was attempted — `None` if the availability check itself failed
+/// (see `nearby_courier_count`) rather than a confirmed zero, so the caller
+/// can tell "no couriers" apart from "couldn't tell".
+pub(crate) async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<Option<usize>> {
     let mut tx = st.db.begin().await?;
     let o: (Uuid, Uuid, Decimal, String, f64, f64, Option<Uuid>) = sqlx::query_as(
         "SELECT o.customer_id, o.merchant_id, o.delivery_fee, o.payment_method, \
@@ -838,13 +877,15 @@ pub(crate) async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()
     .fetch_one(&mut *tx)
     .await?;
     if o.6.is_some() {
-        return Ok(()); // already dispatched
+        return Ok(None); // already dispatched
     }
     let (merchant_lat, merchant_lng): (f64, f64) =
         sqlx::query_as("SELECT lat, lng FROM merchants WHERE id = $1")
             .bind(o.1)
             .fetch_one(&mut *tx)
             .await?;
+
+    let nearby = nearby_courier_count(st, merchant_lat, merchant_lng).await;
 
     let req = CreateDeliveryTripRequest {
         rider_id: o.0,
@@ -882,7 +923,7 @@ pub(crate) async fn spawn_courier(st: &AppState, order_id: Uuid) -> AppResult<()
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    Ok(())
+    Ok(nearby)
 }
 
 // ── Merchant-facing ──────────────────────────────────────────────────────────
