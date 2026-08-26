@@ -64,7 +64,10 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
 
   void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
+      // `dispose()` cancels `_poll` but also disposes `_scroll` itself — a
+      // callback queued just before teardown must check `mounted`, not just
+      // `hasClients`, or it can call into an already-disposed controller.
+      if (mounted && _scroll.hasClients) {
         _scroll.animateTo(
           _scroll.position.maxScrollExtent,
           duration: const Duration(milliseconds: 250),
@@ -85,6 +88,9 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
             tripId: widget.tripId,
             orderId: widget.orderId,
           );
+      // The user can back out of the chat while this send is in flight —
+      // `ref.invalidate`/touching state on a disposed ConsumerState throws.
+      if (!mounted) return;
       ref.invalidate(supportThreadProvider);
       _scrollToEnd();
     } on ApiException catch (e) {

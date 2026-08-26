@@ -107,7 +107,13 @@ class _BiddingSheetState extends ConsumerState<BiddingSheet> {
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final ask = widget.trip.askFare ?? 0;
+    // A zero/missing askFare (a bad draft, or a promo that zeroed it out)
+    // would otherwise make `min == max == 0` below, permanently disabling
+    // both stepper buttons with no way for the rider to raise their offer
+    // and no explanation why. Floor it to a value the stepper can actually
+    // work with.
+    final rawAsk = widget.trip.askFare ?? 0;
+    final ask = rawAsk > 0 ? rawAsk : 100.0;
     final bids =
         ref.watch(tripBidsProvider(widget.trip.id)).valueOrNull ?? const [];
     final originLabelAsync = ref.watch(tripOriginLabelProvider(widget.trip.id));

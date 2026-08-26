@@ -6,6 +6,12 @@ import '../../../core/storage/token_store.dart';
 import '../data/auth_repository.dart';
 import '../domain/models.dart';
 
+/// Thrown when the OTP was verified server-side (and consumed — it can't be
+/// reused) but saving the resulting session locally failed. Distinct from a
+/// wrong/expired code so the UI doesn't tell the user their code was
+/// invalid when it was actually a device storage problem.
+class SessionSaveException implements Exception {}
+
 class AuthController extends Notifier<AuthState> {
   @override
   AuthState build() {
@@ -68,7 +74,11 @@ class AuthController extends Notifier<AuthState> {
   Future<void> verifyOtp(String phone, String code,
       {bool asDriver = false}) async {
     final session = await _repo.verifyOtp(phone, code, asDriver: asDriver);
-    await _tokens.save(access: session.access, refresh: session.refresh);
+    try {
+      await _tokens.save(access: session.access, refresh: session.refresh);
+    } catch (_) {
+      throw SessionSaveException();
+    }
     state = AuthState(
       status: AuthStatus.authenticated,
       user: session.user,

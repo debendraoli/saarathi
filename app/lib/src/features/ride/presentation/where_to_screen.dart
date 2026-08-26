@@ -477,9 +477,17 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
           final surge = next.valueOrNull?.surgeMultiplier;
           if (surge == null) return;
           if (_lastSurge != null && surge > _lastSurge!) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(l.surgeNotice)),
-            );
+            // A fare estimate resolving right as this screen is being
+            // navigated away from (e.g. the rider tapped back mid-fetch)
+            // can fire this listener while the widget is deactivated but
+            // not yet disposed — `context` isn't safe to touch synchronously
+            // there. Defer past the frame where Flutter resolves that.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(l.surgeNotice)),
+              );
+            });
           }
           _lastSurge = surge;
         },

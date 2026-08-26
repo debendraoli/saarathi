@@ -541,6 +541,12 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
   }
 
   Future<void> _accept() async {
+    if (_expired) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppL10n.of(context).offerExpired)),
+      );
+      return;
+    }
     setState(() => _busy = true);
     RequestRing.stop();
     final repo = ref.read(driverRepositoryProvider);
@@ -567,6 +573,12 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
   }
 
   Future<void> _placeBid(double amount) async {
+    if (_expired) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppL10n.of(context).offerExpired)),
+      );
+      return;
+    }
     setState(() => _busy = true);
     RequestRing.stop();
     final repo = ref.read(driverRepositoryProvider);
@@ -610,11 +622,27 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
     return '${left}s';
   }
 
+  // A zero/missing askFare would otherwise make the counter-offer stepper's
+  // min == max == 0, permanently disabling both its buttons — same
+  // degenerate-range bug as the rider-side bidding sheet.
+  double _counterFloor(double? askFare) =>
+      (askFare ?? 0) > 0 ? askFare! : 100.0;
+
+  bool get _expired {
+    final expiresAt = widget.offer.expiresAt;
+    return expiresAt != null && !expiresAt.isAfter(DateTime.now());
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final offer = widget.offer;
     final expiry = _expiryLabel();
+    // Previously nothing stopped a tap landing in the same frame the
+    // countdown hits zero — the request just went out against an offer the
+    // backend had already expired/reassigned, surfacing as a generic
+    // network/error snackbar instead of a clear "offer expired" message.
+    final expired = _expired;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -702,9 +730,9 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                 )
               else if (_showCounter) ...[
                 FareStepper(
-                  amount: _counterAmount ?? (offer.askFare ?? 0),
-                  min: offer.askFare ?? 0,
-                  max: (offer.askFare ?? 0) * 1.5,
+                  amount: _counterAmount ?? _counterFloor(offer.askFare),
+                  min: _counterFloor(offer.askFare),
+                  max: _counterFloor(offer.askFare) * 1.5,
                   onChanged: (v) => setState(() => _counterAmount = v),
                 ),
                 const SizedBox(height: 10),
@@ -719,7 +747,7 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: FilledButton(
-                        onPressed: _busy
+                        onPressed: _busy || expired
                             ? null
                             : () => _placeBid(
                                 _counterAmount ?? (offer.askFare ?? 0)),
@@ -737,7 +765,7 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                     ),
                     const SizedBox(width: 8),
                     OutlinedButton(
-                      onPressed: _busy
+                      onPressed: _busy || expired
                           ? null
                           : () => setState(() => _showCounter = true),
                       child: Text(l.counterOffer),
@@ -746,7 +774,7 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                     Expanded(
                       child: SwipeToConfirm(
                         label: l.accept,
-                        busy: _busy,
+                        busy: _busy || expired,
                         onConfirmed: () =>
                             _placeBid(offer.askFare ?? offer.finalFare),
                       ),
@@ -778,7 +806,7 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                   Expanded(
                     child: SwipeToConfirm(
                       label: l.accept,
-                      busy: _busy,
+                      busy: _busy || expired,
                       onConfirmed: _accept,
                     ),
                   ),

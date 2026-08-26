@@ -52,9 +52,16 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
     try {
       final devCode =
           await ref.read(authControllerProvider.notifier).requestOtp(e164);
-      ref.read(devOtpCodeProvider.notifier).state = devCode;
-      Haptics.tap();
-      if (mounted) context.push(Routes.otp, extra: e164);
+      // Deferred, not just `if (mounted)` — `mounted` alone doesn't catch
+      // the window where this widget is deactivated-but-not-yet-disposed
+      // (the user backed out right as the request resolved), which is
+      // exactly when `ref.read`/`context.push` become unsafe.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(devOtpCodeProvider.notifier).state = devCode;
+        Haptics.tap();
+        context.push(Routes.otp, extra: e164);
+      });
     } on ApiException catch (e) {
       Haptics.error();
       setState(() => _error = e.isNetwork ? l.errorNetwork : e.message);

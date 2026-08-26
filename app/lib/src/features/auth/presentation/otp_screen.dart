@@ -22,6 +22,7 @@ class OtpScreen extends ConsumerStatefulWidget {
 class _OtpScreenState extends ConsumerState<OtpScreen> {
   final _controller = TextEditingController();
   bool _busy = false;
+  bool _resending = false;
   String? _error;
 
   @override
@@ -38,6 +39,11 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   }
 
   Future<void> _verify() async {
+    // The auto-submit-on-6-digits path (onChanged below) and the manual
+    // button can both invoke this before a rebuild reflects `_busy` — the
+    // button's own `_busy ? null : _verify` guard only matters once Flutter
+    // actually rebuilds with the disabled state, not synchronously.
+    if (_busy) return;
     final l = AppL10n.of(context);
     if (_controller.text.length < 4) return;
     setState(() {
@@ -53,6 +59,9 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     } on ApiException catch (e) {
       Haptics.error();
       setState(() => _error = e.isNetwork ? l.errorNetwork : e.message);
+    } on SessionSaveException {
+      Haptics.error();
+      setState(() => _error = l.otpSessionSaveFailed);
     } catch (_) {
       Haptics.error();
       setState(() => _error = l.otpInvalid);
@@ -62,11 +71,32 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   }
 
   Future<void> _resend() async {
-    final code = await ref
-        .read(authControllerProvider.notifier)
-        .requestOtp(widget.phone);
-    ref.read(devOtpCodeProvider.notifier).state = code;
-    if (code != null) _controller.text = code;
+    if (_resending) return;
+    final l = AppL10n.of(context);
+    setState(() => _resending = true);
+    try {
+      final code = await ref
+          .read(authControllerProvider.notifier)
+          .requestOtp(widget.phone);
+      if (!mounted) return;
+      ref.read(devOtpCodeProvider.notifier).state = code;
+      if (code != null) _controller.text = code;
+    } on ApiException catch (e) {
+      Haptics.error();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.isNetwork ? l.errorNetwork : e.message)),
+        );
+      }
+    } catch (_) {
+      Haptics.error();
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(l.errorGeneric)));
+      }
+    } finally {
+      if (mounted) setState(() => _resending = false);
+    }
   }
 
   @override
@@ -129,7 +159,10 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerLeft,
-                child: TextButton(onPressed: _resend, child: Text(l.otpResend)),
+                child: TextButton(
+                  onPressed: _resending ? null : _resend,
+                  child: Text(l.otpResend),
+                ),
               ),
               const Spacer(),
               FilledButton(

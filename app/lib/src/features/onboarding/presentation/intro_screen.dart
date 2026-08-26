@@ -19,6 +19,7 @@ class IntroScreen extends ConsumerStatefulWidget {
 class _IntroScreenState extends ConsumerState<IntroScreen> {
   final _controller = PageController();
   int _page = 0;
+  bool _finishing = false;
 
   @override
   void dispose() {
@@ -27,8 +28,17 @@ class _IntroScreenState extends ConsumerState<IntroScreen> {
   }
 
   Future<void> _finish() async {
+    // "Skip" and the final "Get Started" both call this with no debounce —
+    // a double-tap could fire the prefs write and the navigation twice.
+    if (_finishing) return;
+    _finishing = true;
     await ref.read(onboardingControllerProvider.notifier).complete();
-    if (mounted) context.go(Routes.login);
+    // Deferred, not just `if (mounted)` — see phone_screen.dart's _submit
+    // for why `mounted` alone doesn't catch the deactivated-but-not-yet-
+    // disposed window.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.go(Routes.login);
+    });
   }
 
   @override
