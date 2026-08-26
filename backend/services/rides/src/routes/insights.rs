@@ -29,6 +29,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/admin/riders/{id}", get(rider_detail))
         .route("/v1/admin/riders/{id}/suspend", post(suspend_rider))
         .route("/v1/admin/riders/{id}/reactivate", post(reactivate_rider))
+        .route("/v1/admin/riders/{id}", axum::routing::patch(update_rider))
         .route("/v1/admin/driver-analytics/{id}", get(driver_analytics))
         .route("/v1/admin/driver-directory", get(driver_directory))
 }
@@ -371,6 +372,69 @@ async fn reactivate_rider(
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
     set_rider_status(&st, id, "active").await
+}
+
+/// Appends to the shared `audit_log` table — this service has no `audit`
+/// module of its own (only `auth` does); duplicating this one small insert
+/// is cheaper than a new cross-service dependency for it.
+async fn audit_record(
+    db: &sqlx::PgPool,
+    actor: Uuid,
+    action: &str,
+    entity_id: Uuid,
+    detail: serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO audit_log (actor_user_id, action, entity_type, entity_id, detail) \
+         VALUES ($1, $2, 'rider', $3, $4)",
+    )
+    .bind(actor)
+    .bind(action)
+    .bind(entity_id)
+    .bind(detail)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct UpdateRiderInput {
+    full_name: Option<String>,
+}
+
+async fn update_rider(
+    State(st): State<AppState>,
+    AdminUser(claims): AdminUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdateRiderInput>,
+) -> AppResult<Json<serde_json::Value>> {
+    if let Some(name) = &body.full_name {
+        if name.trim().is_empty() {
+            return Err(AppError::BadRequest("full_name cannot be empty".into()));
+        }
+    }
+    let full_name = body.full_name.as_deref().map(str::trim);
+
+    let updated: Option<(Uuid,)> = sqlx::query_as(
+        "UPDATE users SET full_name = COALESCE($2, full_name) \
+         WHERE id = $1 AND role = 'rider' RETURNING id",
+    )
+    .bind(id)
+    .bind(full_name)
+    .fetch_optional(&st.db)
+    .await?;
+    updated.ok_or(AppError::NotFound)?;
+
+    audit_record(
+        &st.db,
+        claims.sub,
+        "rider.update",
+        id,
+        json!({ "full_name": full_name }),
+    )
+    .await?;
+
+    Ok(Json(json!({ "ok": true })))
 }
 
 // ── Per-driver analytics ─────────────────────────────────────────────────────

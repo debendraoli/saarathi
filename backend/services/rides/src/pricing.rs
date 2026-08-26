@@ -141,10 +141,15 @@ pub async fn estimate(
     let per_km = effective_per_km_rate(st, vclass).await;
     // Computed once here — feeds both the supply-surge signal below and the
     // `nearby_drivers` count returned to the app for the booking-button gate.
-    let nearby_drivers =
-        crate::dispatch::nearby_count(st, origin.lng, origin.lat, st.config.dispatch_max_radius_km)
-            .await
-            .unwrap_or(0);
+    let nearby_drivers = crate::dispatch::nearby_count(
+        st,
+        origin.lng,
+        origin.lat,
+        st.config.dispatch_max_radius_km,
+        "ride",
+    )
+    .await
+    .unwrap_or(0);
     // Dynamic surge (time windows + supply scarcity); the core clamps it to +20%.
     let surge = crate::surge::effective_multiplier(st, vehicle_class, nearby_drivers).await;
     let quote = quote_fare(

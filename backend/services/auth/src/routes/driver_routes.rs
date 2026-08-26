@@ -70,7 +70,7 @@ async fn submit_kyc(
         "UPDATE drivers SET kyc_status = 'under_review', rejection_reason = NULL \
          WHERE id = $1 AND kyc_status IN ('pending', 'rejected') \
          RETURNING id, user_id, kyc_status, license_number, date_of_birth, address, \
-                   rejection_reason, reviewed_by, reviewed_at, approved_at, created_at, updated_at",
+                   rejection_reason, reviewed_by, reviewed_at, approved_at, service_types, created_at, updated_at",
     )
     .bind(driver_id)
     .fetch_optional(&st.db)
@@ -96,6 +96,22 @@ struct RegisterInput {
     date_of_birth: Option<NaiveDate>,
     address: Option<String>,
     vehicle: VehicleInput,
+    /// Job types this driver wants to accept — "ride", "delivery", or both.
+    /// Defaults to ride-only when omitted (pre-existing behavior).
+    service_types: Option<Vec<String>>,
+}
+
+/// Validates and normalizes a driver's requested service types, rejecting
+/// anything outside `{"ride", "delivery"}` or an empty selection.
+pub(crate) fn validate_service_types(input: Option<Vec<String>>) -> AppResult<Vec<String>> {
+    let types = input.unwrap_or_else(|| vec!["ride".to_string()]);
+    if types.is_empty() || types.iter().any(|t| t != "ride" && t != "delivery") {
+        return Err(AppError::bad(
+            ErrorCode::Validation,
+            "service_types must be a non-empty subset of [\"ride\", \"delivery\"]",
+        ));
+    }
+    Ok(types)
 }
 
 #[derive(Serialize)]
@@ -110,6 +126,19 @@ async fn register(
     AuthUser(claims): AuthUser,
     Json(body): Json<RegisterInput>,
 ) -> AppResult<Json<Driver>> {
+    if body.license_number.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::BadRequest("license_number is required".into()));
+    }
+    if body.address.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::BadRequest("address is required".into()));
+    }
+    if body.vehicle.plate_number.trim().is_empty() {
+        return Err(AppError::BadRequest("plate_number is required".into()));
+    }
+    if body.vehicle.model.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::BadRequest("vehicle model is required".into()));
+    }
+    let service_types = validate_service_types(body.service_types)?;
     let mut tx = st.db.begin().await?;
 
     // Promote the account to a driver (idempotent).
@@ -119,19 +148,21 @@ async fn register(
         .await?;
 
     let driver: Driver = sqlx::query_as(
-        "INSERT INTO drivers (user_id, license_number, date_of_birth, address, kyc_status) \
-         VALUES ($1, $2, $3, $4, 'pending') \
+        "INSERT INTO drivers (user_id, license_number, date_of_birth, address, kyc_status, service_types) \
+         VALUES ($1, $2, $3, $4, 'pending', $5) \
          ON CONFLICT (user_id) DO UPDATE SET \
              license_number = EXCLUDED.license_number, \
              date_of_birth = EXCLUDED.date_of_birth, \
-             address = EXCLUDED.address \
+             address = EXCLUDED.address, \
+             service_types = EXCLUDED.service_types \
          RETURNING id, user_id, kyc_status, license_number, date_of_birth, address, \
-                   rejection_reason, reviewed_by, reviewed_at, approved_at, created_at, updated_at",
+                   rejection_reason, reviewed_by, reviewed_at, approved_at, service_types, created_at, updated_at",
     )
     .bind(claims.sub)
     .bind(body.license_number)
     .bind(body.date_of_birth)
     .bind(body.address)
+    .bind(&service_types)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -239,7 +270,7 @@ async fn status(
 ) -> AppResult<Json<DriverProfile>> {
     let driver: Driver = sqlx::query_as(
         "SELECT id, user_id, kyc_status, license_number, date_of_birth, address, \
-                rejection_reason, reviewed_by, reviewed_at, approved_at, created_at, updated_at \
+                rejection_reason, reviewed_by, reviewed_at, approved_at, service_types, created_at, updated_at \
          FROM drivers WHERE user_id = $1",
     )
     .bind(claims.sub)

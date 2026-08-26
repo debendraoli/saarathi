@@ -74,6 +74,10 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/admin/merchants/queue", get(merchant_queue))
         .route("/v1/admin/merchants/{id}/approve", post(approve_merchant))
         .route("/v1/admin/merchants/{id}/reject", post(reject_merchant))
+        .route(
+            "/v1/admin/merchants/{id}",
+            axum::routing::patch(update_merchant),
+        )
 }
 
 /// True when the user owns the merchant (or is staff).
@@ -851,6 +855,7 @@ async fn nearby_courier_count(st: &AppState, lat: f64, lng: f64) -> Option<usize
         ))
         .header("x-internal-secret", &st.config.internal_service_secret)
         .query(&[("lat", lat), ("lng", lng)])
+        .query(&[("job_type", "delivery")])
         .send()
         .await
         .ok()?
@@ -1885,6 +1890,105 @@ async fn approve_merchant(
         )
         .await;
     }
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// Appends to the shared `audit_log` table — this service has no `audit`
+/// module of its own (only `auth` does); duplicating this one small insert
+/// is cheaper than a new cross-service dependency for it.
+async fn audit_record(
+    db: &sqlx::PgPool,
+    actor: Uuid,
+    action: &str,
+    entity_id: Uuid,
+    detail: Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO audit_log (actor_user_id, action, entity_type, entity_id, detail) \
+         VALUES ($1, $2, 'merchant', $3, $4)",
+    )
+    .bind(actor)
+    .bind(action)
+    .bind(entity_id)
+    .bind(detail)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct UpdateMerchant {
+    name: Option<String>,
+    address: Option<String>,
+    phone: Option<String>,
+    prep_mins: Option<i32>,
+    vertical: Option<String>,
+}
+
+/// Staff correction of a listing's own details — typo fixes, not the
+/// approve/reject decision or the owner's own open/closed toggle.
+async fn update_merchant(
+    State(st): State<AppState>,
+    crate::auth::StaffUser(claims): crate::auth::StaffUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdateMerchant>,
+) -> AppResult<Json<Value>> {
+    if !claims.can_approve() {
+        return Err(AppError::Forbidden);
+    }
+    if let Some(name) = &body.name {
+        if name.trim().is_empty() {
+            return Err(AppError::BadRequest("name cannot be empty".into()));
+        }
+    }
+    if let Some(address) = &body.address {
+        if address.trim().is_empty() {
+            return Err(AppError::BadRequest("address cannot be empty".into()));
+        }
+    }
+    if let Some(vertical) = &body.vertical {
+        if !matches!(vertical.as_str(), "food" | "grocery") {
+            return Err(AppError::BadRequest(
+                "vertical must be 'food' or 'grocery'".into(),
+            ));
+        }
+    }
+
+    let name = body.name.as_deref().map(str::trim);
+    let updated: Option<(Uuid,)> = sqlx::query_as(
+        "UPDATE merchants SET \
+             name = COALESCE($2, name), \
+             address = COALESCE($3, address), \
+             phone = COALESCE($4, phone), \
+             prep_mins = COALESCE($5, prep_mins), \
+             vertical = COALESCE($6, vertical) \
+         WHERE id = $1 RETURNING id",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(&body.address)
+    .bind(&body.phone)
+    .bind(body.prep_mins)
+    .bind(&body.vertical)
+    .fetch_optional(&st.db)
+    .await?;
+    updated.ok_or(AppError::NotFound)?;
+
+    audit_record(
+        &st.db,
+        claims.sub,
+        "merchant.update",
+        id,
+        json!({
+            "name": name,
+            "address": body.address,
+            "phone": body.phone,
+            "prep_mins": body.prep_mins,
+            "vertical": body.vertical,
+        }),
+    )
+    .await?;
+
     Ok(Json(json!({ "ok": true })))
 }
 

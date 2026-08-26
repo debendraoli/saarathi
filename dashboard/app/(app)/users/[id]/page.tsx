@@ -14,6 +14,8 @@ export default function RiderDetailPage({ params }: { params: Promise<{ id: stri
   const [showTopup, setShowTopup] = useState(false);
   const [showSuspend, setShowSuspend] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [nameBusy, setNameBusy] = useState(false);
   const isAdmin = ["super_admin", "admin"].includes(auth.user?.role ?? "");
   const canTopup = isAdmin;
   const [routeFor, setRouteFor] = useState<string | null>(null);
@@ -60,9 +62,24 @@ export default function RiderDetailPage({ params }: { params: Promise<{ id: stri
   async function load() {
     setError(null);
     try {
-      setData(await rides.riderDetail(id));
+      const d = await rides.riderDetail(id);
+      setData(d);
+      setNameDraft(d.full_name ?? "");
     } catch (e) {
       setError((e as Error).message);
+    }
+  }
+
+  async function saveName() {
+    setNameBusy(true);
+    setError(null);
+    try {
+      await rides.updateRider(id, { full_name: nameDraft.trim() });
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setNameBusy(false);
     }
   }
 
@@ -101,6 +118,25 @@ export default function RiderDetailPage({ params }: { params: Promise<{ id: stri
             <dt>Joined</dt>
             <dd>{new Date(data.created_at).toLocaleString()}</dd>
           </dl>
+          <div className="field" style={{ marginTop: 12 }}>
+            <label>Full name</label>
+            <div className="row">
+              <input
+                className="input"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+              />
+              <button
+                className="btn ghost"
+                disabled={
+                  nameBusy || !nameDraft.trim() || nameDraft.trim() === (data.full_name ?? "")
+                }
+                onClick={saveName}
+              >
+                {nameBusy ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
         </div>
         {canTopup && (
           <button className="btn primary" onClick={() => setShowTopup(true)}>

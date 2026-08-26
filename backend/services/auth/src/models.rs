@@ -167,6 +167,7 @@ pub struct Driver {
     pub reviewed_by: Option<Uuid>,
     pub reviewed_at: Option<DateTime<Utc>>,
     pub approved_at: Option<DateTime<Utc>>,
+    pub service_types: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

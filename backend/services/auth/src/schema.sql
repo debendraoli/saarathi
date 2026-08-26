@@ -124,6 +124,14 @@ ALTER TABLE drivers ADD COLUMN IF NOT EXISTS onboarded_by uuid REFERENCES users 
 -- the dashboard can show who is online and it survives a Redis flush).
 ALTER TABLE drivers ADD COLUMN IF NOT EXISTS is_online boolean NOT NULL DEFAULT false;
 ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_online_at timestamptz;
+-- Which job types this driver accepts — set at KYC, editable from the
+-- dashboard afterward. Drives the rides service's Redis `job_types`
+-- presence field (see rides/src/dispatch.rs), which is what actually
+-- filters dispatch; this is the persisted source of truth behind it.
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS service_types text[] NOT NULL DEFAULT '{ride}';
+ALTER TABLE drivers DROP CONSTRAINT IF EXISTS drivers_service_types_valid;
+ALTER TABLE drivers ADD CONSTRAINT drivers_service_types_valid
+    CHECK (service_types <@ ARRAY['ride','delivery']::text[] AND array_length(service_types, 1) > 0);
 
 -- ── Vehicles ───────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS vehicles (

@@ -23,6 +23,15 @@ export default function MerchantDetailPage({ params }: { params: Promise<{ id: s
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
+  const [storeDraft, setStoreDraft] = useState({
+    name: "",
+    vertical: "",
+    phone: "",
+    address: "",
+    prep_mins: "",
+  });
+  const [storeBusy, setStoreBusy] = useState(false);
+  const [storeDirty, setStoreDirty] = useState(false);
 
   async function load() {
     setError(null);
@@ -33,7 +42,18 @@ export default function MerchantDetailPage({ params }: { params: Promise<{ id: s
         merchant.orders(),
         merchant.zone(id).catch(() => null),
       ]);
-      setRow(rows.find((m) => m.id === id) ?? null);
+      const r = rows.find((m) => m.id === id) ?? null;
+      setRow(r);
+      if (r) {
+        setStoreDraft({
+          name: r.name,
+          vertical: r.vertical,
+          phone: r.phone ?? "",
+          address: r.address ?? "",
+          prep_mins: String(r.prep_mins),
+        });
+        setStoreDirty(false);
+      }
       setMenu(items);
       setOrders(allOrders.filter((o) => o.merchant_id === id));
       if (zone) {
@@ -93,6 +113,31 @@ export default function MerchantDetailPage({ params }: { params: Promise<{ id: s
       setError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  function setStoreField<K extends keyof typeof storeDraft>(key: K, value: string) {
+    setStoreDraft((cur) => ({ ...cur, [key]: value }));
+    setStoreDirty(true);
+  }
+
+  async function saveStore() {
+    setStoreBusy(true);
+    setError(null);
+    try {
+      const prepMins = storeDraft.prep_mins.trim();
+      await merchant.update(id, {
+        name: storeDraft.name.trim(),
+        vertical: storeDraft.vertical.trim(),
+        phone: storeDraft.phone.trim(),
+        address: storeDraft.address.trim(),
+        prep_mins: prepMins ? Number(prepMins) : undefined,
+      });
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setStoreBusy(false);
     }
   }
 
@@ -194,12 +239,6 @@ export default function MerchantDetailPage({ params }: { params: Promise<{ id: s
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Store</h3>
           <dl className="kv">
-            <dt>Vertical</dt>
-            <dd>{row.vertical}</dd>
-            <dt>Phone</dt>
-            <dd>{row.phone ?? "—"}</dd>
-            <dt>Address</dt>
-            <dd>{row.address ?? "—"}</dd>
             <dt>Location</dt>
             <dd>
               <a
@@ -211,11 +250,69 @@ export default function MerchantDetailPage({ params }: { params: Promise<{ id: s
                 {row.lat.toFixed(5)}, {row.lng.toFixed(5)} ↗
               </a>
             </dd>
-            <dt>Prep time</dt>
-            <dd>{row.prep_mins} min</dd>
             <dt>Rating</dt>
             <dd>{Number(row.rating).toFixed(1)}</dd>
           </dl>
+          <div className="stack" style={{ gap: 10, marginTop: 10 }}>
+            <div className="field">
+              <label>Name</label>
+              <input
+                className="input"
+                value={storeDraft.name}
+                onChange={(e) => setStoreField("name", e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Vertical</label>
+              <select
+                className="input"
+                value={storeDraft.vertical}
+                onChange={(e) => setStoreField("vertical", e.target.value)}
+              >
+                <option value="food">food</option>
+                <option value="grocery">grocery</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Phone</label>
+              <input
+                className="input"
+                value={storeDraft.phone}
+                onChange={(e) => setStoreField("phone", e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Address</label>
+              <input
+                className="input"
+                value={storeDraft.address}
+                onChange={(e) => setStoreField("address", e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Prep time (min)</label>
+              <input
+                className="input"
+                type="number"
+                value={storeDraft.prep_mins}
+                onChange={(e) => setStoreField("prep_mins", e.target.value)}
+              />
+            </div>
+            <div className="form-actions">
+              <button
+                className="btn primary"
+                disabled={
+                  storeBusy ||
+                  !storeDirty ||
+                  !storeDraft.name.trim() ||
+                  !storeDraft.address.trim()
+                }
+                onClick={saveStore}
+              >
+                {storeBusy ? "Saving…" : "Save details"}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="card">

@@ -25,6 +25,21 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
   const [showTopup, setShowTopup] = useState(false);
   const [showSuspend, setShowSuspend] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [serviceTypesDraft, setServiceTypesDraft] = useState<string[]>([]);
+  const [serviceTypesBusy, setServiceTypesBusy] = useState(false);
+  const [detailsDraft, setDetailsDraft] = useState({
+    full_name: "",
+    license_number: "",
+    date_of_birth: "",
+    address: "",
+    make: "",
+    model: "",
+    year: "",
+    plate_number: "",
+    color: "",
+  });
+  const [detailsBusy, setDetailsBusy] = useState(false);
+  const [detailsDirty, setDetailsDirty] = useState(false);
   const isAdmin = ["super_admin", "admin"].includes(auth.user?.role ?? "");
   const canTopup = isAdmin;
   const [routeFor, setRouteFor] = useState<string | null>(null);
@@ -73,6 +88,19 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
     try {
       const d = await api.driverDetail(id);
       setData(d);
+      setServiceTypesDraft(d.driver.service_types);
+      setDetailsDraft({
+        full_name: d.user.full_name ?? "",
+        license_number: d.driver.license_number ?? "",
+        date_of_birth: d.driver.date_of_birth ?? "",
+        address: d.driver.address ?? "",
+        make: d.vehicle?.make ?? "",
+        model: d.vehicle?.model ?? "",
+        year: d.vehicle?.year != null ? String(d.vehicle.year) : "",
+        plate_number: d.vehicle?.plate_number ?? "",
+        color: d.vehicle?.color ?? "",
+      });
+      setDetailsDirty(false);
       // Best-effort — analytics keys on the user id, not the driver row id.
       rides.driverAnalytics(d.user.id).then(setAnalytics).catch(() => {});
     } catch (e) {
@@ -95,6 +123,64 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
       setError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  function setDetailField<K extends keyof typeof detailsDraft>(key: K, value: string) {
+    setDetailsDraft((cur) => ({ ...cur, [key]: value }));
+    setDetailsDirty(true);
+  }
+
+  async function saveDetails() {
+    setDetailsBusy(true);
+    setError(null);
+    try {
+      const year = detailsDraft.year.trim();
+      await api.updateDriver(id, {
+        full_name: detailsDraft.full_name.trim(),
+        license_number: detailsDraft.license_number.trim(),
+        date_of_birth: detailsDraft.date_of_birth.trim() || undefined,
+        address: detailsDraft.address.trim(),
+        ...(data?.vehicle
+          ? {
+              vehicle: {
+                make: detailsDraft.make.trim(),
+                model: detailsDraft.model.trim(),
+                year: year ? Number(year) : undefined,
+                plate_number: detailsDraft.plate_number.trim(),
+                color: detailsDraft.color.trim(),
+              },
+            }
+          : {}),
+      });
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDetailsBusy(false);
+    }
+  }
+
+  function toggleServiceType(type: string) {
+    setServiceTypesDraft((cur) =>
+      cur.includes(type) ? cur.filter((t) => t !== type) : [...cur, type],
+    );
+  }
+
+  async function saveServiceTypes() {
+    if (serviceTypesDraft.length === 0) {
+      setError("Select at least one job type.");
+      return;
+    }
+    setServiceTypesBusy(true);
+    setError(null);
+    try {
+      await api.updateDriverServiceTypes(id, serviceTypesDraft);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setServiceTypesBusy(false);
     }
   }
 
@@ -202,36 +288,142 @@ export default function DriverDetailPage({ params }: { params: Promise<{ id: str
           <dl className="kv">
             <dt>Phone</dt>
             <dd>{user.phone}</dd>
-            <dt>Full name</dt>
-            <dd>{user.full_name ?? "—"}</dd>
-            <dt>License #</dt>
-            <dd>{driver.license_number ?? "—"}</dd>
-            <dt>Date of birth</dt>
-            <dd>{driver.date_of_birth ?? "—"}</dd>
-            <dt>Address</dt>
-            <dd>{driver.address ?? "—"}</dd>
           </dl>
+          <div className="stack" style={{ gap: 10, marginTop: 10 }}>
+            <div className="field">
+              <label>Full name</label>
+              <input
+                className="input"
+                value={detailsDraft.full_name}
+                onChange={(e) => setDetailField("full_name", e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>License #</label>
+              <input
+                className="input"
+                value={detailsDraft.license_number}
+                onChange={(e) => setDetailField("license_number", e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Date of birth</label>
+              <input
+                className="input"
+                type="date"
+                value={detailsDraft.date_of_birth}
+                onChange={(e) => setDetailField("date_of_birth", e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Address</label>
+              <input
+                className="input"
+                value={detailsDraft.address}
+                onChange={(e) => setDetailField("address", e.target.value)}
+              />
+            </div>
+          </div>
+
+          <h4 style={{ marginBottom: 8 }}>Job types</h4>
+          <div className="row">
+            {["ride", "delivery"].map((type) => (
+              <label key={type} className="row" style={{ gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={serviceTypesDraft.includes(type)}
+                  onChange={() => toggleServiceType(type)}
+                />
+                {type === "ride" ? "Rides" : "Delivery"}
+              </label>
+            ))}
+            <button
+              className="btn ghost"
+              disabled={
+                serviceTypesBusy ||
+                JSON.stringify([...serviceTypesDraft].sort()) ===
+                  JSON.stringify([...driver.service_types].sort())
+              }
+              onClick={saveServiceTypes}
+            >
+              {serviceTypesBusy ? "Saving…" : "Save"}
+            </button>
+          </div>
         </div>
 
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Vehicle</h3>
           {vehicle ? (
-            <dl className="kv">
-              <dt>Class</dt>
-              <dd>{vehicle.class.replace("_", " ")}</dd>
-              <dt>Plate</dt>
-              <dd>{vehicle.plate_number}</dd>
-              <dt>Make / Model</dt>
-              <dd>{[vehicle.make, vehicle.model].filter(Boolean).join(" ") || "—"}</dd>
-              <dt>Year</dt>
-              <dd>{vehicle.year ?? "—"}</dd>
-              <dt>Colour</dt>
-              <dd>{vehicle.color ?? "—"}</dd>
-            </dl>
+            <>
+              <dl className="kv">
+                <dt>Class</dt>
+                <dd>{vehicle.class.replace("_", " ")}</dd>
+              </dl>
+              <div className="stack" style={{ gap: 10, marginTop: 10 }}>
+                <div className="field">
+                  <label>Plate</label>
+                  <input
+                    className="input"
+                    value={detailsDraft.plate_number}
+                    onChange={(e) => setDetailField("plate_number", e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label>Make</label>
+                  <input
+                    className="input"
+                    value={detailsDraft.make}
+                    onChange={(e) => setDetailField("make", e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label>Model</label>
+                  <input
+                    className="input"
+                    value={detailsDraft.model}
+                    onChange={(e) => setDetailField("model", e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label>Year</label>
+                  <input
+                    className="input"
+                    type="number"
+                    value={detailsDraft.year}
+                    onChange={(e) => setDetailField("year", e.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label>Colour</label>
+                  <input
+                    className="input"
+                    value={detailsDraft.color}
+                    onChange={(e) => setDetailField("color", e.target.value)}
+                  />
+                </div>
+              </div>
+            </>
           ) : (
             <p className="subtle">No vehicle on file.</p>
           )}
         </div>
+      </div>
+
+      <div className="form-actions">
+        <button
+          className="btn primary"
+          disabled={
+            detailsBusy ||
+            !detailsDirty ||
+            !detailsDraft.full_name.trim() ||
+            !detailsDraft.license_number.trim() ||
+            !detailsDraft.address.trim() ||
+            (!!vehicle && (!detailsDraft.plate_number.trim() || !detailsDraft.model.trim()))
+          }
+          onClick={saveDetails}
+        >
+          {detailsBusy ? "Saving…" : "Save applicant / vehicle details"}
+        </button>
       </div>
 
       <div className="card">

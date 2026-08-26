@@ -181,6 +181,7 @@ export default function SurgePage() {
             <select className="input" value={vclass} onChange={(e) => setVclass(e.target.value)}>
               <option value="">Any</option>
               <option value="two_wheeler">Two-wheeler</option>
+              <option value="three_wheeler">Three-wheeler</option>
               <option value="four_wheeler">Four-wheeler</option>
             </select>
           </div>

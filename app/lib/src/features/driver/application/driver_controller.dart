@@ -12,6 +12,7 @@ import '../../../shared/request_ring.dart';
 import '../../../shared/resilient_poll.dart';
 import '../../ride/data/ride_repository.dart';
 import '../../ride/domain/models.dart' show Trip;
+import '../data/driver_kyc_repository.dart';
 import '../data/driver_repository.dart';
 import '../domain/models.dart';
 import 'driver_channel.dart';
@@ -128,8 +129,9 @@ class DriverController extends Notifier<DriverStatus> {
         return;
       }
       final at = loc.point;
-      state = state.copyWith(lastLocation: at);
-      await _repo.goOnline(at, state.jobTypes);
+      final jobTypes = await _currentJobTypes();
+      state = state.copyWith(lastLocation: at, jobTypes: jobTypes);
+      await _repo.goOnline(at, jobTypes);
       await ref.read(sharedPreferencesProvider).setBool(_wasOnlineKey, true);
       _resumeAttempt = 0;
       _heartbeat?.cancel();
@@ -159,6 +161,21 @@ class DriverController extends Notifier<DriverStatus> {
 
   DriverRepository get _repo => ref.read(driverRepositoryProvider);
 
+  /// The driver's currently-declared job types (ride/delivery/both) — set at
+  /// KYC, editable later from the admin dashboard. Re-fetched fresh on every
+  /// `goOnline`/resume so a dashboard-side edit takes effect the next time
+  /// the driver comes online, without needing its own sync mechanism. Falls
+  /// back to whatever's already in state on a network hiccup, rather than
+  /// blocking going online over it.
+  Future<List<String>> _currentJobTypes() async {
+    try {
+      final kyc = await ref.read(driverKycRepositoryProvider).status();
+      return kyc.serviceTypes.toList();
+    } catch (_) {
+      return state.jobTypes;
+    }
+  }
+
   Future<void> toggleOnline() => state.online ? goOffline() : goOnline();
 
   Future<void> goOnline() async {
@@ -171,8 +188,9 @@ class DriverController extends Notifier<DriverStatus> {
         throw LocationUnavailableException();
       }
       final at = loc.point;
-      state = state.copyWith(lastLocation: at);
-      await _repo.goOnline(at, state.jobTypes);
+      final jobTypes = await _currentJobTypes();
+      state = state.copyWith(lastLocation: at, jobTypes: jobTypes);
+      await _repo.goOnline(at, jobTypes);
       state = state.copyWith(online: true, busy: false);
       await ref.read(sharedPreferencesProvider).setBool(_wasOnlineKey, true);
       // Presence keep-alive (backend TTL is ~60s; beat well inside it).

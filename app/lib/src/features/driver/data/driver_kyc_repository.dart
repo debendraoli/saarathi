@@ -14,6 +14,7 @@ class DriverInput {
     this.address,
     this.make,
     this.model,
+    this.serviceTypes = const {'ride'},
   });
 
   final VehicleClass vehicleClass;
@@ -23,6 +24,9 @@ class DriverInput {
   final String? address;
   final String? make;
   final String? model;
+
+  /// "ride", "delivery", or both — see [DriverKyc.serviceTypes].
+  final Set<String> serviceTypes;
 }
 
 class DriverKycRepository {
@@ -43,6 +47,7 @@ class DriverKycRepository {
             if (input.make != null) 'make': input.make,
             if (input.model != null) 'model': input.model,
           },
+          'service_types': input.serviceTypes.toList(),
         },
       );
 

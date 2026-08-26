@@ -20,7 +20,7 @@ export type UserRole =
 
 export type KycStatus = "pending" | "under_review" | "approved" | "rejected";
 export type DocumentStatus = "submitted" | "approved" | "rejected";
-export type VehicleClass = "two_wheeler" | "four_wheeler";
+export type VehicleClass = "two_wheeler" | "three_wheeler" | "four_wheeler";
 
 export interface User {
   id: string;
@@ -39,6 +39,7 @@ export interface DriverListItem {
   full_name: string | null;
   phone: string;
   license_number: string | null;
+  service_types: string[];
   created_at: string;
   reviewed_at: string | null;
 }
@@ -53,6 +54,7 @@ export interface Driver {
   rejection_reason: string | null;
   reviewed_at: string | null;
   approved_at: string | null;
+  service_types: string[];
   created_at: string;
 }
 
@@ -237,6 +239,33 @@ export const api = {
 
   reactivateDriver: (id: string) =>
     request<{ ok: boolean; status: string }>(`/v1/admin/drivers/${id}/reactivate`, { method: "POST" }),
+
+  updateDriverServiceTypes: (id: string, serviceTypes: string[]) =>
+    request<{ ok: boolean; service_types: string[] }>(`/v1/admin/drivers/${id}/service-types`, {
+      method: "POST",
+      body: JSON.stringify({ service_types: serviceTypes }),
+    }),
+
+  updateDriver: (
+    id: string,
+    fields: {
+      full_name?: string;
+      license_number?: string;
+      date_of_birth?: string;
+      address?: string;
+      vehicle?: {
+        make?: string;
+        model?: string;
+        year?: number;
+        plate_number?: string;
+        color?: string;
+      };
+    },
+  ) =>
+    request<Driver>(`/v1/admin/drivers/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    }),
 
   async documentBlobUrl(id: string): Promise<string> {
     const res = await raw(`/v1/admin/documents/${id}/content`, {}, true);
@@ -445,6 +474,7 @@ export interface OnboardDriverInput {
     plate_number: string;
     color?: string | null;
   };
+  service_types?: string[];
 }
 
 // ── Rides service (campaigns) ────────────────────────────────────────────────
@@ -651,6 +681,11 @@ export const rides = {
     ridesRequest<{ ok: boolean; status: string }>(`/v1/admin/riders/${id}/suspend`, { method: "POST" }),
   reactivateRider: (id: string) =>
     ridesRequest<{ ok: boolean; status: string }>(`/v1/admin/riders/${id}/reactivate`, { method: "POST" }),
+  updateRider: (id: string, fields: { full_name?: string }) =>
+    ridesRequest<{ ok: boolean }>(`/v1/admin/riders/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    }),
   driverAnalytics: (userId: string) =>
     ridesRequest<DriverAnalytics>(`/v1/admin/driver-analytics/${userId}`),
   driverDirectory: (q?: string) =>
@@ -1095,6 +1130,15 @@ export const merchant = {
     merchantRequest<{ ok: boolean }>(`/v1/admin/merchants/${id}/reject`, {
       method: "POST",
       body: JSON.stringify({ reason }),
+    }),
+
+  update: (
+    id: string,
+    fields: { name?: string; address?: string; phone?: string; prep_mins?: number; vertical?: string },
+  ) =>
+    merchantRequest<{ ok: boolean }>(`/v1/admin/merchants/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
     }),
 
   menu: (id: string) => merchantRequest<MerchantMenuItem[]>(`/v1/merchant/merchants/${id}/menu`),

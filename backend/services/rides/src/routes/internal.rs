@@ -116,6 +116,15 @@ async fn create_delivery_trip(
 struct NearbyDriversQuery {
     lat: f64,
     lng: f64,
+    /// "ride" or "delivery" — which drivers count as "nearby" for the
+    /// caller's purpose. Defaults to "delivery" since the only current
+    /// caller is the merchant service's courier-availability check.
+    #[serde(default = "default_job_type")]
+    job_type: String,
+}
+
+fn default_job_type() -> String {
+    "delivery".to_string()
 }
 
 #[derive(Serialize)]
@@ -127,15 +136,21 @@ struct NearbyDriversResponse {
 /// moment a courier is actually needed — see `spawn_courier`) when no
 /// courier is likely to be dispatched soon, using the exact same "nearby"
 /// definition the app's own ride-booking gate and the supply-surge signal
-/// already use.
+/// already use, filtered to drivers who actually accept that job type.
 async fn nearby_drivers(
     State(st): State<AppState>,
     headers: HeaderMap,
     Query(q): Query<NearbyDriversQuery>,
 ) -> AppResult<Json<NearbyDriversResponse>> {
     check_internal_secret(&st, &headers)?;
-    let count = crate::dispatch::nearby_count(&st, q.lng, q.lat, st.config.dispatch_max_radius_km)
-        .await
-        .unwrap_or(0);
+    let count = crate::dispatch::nearby_count(
+        &st,
+        q.lng,
+        q.lat,
+        st.config.dispatch_max_radius_km,
+        &q.job_type,
+    )
+    .await
+    .unwrap_or(0);
     Ok(Json(NearbyDriversResponse { count }))
 }

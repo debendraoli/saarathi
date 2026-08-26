@@ -24,11 +24,18 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/admin/drivers", get(list_drivers))
         .route("/v1/admin/drivers/onboard", post(onboard_driver))
-        .route("/v1/admin/drivers/{id}", get(driver_detail))
+        .route(
+            "/v1/admin/drivers/{id}",
+            get(driver_detail).patch(update_driver),
+        )
         .route("/v1/admin/drivers/{id}/approve", post(approve_driver))
         .route("/v1/admin/drivers/{id}/reject", post(reject_driver))
         .route("/v1/admin/drivers/{id}/suspend", post(suspend_driver))
         .route("/v1/admin/drivers/{id}/reactivate", post(reactivate_driver))
+        .route(
+            "/v1/admin/drivers/{id}/service-types",
+            post(update_service_types),
+        )
         .route(
             "/v1/admin/drivers/{id}/documents",
             post(upload_driver_document),
@@ -58,6 +65,7 @@ struct DriverListItem {
     full_name: Option<String>,
     phone: String,
     license_number: Option<String>,
+    service_types: Vec<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -73,7 +81,7 @@ async fn list_drivers(
     let status_filter = q.status.unwrap_or_else(|| "queue".into());
 
     let base = "SELECT d.id, d.user_id, d.kyc_status, u.full_name, u.phone, \
-                d.license_number, d.created_at, d.reviewed_at \
+                d.license_number, d.service_types, d.created_at, d.reviewed_at \
                 FROM drivers d JOIN users u ON u.id = d.user_id ";
 
     let items: Vec<DriverListItem> = if status_filter == "queue" {
@@ -109,7 +117,7 @@ async fn driver_detail(
 ) -> AppResult<Json<DriverDetail>> {
     let driver: Driver = sqlx::query_as(
         "SELECT id, user_id, kyc_status, license_number, date_of_birth, address, \
-                rejection_reason, reviewed_by, reviewed_at, approved_at, created_at, updated_at \
+                rejection_reason, reviewed_by, reviewed_at, approved_at, service_types, created_at, updated_at \
          FROM drivers WHERE id = $1",
     )
     .bind(id)
@@ -371,6 +379,169 @@ async fn reactivate_driver(
     Ok(Json(json!({ "ok": true, "status": "active" })))
 }
 
+#[derive(Deserialize)]
+struct ServiceTypesInput {
+    service_types: Vec<String>,
+}
+
+/// Staff override of a driver's declared service types (ride/delivery/both) —
+/// the same field the driver themselves sets at KYC (`POST
+/// /v1/driver/register`) and that the app re-reads before every `goOnline`,
+/// so this takes effect the next time the driver comes online.
+async fn update_service_types(
+    State(st): State<AppState>,
+    AdminUser(claims): AdminUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<ServiceTypesInput>,
+) -> AppResult<Json<Value>> {
+    let service_types = crate::routes::driver_routes::validate_service_types(Some(
+        body.service_types,
+    ))?;
+
+    let updated = sqlx::query("UPDATE drivers SET service_types = $2 WHERE id = $1")
+        .bind(id)
+        .bind(&service_types)
+        .execute(&st.db)
+        .await?;
+    if updated.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+
+    audit::record(
+        &st.db,
+        claims.sub,
+        "driver.service_types.update",
+        "driver",
+        id,
+        json!({ "service_types": service_types }),
+    )
+    .await?;
+
+    Ok(Json(json!({ "ok": true, "service_types": service_types })))
+}
+
+#[derive(Deserialize)]
+struct UpdateDriverVehicle {
+    make: Option<String>,
+    model: Option<String>,
+    year: Option<i32>,
+    plate_number: Option<String>,
+    color: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateDriverInput {
+    full_name: Option<String>,
+    license_number: Option<String>,
+    date_of_birth: Option<NaiveDate>,
+    address: Option<String>,
+    vehicle: Option<UpdateDriverVehicle>,
+}
+
+/// Staff correction of a driver's own details and vehicle — typo fixes, not
+/// KYC review (that stays on `approve`/`reject`) and not the service-types
+/// toggle (that has its own endpoint above).
+async fn update_driver(
+    State(st): State<AppState>,
+    AdminUser(claims): AdminUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdateDriverInput>,
+) -> AppResult<Json<Driver>> {
+    if let Some(name) = &body.full_name {
+        if name.trim().is_empty() {
+            return Err(AppError::BadRequest("full_name cannot be empty".into()));
+        }
+    }
+    if let Some(license) = &body.license_number {
+        if license.trim().is_empty() {
+            return Err(AppError::BadRequest("license_number cannot be empty".into()));
+        }
+    }
+    if let Some(address) = &body.address {
+        if address.trim().is_empty() {
+            return Err(AppError::BadRequest("address cannot be empty".into()));
+        }
+    }
+    if let Some(v) = &body.vehicle {
+        if let Some(plate) = &v.plate_number {
+            if plate.trim().is_empty() {
+                return Err(AppError::BadRequest("plate_number cannot be empty".into()));
+            }
+        }
+        if let Some(model) = &v.model {
+            if model.trim().is_empty() {
+                return Err(AppError::BadRequest("model cannot be empty".into()));
+            }
+        }
+    }
+    let full_name = body.full_name.as_deref().map(str::trim);
+
+    let mut tx = st.db.begin().await?;
+
+    let driver: Driver = sqlx::query_as(
+        "UPDATE drivers SET \
+             license_number = COALESCE($2, license_number), \
+             date_of_birth = COALESCE($3, date_of_birth), \
+             address = COALESCE($4, address) \
+         WHERE id = $1 \
+         RETURNING id, user_id, kyc_status, license_number, date_of_birth, address, \
+                   rejection_reason, reviewed_by, reviewed_at, approved_at, service_types, created_at, updated_at",
+    )
+    .bind(id)
+    .bind(body.license_number)
+    .bind(body.date_of_birth)
+    .bind(body.address)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    if full_name.is_some() {
+        sqlx::query("UPDATE users SET full_name = COALESCE($2, full_name) WHERE id = $1")
+            .bind(driver.user_id)
+            .bind(full_name)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    if let Some(v) = &body.vehicle {
+        sqlx::query(
+            "UPDATE vehicles SET \
+                 make = COALESCE($2, make), \
+                 model = COALESCE($3, model), \
+                 year = COALESCE($4, year), \
+                 plate_number = COALESCE($5, plate_number), \
+                 color = COALESCE($6, color) \
+             WHERE driver_id = $1",
+        )
+        .bind(id)
+        .bind(&v.make)
+        .bind(&v.model)
+        .bind(v.year)
+        .bind(v.plate_number.as_deref().map(str::trim))
+        .bind(&v.color)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    audit::record(
+        &st.db,
+        claims.sub,
+        "driver.update",
+        "driver",
+        id,
+        json!({
+            "full_name": full_name,
+            "license_number": driver.license_number,
+            "date_of_birth": driver.date_of_birth,
+            "address": driver.address,
+        }),
+    )
+    .await?;
+
+    tx.commit().await?;
+    Ok(Json(driver))
+}
+
 // ── On-site KYC entry (staff onboards a walk-in driver) ────────────────────
 
 #[derive(Deserialize)]
@@ -391,6 +562,10 @@ struct OnboardInput {
     date_of_birth: Option<NaiveDate>,
     address: Option<String>,
     vehicle: OnboardVehicle,
+    /// Job types this driver accepts — same field the self-serve app KYC
+    /// form sets (see `driver_routes::RegisterInput`); defaults to ride-only
+    /// when omitted.
+    service_types: Option<Vec<String>>,
 }
 
 /// Staff captures a driver's KYC on-site (walk-in): creates/promotes the user,
@@ -408,11 +583,24 @@ async fn onboard_driver(
     if phone.is_empty() {
         return Err(AppError::BadRequest("phone is required".into()));
     }
+    if body.full_name.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::BadRequest("full_name is required".into()));
+    }
+    if body.license_number.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::BadRequest("license_number is required".into()));
+    }
+    if body.address.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::BadRequest("address is required".into()));
+    }
     if body.vehicle.plate_number.trim().is_empty() {
         return Err(AppError::BadRequest(
             "vehicle plate_number is required".into(),
         ));
     }
+    if body.vehicle.model.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::BadRequest("vehicle model is required".into()));
+    }
+    let service_types = crate::routes::driver_routes::validate_service_types(body.service_types)?;
 
     let mut tx = st.db.begin().await?;
 
@@ -430,21 +618,23 @@ async fn onboard_driver(
     .await?;
 
     let driver: Driver = sqlx::query_as(
-        "INSERT INTO drivers (user_id, license_number, date_of_birth, address, kyc_status, onboarded_by) \
-         VALUES ($1, $2, $3, $4, 'under_review', $5) \
+        "INSERT INTO drivers (user_id, license_number, date_of_birth, address, kyc_status, onboarded_by, service_types) \
+         VALUES ($1, $2, $3, $4, 'under_review', $5, $6) \
          ON CONFLICT (user_id) DO UPDATE SET \
              license_number = EXCLUDED.license_number, \
              date_of_birth = EXCLUDED.date_of_birth, \
              address = EXCLUDED.address, \
-             onboarded_by = EXCLUDED.onboarded_by \
+             onboarded_by = EXCLUDED.onboarded_by, \
+             service_types = EXCLUDED.service_types \
          RETURNING id, user_id, kyc_status, license_number, date_of_birth, address, \
-                   rejection_reason, reviewed_by, reviewed_at, approved_at, created_at, updated_at",
+                   rejection_reason, reviewed_by, reviewed_at, approved_at, service_types, created_at, updated_at",
     )
     .bind(user_id)
     .bind(body.license_number)
     .bind(body.date_of_birth)
     .bind(body.address)
     .bind(claims.sub)
+    .bind(&service_types)
     .fetch_one(&mut *tx)
     .await?;
 

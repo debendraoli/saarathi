@@ -126,13 +126,15 @@ struct Candidate {
     lng: f64,
 }
 
-/// Fetch + parse meta for every driver in the H3 disk around `(lat, lng)`,
-/// lazily evicting anyone stale, without yet filtering by exact distance.
+/// Fetch + parse meta for every driver in the H3 disk around `(lat, lng)` who
+/// opted into `job_type`, lazily evicting anyone stale, without yet filtering
+/// by exact distance.
 async fn candidates_in_disk(
     st: &AppState,
     lat: f64,
     lng: f64,
     radius_km: f64,
+    job_type: &str,
 ) -> anyhow::Result<Vec<Candidate>> {
     let mut r = st.redis.clone();
     let center = cell_for(lat, lng)?;
@@ -159,16 +161,24 @@ async fn candidates_in_disk(
             .arg(meta_key(*did))
             .arg("lat")
             .arg("lng")
-            .arg("last_seen");
+            .arg("last_seen")
+            .arg("job_types");
     }
-    let rows: Vec<(Option<f64>, Option<f64>, Option<i64>)> = pipe.query_async(&mut r).await?;
+    let rows: Vec<(Option<f64>, Option<f64>, Option<i64>, Option<String>)> =
+        pipe.query_async(&mut r).await?;
 
     let mut out = Vec::with_capacity(driver_ids.len());
-    for (driver_id, (lat, lng, last_seen)) in driver_ids.into_iter().zip(rows) {
+    for (driver_id, (lat, lng, last_seen, job_types)) in driver_ids.into_iter().zip(rows) {
         match (lat, lng, last_seen) {
             (Some(lat), Some(lng), Some(last_seen)) => {
                 if is_stale(last_seen, st.config.presence_ttl_secs) {
                     let _ = remove_driver(&mut r, driver_id).await;
+                    continue;
+                }
+                let opted_in = job_types
+                    .as_deref()
+                    .is_some_and(|jt| jt.split(',').any(|t| t == job_type));
+                if !opted_in {
                     continue;
                 }
                 out.push(Candidate { driver_id, lat, lng });
@@ -181,10 +191,17 @@ async fn candidates_in_disk(
     Ok(out)
 }
 
-/// Nearest online drivers (ids) within `radius_km` of a point, nearest first.
-async fn nearby(st: &AppState, lng: f64, lat: f64, radius_km: f64) -> anyhow::Result<Vec<Uuid>> {
+/// Nearest online drivers (ids) within `radius_km` of a point who opted into
+/// `job_type`, nearest first.
+async fn nearby(
+    st: &AppState,
+    lng: f64,
+    lat: f64,
+    radius_km: f64,
+    job_type: &str,
+) -> anyhow::Result<Vec<Uuid>> {
     let origin = CoreLatLng { lat, lng };
-    let mut scored: Vec<(f64, Uuid)> = candidates_in_disk(st, lat, lng, radius_km)
+    let mut scored: Vec<(f64, Uuid)> = candidates_in_disk(st, lat, lng, radius_km, job_type)
         .await?
         .into_iter()
         .filter_map(|c| {
@@ -215,9 +232,10 @@ async fn nearby_by_eta(
     lat: f64,
     radius_km: f64,
     profile: RouteProfile,
+    job_type: &str,
 ) -> anyhow::Result<Vec<Uuid>> {
     let origin = CoreLatLng { lat, lng };
-    let mut scored: Vec<(f64, Candidate)> = candidates_in_disk(st, lat, lng, radius_km)
+    let mut scored: Vec<(f64, Candidate)> = candidates_in_disk(st, lat, lng, radius_km, job_type)
         .await?
         .into_iter()
         .filter_map(|c| {
@@ -246,15 +264,19 @@ async fn nearby_by_eta(
     Ok(with_eta.into_iter().map(|(_, id)| id).collect())
 }
 
-/// How many drivers are online within `radius_km` of a point. Used by the surge
-/// engine to detect supply scarcity.
+/// How many drivers opted into `job_type` are online within `radius_km` of a
+/// point. Used by the surge engine (ride estimates) and the merchant
+/// service's "no couriers nearby" warning to detect supply scarcity — each
+/// passes its own job type so a delivery-only driver never counts as a
+/// nearby *ride* driver and vice versa.
 pub async fn nearby_count(
     st: &AppState,
     lng: f64,
     lat: f64,
     radius_km: f64,
+    job_type: &str,
 ) -> anyhow::Result<usize> {
-    Ok(nearby(st, lng, lat, radius_km).await?.len())
+    Ok(nearby(st, lng, lat, radius_km, job_type).await?.len())
 }
 
 /// Approximate positions of online drivers within `radius_km`, for the
@@ -270,7 +292,9 @@ pub async fn nearby_positions(
 ) -> anyhow::Result<Vec<(f64, f64)>> {
     use rand::RngExt;
     let origin = CoreLatLng { lat, lng };
-    let candidates = candidates_in_disk(st, lat, lng, radius_km).await?;
+    // Rider-facing search animation is always about ride drivers, never
+    // delivery couriers.
+    let candidates = candidates_in_disk(st, lat, lng, radius_km, "ride").await?;
     let mut rng = rand::rng();
     let mut out: Vec<(f64, f64)> = candidates
         .into_iter()
@@ -425,7 +449,7 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
             .unwrap_or(st.config.dispatch_max_radius_km);
         let mut candidates: Vec<Uuid> = Vec::new();
         while radius <= max_radius {
-            for did in nearby_by_eta(st, lng, lat, radius, profile).await? {
+            for did in nearby_by_eta(st, lng, lat, radius, profile, &job_type).await? {
                 if already.contains(&did) || candidates.contains(&did) {
                     continue;
                 }

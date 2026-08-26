@@ -27,11 +27,14 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
   VehicleClass _class = VehicleClass.twoWheeler;
   DateTime? _dob;
   bool _busy = false;
+  final Set<String> _serviceTypes = {'ride'};
 
   @override
   void initState() {
     super.initState();
-    _plate.addListener(() => setState(() {}));
+    for (final c in [_plate, _license, _address, _model]) {
+      c.addListener(() => setState(() {}));
+    }
   }
 
   @override
@@ -53,8 +56,15 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
     if (picked != null) setState(() => _dob = picked);
   }
 
+  bool get _isValid =>
+      _plate.text.trim().isNotEmpty &&
+      _license.text.trim().isNotEmpty &&
+      _address.text.trim().isNotEmpty &&
+      _model.text.trim().isNotEmpty &&
+      _serviceTypes.isNotEmpty;
+
   Future<void> _submit() async {
-    if (_plate.text.trim().isEmpty) return;
+    if (!_isValid) return;
     setState(() => _busy = true);
     try {
       String two(int n) => n.toString().padLeft(2, '0');
@@ -71,6 +81,7 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
               dateOfBirth: _dob == null
                   ? null
                   : '${_dob!.year}-${two(_dob!.month)}-${two(_dob!.day)}',
+              serviceTypes: _serviceTypes,
             ),
           );
       await ref.read(authControllerProvider.notifier).refresh();
@@ -126,7 +137,7 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
                 label: 'Plate number',
                 hint: 'BA-1-PA-1234'),
             _Field(controller: _make, label: 'Make (optional)'),
-            _Field(controller: _model, label: 'Model (optional)'),
+            _Field(controller: _model, label: 'Model'),
             const Divider(height: 32),
             _Field(controller: _license, label: 'License number'),
             ListTile(
@@ -141,9 +152,47 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
               onTap: _pickDob,
             ),
             _Field(controller: _address, label: 'Address'),
+            const Divider(height: 32),
+            Text(l.jobTypesLabel, style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                FilterChip(
+                  label: Text(l.jobTypesRide),
+                  selected: _serviceTypes.contains('ride'),
+                  onSelected: (sel) => setState(() {
+                    if (sel) {
+                      _serviceTypes.add('ride');
+                    } else {
+                      _serviceTypes.remove('ride');
+                    }
+                  }),
+                ),
+                FilterChip(
+                  label: Text(l.jobTypesDelivery),
+                  selected: _serviceTypes.contains('delivery'),
+                  onSelected: (sel) => setState(() {
+                    if (sel) {
+                      _serviceTypes.add('delivery');
+                    } else {
+                      _serviceTypes.remove('delivery');
+                    }
+                  }),
+                ),
+              ],
+            ),
+            if (_serviceTypes.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  l.jobTypesRequireOne,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
             const SizedBox(height: 24),
             FilledButton(
-              onPressed: _busy || _plate.text.trim().isEmpty ? null : _submit,
+              onPressed: _busy || !_isValid ? null : _submit,
               child: _busy
                   ? const SizedBox(
                       height: 22,

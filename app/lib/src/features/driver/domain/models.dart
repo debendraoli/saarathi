@@ -95,20 +95,28 @@ class DriverKyc {
   const DriverKyc(
       {required this.status,
       this.uploadedKinds = const {},
-      this.rejectionReason});
+      this.rejectionReason,
+      this.serviceTypes = const {'ride'}});
 
   final KycStatus status;
   final Set<String> uploadedKinds;
   final String? rejectionReason;
 
+  /// Which job types this driver accepts — set at KYC, editable later from
+  /// the admin dashboard (see `PATCH /v1/admin/drivers/{id}/service-types`).
+  final Set<String> serviceTypes;
+
   factory DriverKyc.fromJson(Map<String, dynamic> j) {
     final driver = j['driver'] as Map<String, dynamic>?;
     final docs =
         (j['documents'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    final types =
+        (driver?['service_types'] as List?)?.cast<String>().toSet();
     return DriverKyc(
       status: KycStatus.fromWire(driver?['kyc_status'] as String?),
       uploadedKinds: docs.map((d) => d['kind'] as String).toSet(),
       rejectionReason: driver?['rejection_reason'] as String?,
+      serviceTypes: types == null || types.isEmpty ? const {'ride'} : types,
     );
   }
 }

@@ -328,6 +328,7 @@ export default function CampaignsPage() {
             >
               <option value="">Any</option>
               <option value="two_wheeler">Two-wheeler</option>
+              <option value="three_wheeler">Three-wheeler</option>
               <option value="four_wheeler">Four-wheeler</option>
             </select>
           </div>

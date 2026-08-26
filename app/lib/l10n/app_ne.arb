@@ -338,6 +338,8 @@
   "offlineBody": "काम पाउन अनलाइन जानुहोस्।",
   "jobTypesRide": "यात्रा",
   "jobTypesDelivery": "डेलिभरी",
+  "jobTypesLabel": "तपाईं कस्तो प्रकारको काम चाहनुहुन्छ?",
+  "jobTypesRequireOne": "कम्तीमा एउटा काम प्रकार छान्नुहोस्",
   "newJobOffer": "नयाँ काम अफर",
   "offerExpired": "यो अफरको म्याद सकियो — नयाँ एउटा पहिले नै आउँदै हुन सक्छ।",
   "notificationTargetGone": "यसले अब कहीं पनि लैजाँदैन — यसको म्याद सकिएको हुन सक्छ।",
