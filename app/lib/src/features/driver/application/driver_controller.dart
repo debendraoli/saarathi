@@ -6,6 +6,7 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/foreground/driver_foreground_service.dart';
 import '../../../core/location.dart';
 import '../../../core/offline/connectivity.dart';
+import '../../../core/prefs.dart';
 import '../../../shared/request_ring.dart';
 import '../../../shared/resilient_poll.dart';
 import '../../ride/data/ride_repository.dart';
@@ -44,6 +45,18 @@ class DriverStatus {
 class DriverController extends Notifier<DriverStatus> {
   Timer? _heartbeat;
 
+  /// Whether the driver was online the last time the app had a chance to
+  /// record it — set the instant `goOnline()` succeeds, cleared the instant
+  /// `goOffline()` runs. Unlike `is_open` for a merchant (a plain DB column
+  /// re-read fresh on every app launch), "online" is fronted by a Redis
+  /// presence TTL that only a live heartbeat keeps renewed — the app being
+  /// killed (swiped from recents) stops that heartbeat, the TTL lapses, and
+  /// the backend genuinely forgets the driver within ~60s. Without this
+  /// flag, relaunching just shows offline with no hint anything should
+  /// resume; with it, launch can silently re-establish presence the same
+  /// way a connectivity drop already resumes it mid-session.
+  static const _wasOnlineKey = 'saarathi.driver.wasOnline';
+
   @override
   DriverStatus build() {
     ref.onDispose(() => _heartbeat?.cancel());
@@ -61,7 +74,23 @@ class DriverController extends Notifier<DriverStatus> {
         _resumeOnlineAfterReconnect();
       }
     });
+    // Same idea, for the other way presence lapses: the app itself getting
+    // killed and relaunched, not just a network blip while it stays alive.
+    // Fire-and-forget — this shouldn't hold up the very first frame.
+    unawaited(_resumeOnlineAfterRelaunch());
     return const DriverStatus();
+  }
+
+  Future<void> _resumeOnlineAfterRelaunch() async {
+    final prefs = ref.read(sharedPreferencesProvider);
+    if (!(prefs.getBool(_wasOnlineKey) ?? false)) return;
+    try {
+      await goOnline();
+    } catch (_) {
+      // No location permission, no network yet at launch, etc. — the
+      // driver just lands on the home screen showing offline and can
+      // toggle manually, same as any other failed goOnline() attempt.
+    }
   }
 
   Future<void> _resumeOnlineAfterReconnect() async {
@@ -92,6 +121,7 @@ class DriverController extends Notifier<DriverStatus> {
       state = state.copyWith(lastLocation: at);
       await _repo.goOnline(at, state.jobTypes);
       state = state.copyWith(online: true, busy: false);
+      await ref.read(sharedPreferencesProvider).setBool(_wasOnlineKey, true);
       // Presence keep-alive (backend TTL is ~60s; beat well inside it).
       _heartbeat?.cancel();
       _heartbeat = Timer.periodic(const Duration(seconds: 20), (_) => _beat());
@@ -111,6 +141,10 @@ class DriverController extends Notifier<DriverStatus> {
       await _repo.goOffline();
     } finally {
       state = state.copyWith(online: false, busy: false);
+      // A deliberate offline should never auto-resume on next launch, even
+      // if the network call above failed — the driver's own intent, not
+      // the backend's confirmation, is what this flag tracks.
+      await ref.read(sharedPreferencesProvider).setBool(_wasOnlineKey, false);
     }
   }
 
