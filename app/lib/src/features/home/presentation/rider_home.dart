@@ -392,7 +392,14 @@ class _ActiveTripCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
     final trips = ref.watch(myTripsProvider).valueOrNull ?? const [];
-    final active = trips.where((t) => t.isActive).firstOrNull;
+    // Must match the tripType != 'delivery' filter used for the booking
+    // lock above — trips also holds delivery/courier legs created for this
+    // rider's own marketplace orders, and without this a newer delivery
+    // trip silently outranked (in created_at order) an actual in-progress
+    // ride, making the ride look cancelled from the rider's Home screen.
+    final active = trips
+        .where((t) => t.isActive && t.tripType != 'delivery')
+        .firstOrNull;
     if (active == null) return const SizedBox.shrink();
 
     // Same live-preview data the full trip screen shows, so the resume card
