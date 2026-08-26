@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../auth/application/auth_controller.dart';
+import '../../ride/application/ride_controller.dart' show tripStreamProvider;
 import '../../ride/application/trip_channel.dart';
+import '../../ride/domain/models.dart' show TripStatus;
 import '../data/rtc_repository.dart';
 
 enum CallStatus { idle, calling, incoming, connected, ended }
@@ -90,24 +92,36 @@ class CallController extends ChangeNotifier {
     if (inCall) return;
     status = CallStatus.calling;
     notifyListeners();
-    await _setup(withVideo);
-    final offer = await _pc!.createOffer();
-    await _pc!.setLocalDescription(offer);
-    _channel.sendSignal('offer', {'sdp': offer.sdp, 'type': offer.type});
+    try {
+      await _setup(withVideo);
+      final offer = await _pc!.createOffer();
+      await _pc!.setLocalDescription(offer);
+      _channel.sendSignal('offer', {'sdp': offer.sdp, 'type': offer.type});
+    } catch (_) {
+      // Mic/camera permission denied (first prompt or revoked since), no
+      // device found, etc. — `_setup` can throw partway through, leaving a
+      // half-created `_pc`/`_localStream`. Without this, `status` was left
+      // stuck on `calling` forever with no error and nothing cleaned up.
+      await _end(local: true);
+    }
   }
 
   Future<void> accept() async {
     final offer = _pendingOffer;
     if (offer == null) return;
-    await _setup(video);
-    await _pc!.setRemoteDescription(
-      RTCSessionDescription(offer['sdp'] as String, offer['type'] as String),
-    );
-    await _flushCandidates();
-    final answer = await _pc!.createAnswer();
-    await _pc!.setLocalDescription(answer);
-    _channel.sendSignal('answer', {'sdp': answer.sdp, 'type': answer.type});
-    _pendingOffer = null;
+    try {
+      await _setup(video);
+      await _pc!.setRemoteDescription(
+        RTCSessionDescription(offer['sdp'] as String, offer['type'] as String),
+      );
+      await _flushCandidates();
+      final answer = await _pc!.createAnswer();
+      await _pc!.setLocalDescription(answer);
+      _channel.sendSignal('answer', {'sdp': answer.sdp, 'type': answer.type});
+      _pendingOffer = null;
+    } catch (_) {
+      await _end(local: true);
+    }
   }
 
   Future<void> _flushCandidates() async {
@@ -135,7 +149,8 @@ class CallController extends ChangeNotifier {
   void hangup() => _end(local: true);
 
   Future<void> _onSignal(Map<String, dynamic> m) async {
-    if (m['sender_id'] == _myId) return; // ignore our own echoed frames
+    final senderId = m['sender_id'] as String?;
+    if (senderId == _myId) return; // ignore our own echoed frames
     final kind = m['kind'] as String?;
     final data = m['data'];
     switch (kind) {
@@ -145,6 +160,29 @@ class CallController extends ChangeNotifier {
           video = true; // offer may carry video; accept with camera available
           status = CallStatus.incoming;
           notifyListeners();
+        } else if (status == CallStatus.calling && senderId != null) {
+          // Glare: both sides tapped "call" at essentially the same moment,
+          // each already sent their own offer, and the `idle`-only guard
+          // above silently dropped both incoming offers — the call hung in
+          // "Calling…" forever on both ends with no way out but a manual
+          // hangup. Break the tie deterministically: the lexicographically
+          // smaller id yields, tearing down its own half-open attempt and
+          // accepting the other side's offer as an ordinary incoming call;
+          // the other side (unaffected) just waits for that accept's
+          // 'answer' to its still-standing offer.
+          final myId = _myId ?? '';
+          if (myId.compareTo(senderId) < 0) {
+            await _localStream?.dispose();
+            _localStream = null;
+            await _pc?.close();
+            _pc = null;
+            _queuedCandidates.clear();
+            _remoteReady = false;
+            _pendingOffer = (data as Map).cast<String, dynamic>();
+            video = true;
+            status = CallStatus.incoming;
+            notifyListeners();
+          }
         }
       case 'answer':
         await _pc?.setRemoteDescription(
@@ -202,6 +240,18 @@ final callControllerProvider =
   final myId = ref.read(authControllerProvider).user?.id;
   final controller =
       CallController(channel, myId, ref.read(rtcRepositoryProvider));
+  // The call previously stayed fully live (media flowing, signaling
+  // channel open) after the trip it belongs to was cancelled or completed
+  // — neither side had anything watching trip status, so a rider/driver
+  // could keep talking on a ride that no longer exists. Force a hangup the
+  // moment the trip goes terminal.
+  ref.listen(tripStreamProvider(tripId), (prev, next) {
+    final status = next.valueOrNull?.status;
+    if ((status == TripStatus.cancelled || status == TripStatus.completed) &&
+        controller.inCall) {
+      controller.hangup();
+    }
+  });
   ref.onDispose(controller.disposeAll);
   return controller;
 });

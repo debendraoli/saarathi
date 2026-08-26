@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../application/call_controller.dart';
 
@@ -36,8 +37,15 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   }
 
   void _onChange() {
-    if (_c.status == CallStatus.ended && mounted) {
-      Navigator.of(context).maybePop();
+    if (_c.status == CallStatus.ended) {
+      // `_onChange` can fire synchronously from an async signal handler
+      // (e.g. the remote side hanging up mid-transition), so `mounted`
+      // alone isn't enough — it stays true through `deactivate()`, only
+      // becoming meaningful once Flutter has resolved deactivation to
+      // either disposed or reactivated on the next frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).maybePop();
+      });
     }
     if (mounted) setState(() {});
   }
@@ -116,15 +124,16 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   }
 
   String _statusLabel() {
+    final l = AppL10n.of(context);
     switch (_c.status) {
       case CallStatus.calling:
-        return 'Calling…';
+        return l.callStatusCalling;
       case CallStatus.incoming:
-        return 'Incoming call';
+        return l.callStatusIncoming;
       case CallStatus.connected:
-        return 'Connected';
+        return l.callStatusConnected;
       default:
-        return 'Call ended';
+        return l.callStatusEnded;
     }
   }
 

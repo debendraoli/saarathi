@@ -79,7 +79,10 @@ class ErrorRetry extends StatelessWidget {
             Text(message, textAlign: TextAlign.center),
             if (onRetry != null) ...[
               const SizedBox(height: 16),
-              OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
+              OutlinedButton(
+                onPressed: onRetry,
+                child: Text(AppL10n.of(context).actionRetry),
+              ),
             ],
           ],
         ),
