@@ -140,22 +140,31 @@ async fn reverse(
         ("point.lat", q.lat.to_string()),
         ("point.lon", q.lng.to_string()),
     ];
-    let place = fetch(&format!("{}/v1/reverse", geocoder_url()), &params)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .next();
+    // `fetch`'s `Err` collapses "Pelias unreachable/timed out/malformed
+    // response" — every one of those is transient infrastructure trouble,
+    // not "this point genuinely has no address". Only an `Ok` (Pelias
+    // itself answered, however many features it found) is trustworthy
+    // enough to cache for 30 days; reproduced live: a ~11h Pelias outage
+    // cached a stuck `null` for every point looked up during it, each
+    // showing "address unavailable" in the app for the rest of that window.
+    let fetch_result = fetch(&format!("{}/v1/reverse", geocoder_url()), &params).await;
+    let place = fetch_result
+        .as_ref()
+        .ok()
+        .and_then(|places| places.first().cloned());
 
-    if let Some(key) = &key {
-        let mut r = st.redis.clone();
-        if let Ok(raw) = serde_json::to_string(&place) {
-            let _: Result<(), _> = redis::cmd("SET")
-                .arg(key)
-                .arg(raw)
-                .arg("EX")
-                .arg(REVERSE_CACHE_TTL_SECS)
-                .query_async::<()>(&mut r)
-                .await;
+    if fetch_result.is_ok() {
+        if let Some(key) = &key {
+            let mut r = st.redis.clone();
+            if let Ok(raw) = serde_json::to_string(&place) {
+                let _: Result<(), _> = redis::cmd("SET")
+                    .arg(key)
+                    .arg(raw)
+                    .arg("EX")
+                    .arg(REVERSE_CACHE_TTL_SECS)
+                    .query_async::<()>(&mut r)
+                    .await;
+            }
         }
     }
     Ok(Json(place))

@@ -514,6 +514,12 @@ services:
   pelias-opensearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
     profiles: ["routing"]
+    # Neither this nor pelias-api had a restart policy — both silently
+    # exited (255, likely the disk-pressure episode earlier this session)
+    # and stayed down for ~11h with nothing surfacing it until reverse-geocode
+    # lookups started coming back empty and getting cached that way for 30
+    # days (see routes::geo's fetch-failure-vs-empty-result fix).
+    restart: unless-stopped
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
@@ -556,6 +562,7 @@ services:
   pelias-api:
     image: pelias/api:latest
     profiles: ["routing"]
+    restart: unless-stopped
     environment:
       PELIAS_CONFIG: /code/pelias.json
     # The image's own default listen port is 3100, regardless of pelias.json
