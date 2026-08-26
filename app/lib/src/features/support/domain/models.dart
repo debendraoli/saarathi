@@ -4,6 +4,7 @@ class SupportMessage {
     required this.senderRole,
     required this.body,
     this.tripId,
+    this.orderId,
     this.createdAt,
   });
 
@@ -11,6 +12,7 @@ class SupportMessage {
   final String senderRole; // user | staff
   final String body;
   final String? tripId;
+  final String? orderId;
   final DateTime? createdAt;
 
   bool get fromStaff => senderRole == 'staff';
@@ -20,6 +22,7 @@ class SupportMessage {
         senderRole: (j['sender_role'] as String?) ?? 'user',
         body: (j['body'] as String?) ?? '',
         tripId: j['trip_id'] as String?,
+        orderId: j['order_id'] as String?,
         createdAt: j['created_at'] == null
             ? null
             : DateTime.tryParse(j['created_at'] as String),

@@ -30,7 +30,67 @@ struct SupportMessage {
     sender_role: String, // user | staff
     body: String,
     trip_id: Option<Uuid>,
+    order_id: Option<Uuid>,
     created_at: DateTime<Utc>,
+}
+
+/// A referenced trip must actually belong to the sender (rider, driver, or
+/// — for a delivery — the fulfilling merchant) — same participant rule
+/// `ws.rs::is_participant` uses for the trip-room socket, just without a
+/// staff exemption (staff replies never validate a reference; see
+/// `staff_reply`).
+async fn validate_trip_ref(st: &AppState, uid: Uuid, trip_id: Uuid) -> AppResult<()> {
+    let row: Option<(Uuid, Option<Uuid>, String)> =
+        sqlx::query_as("SELECT rider_id, driver_id, trip_type::text FROM trips WHERE id = $1")
+            .bind(trip_id)
+            .fetch_optional(&st.db)
+            .await?;
+    let Some((rider, driver, trip_type)) = row else {
+        return Err(AppError::BadRequest("referenced trip not found".into()));
+    };
+    if rider == uid || driver == Some(uid) {
+        return Ok(());
+    }
+    if trip_type == "delivery" {
+        let owns: Option<Uuid> = sqlx::query_scalar(
+            "SELECT m.id FROM orders o JOIN merchants m ON m.id = o.merchant_id \
+             WHERE o.trip_id = $1 AND m.owner_user_id = $2",
+        )
+        .bind(trip_id)
+        .bind(uid)
+        .fetch_optional(&st.db)
+        .await?;
+        if owns.is_some() {
+            return Ok(());
+        }
+    }
+    Err(AppError::Forbidden)
+}
+
+/// Same idea for a referenced order: the customer who placed it, or the
+/// owner of the merchant fulfilling it.
+async fn validate_order_ref(st: &AppState, uid: Uuid, order_id: Uuid) -> AppResult<()> {
+    let row: Option<(Uuid, Uuid)> =
+        sqlx::query_as("SELECT customer_id, merchant_id FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_optional(&st.db)
+            .await?;
+    let Some((customer_id, merchant_id)) = row else {
+        return Err(AppError::BadRequest("referenced order not found".into()));
+    };
+    if customer_id == uid {
+        return Ok(());
+    }
+    let owns: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM merchants WHERE id = $1 AND owner_user_id = $2")
+            .bind(merchant_id)
+            .bind(uid)
+            .fetch_optional(&st.db)
+            .await?;
+    if owns.is_some() {
+        return Ok(());
+    }
+    Err(AppError::Forbidden)
 }
 
 async fn my_thread(
@@ -38,7 +98,7 @@ async fn my_thread(
     AuthUser(claims): AuthUser,
 ) -> AppResult<Json<Vec<SupportMessage>>> {
     let rows: Vec<SupportMessage> = sqlx::query_as(
-        "SELECT id, sender_role, body, trip_id, created_at FROM support_messages \
+        "SELECT id, sender_role, body, trip_id, order_id, created_at FROM support_messages \
          WHERE user_id = $1 ORDER BY created_at ASC",
     )
     .bind(claims.sub)
@@ -55,6 +115,7 @@ async fn my_thread(
 struct NewMessage {
     body: String,
     trip_id: Option<Uuid>,
+    order_id: Option<Uuid>,
 }
 
 async fn send_message(
@@ -66,14 +127,21 @@ async fn send_message(
     if body.is_empty() {
         return Err(AppError::BadRequest("message body is required".into()));
     }
+    if let Some(trip_id) = b.trip_id {
+        validate_trip_ref(&st, claims.sub, trip_id).await?;
+    }
+    if let Some(order_id) = b.order_id {
+        validate_order_ref(&st, claims.sub, order_id).await?;
+    }
     let row: SupportMessage = sqlx::query_as(
-        "INSERT INTO support_messages (user_id, sender_id, sender_role, body, trip_id) \
-         VALUES ($1, $1, 'user', $2, $3) \
-         RETURNING id, sender_role, body, trip_id, created_at",
+        "INSERT INTO support_messages (user_id, sender_id, sender_role, body, trip_id, order_id) \
+         VALUES ($1, $1, 'user', $2, $3, $4) \
+         RETURNING id, sender_role, body, trip_id, order_id, created_at",
     )
     .bind(claims.sub)
     .bind(body)
     .bind(b.trip_id)
+    .bind(b.order_id)
     .fetch_one(&st.db)
     .await?;
 
@@ -137,7 +205,7 @@ async fn staff_thread(
     Path(user_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<SupportMessage>>> {
     let rows: Vec<SupportMessage> = sqlx::query_as(
-        "SELECT id, sender_role, body, trip_id, created_at FROM support_messages \
+        "SELECT id, sender_role, body, trip_id, order_id, created_at FROM support_messages \
          WHERE user_id = $1 ORDER BY created_at ASC",
     )
     .bind(user_id)
@@ -164,14 +232,15 @@ async fn staff_reply(
         return Err(AppError::BadRequest("message body is required".into()));
     }
     let row: SupportMessage = sqlx::query_as(
-        "INSERT INTO support_messages (user_id, sender_id, sender_role, body, trip_id, read_by_staff) \
-         VALUES ($1, $2, 'staff', $3, $4, true) \
-         RETURNING id, sender_role, body, trip_id, created_at",
+        "INSERT INTO support_messages (user_id, sender_id, sender_role, body, trip_id, order_id, read_by_staff) \
+         VALUES ($1, $2, 'staff', $3, $4, $5, true) \
+         RETURNING id, sender_role, body, trip_id, order_id, created_at",
     )
     .bind(user_id)
     .bind(claims.sub)
     .bind(body)
     .bind(b.trip_id)
+    .bind(b.order_id)
     .fetch_one(&st.db)
     .await?;
 

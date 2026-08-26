@@ -405,6 +405,11 @@ CREATE TABLE IF NOT EXISTS support_messages (
     created_at    timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS support_messages_user_idx ON support_messages (user_id, created_at);
+-- References a marketplace order (delivery) separately from `trip_id` —
+-- an order has no trip until a courier's dispatched, so a rider/merchant
+-- reporting an issue on a not-yet-dispatched order has nothing else to
+-- reference.
+ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS order_id uuid;
 
 -- DEPRECATED / frozen — the "unlimited for a period" subscription pass model
 -- has been retired in favour of an always-on per-ride credit draw (no fee ever

@@ -340,8 +340,13 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: Routes.support,
-        pageBuilder: (_, state) =>
-            _page(const SupportChatScreen(), key: state.pageKey),
+        pageBuilder: (_, state) {
+          final args = state.extra as SupportContextArgs?;
+          return _page(
+            SupportChatScreen(tripId: args?.tripId, orderId: args?.orderId),
+            key: state.pageKey,
+          );
+        },
       ),
       GoRoute(
         path: Routes.wallet,

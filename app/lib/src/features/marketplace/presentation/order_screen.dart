@@ -10,6 +10,7 @@ import '../../ride/data/ride_repository.dart';
 import '../../ride/domain/rating_tags.dart';
 import '../../ride/presentation/widgets/mini_route_map.dart';
 import '../../ride/presentation/widgets/rating_sheet.dart';
+import '../../support/presentation/support_chat_screen.dart';
 import '../data/marketplace_repository.dart';
 
 const _steps = <String>[
@@ -155,6 +156,15 @@ class OrderScreen extends ConsumerWidget {
                         _row(l.orderDiscount, -o.discountAmount),
                       _row(l.deliveryFee, o.deliveryFee),
                       _row(l.total, o.total, bold: true),
+                      const SizedBox(height: 24),
+                      OutlinedButton.icon(
+                        onPressed: () => context.push(
+                          Routes.support,
+                          extra: SupportContextArgs(orderId: o.id),
+                        ),
+                        icon: const Icon(Icons.support_agent_rounded),
+                        label: Text(l.getHelp),
+                      ),
                     ],
                   );
                 },

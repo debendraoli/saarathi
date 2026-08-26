@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../core/router/app_router.dart';
 import '../../../shared/geocode_cache.dart';
 import '../../../shared/widgets/common.dart';
 import '../../places/data/places_repository.dart';
+import '../../support/presentation/support_chat_screen.dart';
 import '../application/ride_controller.dart';
 import '../domain/models.dart';
 import 'widgets/mini_route_map.dart';
@@ -181,6 +184,15 @@ class _BodyState extends ConsumerState<_Body> {
             ),
           ),
         ],
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () => context.push(
+            Routes.support,
+            extra: SupportContextArgs(tripId: trip.id),
+          ),
+          icon: const Icon(Icons.support_agent_rounded),
+          label: Text(l.getHelp),
+        ),
       ],
     );
   }

@@ -12,12 +12,13 @@ class SupportRepository {
     return res.cast<Map<String, dynamic>>().map(SupportMessage.fromJson).toList();
   }
 
-  Future<SupportMessage> send(String body, {String? tripId}) async {
+  Future<SupportMessage> send(String body, {String? tripId, String? orderId}) async {
     final res = await _api.post(
       '/v1/support/messages',
       body: {
         'body': body,
         if (tripId != null) 'trip_id': tripId,
+        if (orderId != null) 'order_id': orderId,
       },
     ) as Map<String, dynamic>;
     return SupportMessage.fromJson(res);
