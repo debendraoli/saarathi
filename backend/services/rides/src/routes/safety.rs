@@ -73,6 +73,7 @@ async fn trigger(
 
     // Alert the trip channel + notify the counterpart. Ops watch the SOS console.
     st.hub.publish(
+        "trip",
         id,
         json!({ "type": "sos", "incident_id": incident.id, "user_id": claims.sub, "lat": b.lat, "lng": b.lng })
             .to_string(),

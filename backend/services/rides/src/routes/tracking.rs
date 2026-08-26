@@ -152,7 +152,7 @@ pub(crate) async fn do_post_location(
     .execute(&st.db)
     .await;
 
-    st.hub.publish(id, payload.to_string());
+    st.hub.publish("trip", id, payload.to_string());
     maybe_auto_complete(st, id, claims.sub, b.lat, b.lng).await;
     Ok(())
 }

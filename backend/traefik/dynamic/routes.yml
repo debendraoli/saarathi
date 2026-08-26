@@ -56,7 +56,7 @@ http:
       entryPoints: ["web"]
       service: notify
       middlewares: ["cors", "ratelimit"]
-      rule: PathPrefix(`/v1/notifications`)
+      rule: PathPrefix(`/v1/notifications`) || PathPrefix(`/v1/staff/ws`)
 
     payments:
       entryPoints: ["web"]

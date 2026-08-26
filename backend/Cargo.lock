@@ -2718,9 +2718,11 @@ name = "saarathi-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-nats",
  "async-trait",
  "axum",
  "chrono",
+ "futures-util",
  "geo",
  "h3o",
  "hex",
@@ -2734,6 +2736,7 @@ dependencies = [
  "sha2 0.10.9",
  "sqlx",
  "thiserror",
+ "tokio",
  "tracing",
  "uuid",
 ]

@@ -89,7 +89,7 @@ async fn is_participant(
 
 async fn socket_loop(socket: WebSocket, st: AppState, uid: Uuid, trip: Uuid) {
     let (mut sink, mut stream) = socket.split();
-    let mut rx = st.hub.subscribe(trip).await;
+    let mut rx = st.hub.subscribe("trip", trip).await;
 
     // Forward broadcast messages to this client.
     let send_task = tokio::spawn(async move {
@@ -101,6 +101,7 @@ async fn socket_loop(socket: WebSocket, st: AppState, uid: Uuid, trip: Uuid) {
     });
 
     st.hub.publish(
+        "trip",
         trip,
         json!({ "type": "presence", "event": "join", "sender_id": uid }).to_string(),
     );
@@ -136,7 +137,7 @@ async fn socket_loop(socket: WebSocket, st: AppState, uid: Uuid, trip: Uuid) {
                         .bind(&enriched)
                         .execute(&st.db)
                         .await;
-                        st.hub.publish(trip, enriched.to_string());
+                        st.hub.publish("trip", trip, enriched.to_string());
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(_)) => break,
@@ -152,6 +153,7 @@ async fn socket_loop(socket: WebSocket, st: AppState, uid: Uuid, trip: Uuid) {
     send_task.abort();
     saarathi_core::presence::mark_offline(&mut presence_conn, uid).await;
     st.hub.publish(
+        "trip",
         trip,
         json!({ "type": "presence", "event": "leave", "sender_id": uid }).to_string(),
     );

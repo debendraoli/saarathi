@@ -3,7 +3,7 @@
 //! `ws.rs`'s trip-scoped socket, which only exists once a driver is already
 //! attached to a particular trip. This is what lets a dispatch offer reach
 //! the driver the instant it's created (see `dispatch::dispatch_trip`'s
-//! `st.hub.publish(driver_id, ...)`) instead of only ever being discovered
+//! `st.hub.publish("driver", driver_id, ...)`) instead of only ever being discovered
 //! by the driver app's fallback poll (`GET /v1/driver/offers`).
 //!
 //! Connect: `GET /v1/driver/ws?token=<jwt>` (driver role only). Receive-only
@@ -47,7 +47,7 @@ pub async fn driver_ws_handler(
 
 async fn driver_socket_loop(socket: WebSocket, st: AppState, driver_id: uuid::Uuid) {
     let (mut sink, mut stream) = socket.split();
-    let mut rx = st.hub.subscribe(driver_id).await;
+    let mut rx = st.hub.subscribe("driver", driver_id).await;
 
     let mut presence_conn = st.redis.clone();
     saarathi_core::presence::mark_online(&mut presence_conn, driver_id).await;

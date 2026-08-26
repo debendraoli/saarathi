@@ -25,3 +25,6 @@ anyhow = { workspace = true }
 h3o = { workspace = true }
 geo = { workspace = true }
 redis = { workspace = true }
+async-nats = { workspace = true }
+futures-util = { workspace = true }
+tokio = { workspace = true }

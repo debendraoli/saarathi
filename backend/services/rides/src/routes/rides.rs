@@ -663,6 +663,7 @@ pub(crate) async fn do_update_status(
     }
 
     st.hub.publish(
+        "trip",
         id,
         json!({ "type": "status", "status": status }).to_string(),
     );
@@ -762,6 +763,7 @@ pub(crate) async fn complete_trip(st: &AppState, id: Uuid, actor: Uuid) -> AppRe
     tx.commit().await?;
 
     st.hub.publish(
+        "trip",
         id,
         json!({ "type": "status", "status": "completed" }).to_string(),
     );

@@ -131,6 +131,7 @@ pub(crate) async fn do_place_bid(
     .await?;
 
     st.hub.publish(
+        "trip",
         id,
         json!({ "type": "bid", "trip_id": id, "amount": body.amount, "kind": kind }).to_string(),
     );
@@ -379,6 +380,7 @@ async fn finalize_bid(
     tx.commit().await?;
 
     st.hub.publish(
+        "trip",
         trip.id,
         json!({ "type": "status", "status": "accepted", "driver_id": driver_id }).to_string(),
     );
@@ -432,6 +434,7 @@ pub(crate) async fn do_change_ask(
     .await?;
 
     st.hub.publish(
+        "trip",
         id,
         json!({ "type": "ask", "trip_id": id, "amount": ask }).to_string(),
     );

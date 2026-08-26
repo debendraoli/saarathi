@@ -15,6 +15,7 @@ use futures_util::StreamExt;
 use saarathi_core::authn::{AuthUser, HasJwtSecret};
 use saarathi_core::domain::notif;
 use saarathi_core::events::{NotifyRequest, NOTIFY_SUBJECT};
+use saarathi_core::hub::Hub;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
@@ -26,11 +27,13 @@ use uuid::Uuid;
 
 mod fcm;
 mod sms;
+mod staff_ws;
 
 #[derive(Clone)]
 struct AppState {
     db: PgPool,
     jwt_secret: Arc<String>,
+    hub: Hub,
 }
 
 impl HasJwtSecret for AppState {
@@ -90,26 +93,44 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Consume notification requests off the bus. If NATS is down we still serve
-    // the (read-only) inbox — delivery resumes when the bus returns.
+    // the (read-only) inbox — delivery resumes when the bus returns. The same
+    // client also backs `hub` below (the staff WS's live push) — one
+    // connection, two uses of the bus.
     let fcm = fcm::FcmSender::from_env();
     let sms = sms::SmsSender::from_env().map(Arc::new);
-    match async_nats::connect(&nats_url).await {
+    let nats = match async_nats::connect(&nats_url).await {
         Ok(client) => {
-            tokio::spawn(consume(client, pool.clone(), fcm.clone(), sms.clone(), redis.clone()));
             tracing::info!(%nats_url, "notify: subscribed to {NOTIFY_SUBJECT}");
+            Some(client)
         }
-        Err(e) => tracing::warn!(error = %e, "notify: NATS unavailable; inbox is read-only"),
+        Err(e) => {
+            tracing::warn!(error = %e, "notify: NATS unavailable; inbox is read-only, staff push disabled");
+            None
+        }
+    };
+    let hub = Hub::new(nats.clone());
+    if let Some(client) = nats {
+        tokio::spawn(consume(
+            client,
+            pool.clone(),
+            fcm.clone(),
+            sms.clone(),
+            redis.clone(),
+            hub.clone(),
+        ));
     }
 
     let state = AppState {
         db: pool,
         jwt_secret: Arc::new(jwt_secret),
+        hub,
     };
     let app = Router::new()
         .route("/health", get(health))
         .route("/v1/notifications", get(inbox))
         .route("/v1/notifications/{id}/read", post(mark_read))
         .route("/v1/notifications/read-all", post(read_all))
+        .route("/v1/staff/ws", get(staff_ws::staff_ws_handler))
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -128,6 +149,7 @@ async fn consume(
     fcm: Option<Arc<fcm::FcmSender>>,
     sms: Option<Arc<sms::SmsSender>>,
     redis: Option<redis::aio::ConnectionManager>,
+    hub: Hub,
 ) {
     let mut sub = match client.subscribe(NOTIFY_SUBJECT).await {
         Ok(s) => s,
@@ -139,7 +161,8 @@ async fn consume(
     while let Some(msg) = sub.next().await {
         match serde_json::from_slice::<NotifyRequest>(&msg.payload) {
             Ok(req) => {
-                if let Err(e) = deliver(&pool, &req, fcm.as_deref(), sms.as_deref(), redis.clone()).await
+                if let Err(e) =
+                    deliver(&pool, &req, fcm.as_deref(), sms.as_deref(), redis.clone(), &hub).await
                 {
                     tracing::warn!(error = %e, "notify: delivery failed");
                 }
@@ -155,18 +178,42 @@ async fn deliver(
     fcm: Option<&fcm::FcmSender>,
     sms: Option<&sms::SmsSender>,
     mut redis: Option<redis::aio::ConnectionManager>,
+    hub: &Hub,
 ) -> anyhow::Result<()> {
     if !req.silent {
-        sqlx::query(
-            "INSERT INTO notifications (user_id, class, title, body, link) VALUES ($1, $2, $3, $4, $5)",
+        let row: (Uuid, DateTime<Utc>) = sqlx::query_as(
+            "INSERT INTO notifications (user_id, class, title, body, link) \
+             VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at",
         )
         .bind(req.user_id)
         .bind(&req.class)
         .bind(&req.title)
         .bind(&req.body)
         .bind(&req.link)
-        .execute(pool)
+        .fetch_one(pool)
         .await?;
+
+        // Push straight to a connected staff dashboard the instant this
+        // lands, instead of it waiting to be discovered by the next poll —
+        // same idea as `dispatch_trip` pushing driver offers over
+        // `driver_ws` rather than leaving it to `GET /v1/driver/offers`
+        // alone. Non-staff recipients (riders/drivers) have no staff socket
+        // subscribed to their id, so this is a no-op for them either way;
+        // harmless and cheap to always call rather than checking role here.
+        hub.publish(
+            "staff",
+            req.user_id,
+            json!({
+                "type": "notification",
+                "id": row.0,
+                "class": req.class,
+                "title": req.title,
+                "body": req.body,
+                "link": req.link,
+                "created_at": row.1.to_rfc3339(),
+            })
+            .to_string(),
+        );
     }
 
     // Skip the tray notification (and, below, the SMS fallback) entirely

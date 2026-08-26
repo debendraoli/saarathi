@@ -124,7 +124,7 @@ services:
       requests: { cpu: 50m, memory: 96Mi }
       limits: { cpu: 250m, memory: 256Mi }
     hpa: { minReplicas: 1, maxReplicas: 3, targetCPUUtilization: 75 }
-    routeMatch: PathPrefix(`/v1/notifications`)
+    routeMatch: PathPrefix(`/v1/notifications`) || PathPrefix(`/v1/staff/ws`)
     config:
       port: "8083"
 

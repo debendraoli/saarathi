@@ -332,6 +332,7 @@ async fn accept_offer(
 
     tx.commit().await?;
     st.hub.publish(
+        "trip",
         id,
         json!({ "type": "status", "status": "accepted", "driver_id": claims.sub }).to_string(),
     );
@@ -397,6 +398,7 @@ async fn ops_assign(
     .execute(&st.db)
     .await?;
     st.hub.publish(
+        "trip",
         id,
         json!({ "type": "status", "status": "accepted", "driver_id": body.driver_id, "by": "ops" })
             .to_string(),

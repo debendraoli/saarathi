@@ -10,7 +10,6 @@ pub mod dispatch;
 pub mod driver_ws;
 pub mod error;
 pub mod flags;
-pub mod hub;
 pub mod ledger;
 pub mod models;
 pub mod notify;
@@ -26,8 +25,8 @@ pub mod surge;
 pub mod ws;
 
 use config::Config;
-use hub::Hub;
 use routing::Router;
+use saarathi_core::hub::Hub;
 use state::AppState;
 use std::sync::Arc;
 

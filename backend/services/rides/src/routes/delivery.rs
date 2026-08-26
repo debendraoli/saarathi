@@ -384,6 +384,7 @@ async fn deliver(
     tx.commit().await?;
 
     st.hub.publish(
+        "trip",
         id,
         json!({ "type": "status", "status": "completed" }).to_string(),
     );

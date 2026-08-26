@@ -12,6 +12,7 @@ pub mod campaigns;
 pub mod domain;
 pub mod events;
 pub mod geo_h3;
+pub mod hub;
 pub mod idempotency;
 pub mod ledger;
 pub mod legal;

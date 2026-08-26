@@ -537,6 +537,7 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
         // this reaches it immediately instead of waiting on the fallback
         // poll below to notice.
         st.hub.publish(
+            "driver",
             did,
             serde_json::json!({
                 "type": "offer",

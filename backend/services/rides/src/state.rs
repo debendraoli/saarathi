@@ -1,8 +1,8 @@
 //! Shared application state.
 
 use crate::config::Config;
-use crate::hub::Hub;
 use crate::routing::Router;
+use saarathi_core::hub::Hub;
 use sqlx::PgPool;
 use std::sync::Arc;
 
