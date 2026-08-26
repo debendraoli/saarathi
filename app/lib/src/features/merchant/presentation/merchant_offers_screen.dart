@@ -82,15 +82,45 @@ class MerchantOffersScreen extends ConsumerWidget {
   }
 }
 
-class _OfferTile extends StatelessWidget {
+class _OfferTile extends StatefulWidget {
   const _OfferTile({required this.offer, this.onDeactivate});
   final MerchantOffer offer;
-  final VoidCallback? onDeactivate;
+  final Future<void> Function()? onDeactivate;
+
+  @override
+  State<_OfferTile> createState() => _OfferTileState();
+}
+
+class _OfferTileState extends State<_OfferTile> {
+  // Unlike every other mutating action on this screen, deactivation had no
+  // disable-on-tap and no error handling — a double-tap could fire two
+  // deactivateOffer calls, and any network failure was swallowed as an
+  // unhandled Future error with zero feedback (the offer would silently
+  // appear not to deactivate).
+  bool _busy = false;
+
+  Future<void> _deactivate() async {
+    final onDeactivate = widget.onDeactivate;
+    if (onDeactivate == null || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await onDeactivate();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppL10n.of(context).errorGeneric)),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
+    final offer = widget.offer;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
@@ -111,10 +141,10 @@ class _OfferTile extends StatelessWidget {
           offer.active ? l.storeOfferActive : l.storeOfferInactive,
           style: TextStyle(color: offer.active ? scheme.primary : scheme.outline),
         ),
-        trailing: onDeactivate == null
+        trailing: widget.onDeactivate == null
             ? null
             : TextButton(
-                onPressed: onDeactivate,
+                onPressed: _busy ? null : _deactivate,
                 child: Text(l.storeOfferDeactivate),
               ),
       ),

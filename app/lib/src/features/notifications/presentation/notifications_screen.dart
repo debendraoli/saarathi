@@ -87,9 +87,19 @@ class NotificationsScreen extends ConsumerWidget {
                           }
                           final link = n.link;
                           if (link == null) return;
+                          if (!context.mounted) return;
                           final target = routeForDeepLink(Uri.parse(link));
-                          if (target != null && context.mounted) {
+                          if (target != null) {
                             context.push(target);
+                          } else {
+                            // The notification is now permanently marked
+                            // read with nothing to show for the tap — the
+                            // target trip/order/etc. no longer resolves
+                            // (deleted, expired). Previously this was
+                            // silent, indistinguishable from a broken tap.
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(l.notificationTargetGone)),
+                            );
                           }
                         },
                 );

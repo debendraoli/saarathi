@@ -336,6 +336,7 @@
   "jobTypesDelivery": "डेलिभरी",
   "newJobOffer": "नयाँ काम अफर",
   "offerExpired": "यो अफरको म्याद सकियो — नयाँ एउटा पहिले नै आउँदै हुन सक्छ।",
+  "notificationTargetGone": "यसले अब कहीं पनि लैजाँदैन — यसको म्याद सकिएको हुन सक्छ।",
   "netEarning": "तपाईंको कमाइ",
   "accept": "स्वीकार",
   "decline": "अस्वीकार",

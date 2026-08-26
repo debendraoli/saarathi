@@ -155,6 +155,21 @@ class _StoreCardState extends ConsumerState<_StoreCard> {
   bool? _pendingOpen;
 
   @override
+  void didUpdateWidget(_StoreCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // `_open` was only ever seeded once at first build — a refresh that
+    // hands this widget a new `Merchant` (pull-to-refresh, another staff
+    // device toggling it, an auto-close-after-hours job) never reached the
+    // switch until this whole card was torn down and rebuilt fresh. Skip
+    // the resync while our own optimistic toggle is still in flight so it
+    // doesn't get clobbered by a response that simply hasn't caught up yet.
+    if (_pendingOpen == null &&
+        widget.merchant.isOpen != oldWidget.merchant.isOpen) {
+      _open = widget.merchant.isOpen;
+    }
+  }
+
+  @override
   void dispose() {
     _retryTimer?.cancel();
     _connSub?.close();

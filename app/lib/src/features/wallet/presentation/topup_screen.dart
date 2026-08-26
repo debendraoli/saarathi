@@ -115,9 +115,21 @@ class _TopupScreenState extends ConsumerState<TopupScreen>
       _phase = _Phase.waiting;
       _busy = true;
     });
-    final result = await ref
-        .read(currentWalletRepositoryProvider)
-        .confirmTopup(intent.reference);
+    final TopupResult result;
+    try {
+      result = await ref
+          .read(currentWalletRepositoryProvider)
+          .confirmTopup(intent.reference);
+    } catch (_) {
+      // `confirmTopup` rethrows on a genuine network failure (as opposed to
+      // a real "payment not completed" response, which it already maps to
+      // `TopupStatus.failed`) — previously uncaught here, leaving `_busy`
+      // stuck true and the button permanently disabled with no way to
+      // retry short of leaving and re-entering the screen.
+      Haptics.error();
+      if (mounted) setState(() => _busy = false);
+      return;
+    }
     if (!mounted) return;
     switch (result.status) {
       case TopupStatus.confirmed:

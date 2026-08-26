@@ -59,8 +59,16 @@ class ApiClient {
           handler.next(options);
         },
         onError: (e, handler) async {
+          // Capped to one retry per original request via the `_retried`
+          // marker below — without it, a token that refresh reports success
+          // for but that the backend keeps rejecting downstream (a
+          // permanently revoked/blacklisted token, or any bug on that path)
+          // would refresh→retry→401 indefinitely for the same request, with
+          // no backoff, since each retry is itself a fresh request that
+          // re-enters this same interceptor.
           if (e.response?.statusCode == 401 &&
-              !_isAuthPath(e.requestOptions.path)) {
+              !_isAuthPath(e.requestOptions.path) &&
+              e.requestOptions.extra['_retried'] != true) {
             final ok = await _refresh();
             if (ok) {
               try {
@@ -94,7 +102,11 @@ class ApiClient {
       o.path,
       data: o.data,
       queryParameters: o.queryParameters,
-      options: Options(method: o.method, headers: headers),
+      options: Options(
+        method: o.method,
+        headers: headers,
+        extra: {...o.extra, '_retried': true},
+      ),
     );
   }
 

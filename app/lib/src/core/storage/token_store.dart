@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,11 +31,24 @@ class TokenStore {
     await _storage.delete(key: _kRefresh);
   }
 
+  Future<String>? _deviceIdInFlight;
+
   /// This install's persistent id — generated once and kept forever
   /// (survives sign-out/sign-in), so the backend can tell "this same
   /// device logging back in" apart from "a genuinely different device"
   /// when enforcing single-device-per-account.
-  Future<String> get deviceId async {
+  Future<String> get deviceId {
+    // Two concurrent callers (e.g. a refresh request and something else
+    // reading this on the same launch) racing the read-then-write below
+    // could otherwise both see no existing id, each generate a different
+    // one, and the second write silently wins — the id used in one
+    // in-flight request could then differ from what's cached elsewhere in
+    // memory this launch. Dedupe concurrent calls onto one shared attempt.
+    return _deviceIdInFlight ??= _readOrCreateDeviceId()
+        .whenComplete(() => _deviceIdInFlight = null);
+  }
+
+  Future<String> _readOrCreateDeviceId() async {
     final existing = await _storage.read(key: _kDeviceId);
     if (existing != null && existing.isNotEmpty) return existing;
     final bytes = List<int>.generate(16, (_) => Random.secure().nextInt(256));
