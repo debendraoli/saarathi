@@ -62,7 +62,8 @@ jobs:
       - name: Build Flutter iOS artifacts (unsigned)
         run: |
           flutter build ios --release --no-codesign \
-            --dart-define=SAARATHI_API_BASE=${{ secrets.SAARATHI_API_BASE_PROD }}
+            --dart-define=SAARATHI_API_BASE=${{ secrets.SAARATHI_API_BASE_PROD }} \
+            --dart-define=SAARATHI_TILE_URL=${{ secrets.SAARATHI_TILE_URL_PROD }}
 
       - name: Archive + upload to TestFlight
         working-directory: app/ios

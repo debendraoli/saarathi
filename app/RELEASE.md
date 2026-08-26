@@ -47,6 +47,7 @@ you can generate. One-time setup:
 | `ANDROID_KEY_PASSWORD` | key password |
 | `PLAY_STORE_JSON_KEY` | the full contents of the service-account JSON key (paste as-is, it's already JSON) |
 | `SAARATHI_API_BASE_PROD` | your production API gateway URL, e.g. `https://api.saarathi.app` |
+| `SAARATHI_TILE_URL_PROD` | self-hosted tile server URL template, e.g. `https://tiles.saarathi.app/styles/basic-preview/{z}/{x}/{y}.png` — see the backend Helm chart's "Map tiles bootstrap" section. Without this the app silently falls back to the public tile.openstreetmap.org, not meant for app traffic |
 
 ## Apple / TestFlight
 
@@ -83,13 +84,16 @@ you can generate. One-time setup:
 | `ASC_KEY_CONTENT` | `base64 -i AuthKey_XXXXXXXXXX.p8 \| pbcopy` |
 | `CI_KEYCHAIN_PASSWORD` | any random string — password for the throwaway CI keychain, not tied to anything else |
 | `SAARATHI_API_BASE_PROD` | same value as the Android secret above |
+| `SAARATHI_TILE_URL_PROD` | same value as the Android secret above |
 
 ## Local release builds (no CI)
 
 Android:
 ```bash
 cp android/key.properties.example android/key.properties   # then fill it in
-flutter build appbundle --release --dart-define=SAARATHI_API_BASE=https://api.saarathi.app
+flutter build appbundle --release \
+  --dart-define=SAARATHI_API_BASE=https://api.saarathi.app \
+  --dart-define=SAARATHI_TILE_URL=https://tiles.saarathi.app/styles/basic-preview/{z}/{x}/{y}.png
 ```
 
 iOS needs a full Xcode install (this repo was scaffolded without one available

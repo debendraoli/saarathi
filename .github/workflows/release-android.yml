@@ -57,7 +57,8 @@ jobs:
       - name: Build App Bundle
         run: |
           flutter build appbundle --release \
-            --dart-define=SAARATHI_API_BASE=${{ secrets.SAARATHI_API_BASE_PROD }}
+            --dart-define=SAARATHI_API_BASE=${{ secrets.SAARATHI_API_BASE_PROD }} \
+            --dart-define=SAARATHI_TILE_URL=${{ secrets.SAARATHI_TILE_URL_PROD }}
 
       - name: Write Play Store service-account key
         run: echo '${{ secrets.PLAY_STORE_JSON_KEY }}' > android/fastlane/play-store-key.json

@@ -1,0 +1,59 @@
+{{/*
+One-off: builds the vector tileset tileserver-gl serves — a few hundred MB,
+minutes to build (not the hours a classic osm2pgsql+mod_tile raster
+pipeline would take). Not triggered automatically by `helm upgrade`, same
+reasoning as the Pelias import Jobs (slow, shouldn't block/re-run on every
+deploy) — run manually, once, after the first install:
+
+  kubectl apply -f <(helm template saarathi backend/deploy/helm/saarathi -s templates/tiles-build-job.yaml)
+  kubectl -n saarathi wait --for=condition=complete job/tiles-build --timeout=20m
+
+Then roll out tileserver-gl (tileserver-gl-deployment.yaml) — it reads the
+same PVC this Job writes to. Re-running later (e.g. to refresh with newer
+OSM data) means deleting the old Job first — Jobs are immutable once
+created:
+
+  kubectl -n saarathi delete job tiles-build
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tiles-data
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "tiles" "Release" .Release) | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.tiles.storage }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tiles-build
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "tiles" "Release" .Release) | nindent 4 }}
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tiles-build
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: tiles-build
+          image: {{ .Values.tiles.build.image }}
+          args:
+            - --download
+            - --area={{ .Values.tiles.build.area }}
+            - --output=/data/nepal.mbtiles
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tiles-data

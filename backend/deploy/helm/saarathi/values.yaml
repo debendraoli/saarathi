@@ -92,6 +92,7 @@ services:
       || PathPrefix(`/v1/driver/analytics`) || PathPrefix(`/v1/driver/credits`)
       || PathPrefix(`/v1/driver/heartbeat`) || PathPrefix(`/v1/driver/offers`)
       || PathPrefix(`/v1/driver/offline`) || PathPrefix(`/v1/driver/online`)
+      || PathPrefix(`/v1/driver/ws`)
       || PathPrefix(`/v1/admin/analytics`) || PathPrefix(`/v1/admin/cancellations`)
       || PathPrefix(`/v1/admin/credit-plans`) || PathPrefix(`/v1/admin/flags`)
       || PathPrefix(`/v1/admin/leaderboard`) || PathPrefix(`/v1/admin/ledger`)
@@ -107,6 +108,10 @@ services:
       port: "8082"
       routingServiceUrl: "http://routing"
       geocoderUrl: "http://pelias-api"
+      # Best-effort redispatch call when a driver cancels a delivery
+      # pre-pickup (see routes/rides.rs) — same plain-service-name
+      # convention as routingServiceUrl/ridesServiceUrl above.
+      merchantServiceUrl: "http://merchant"
       # Coturn runs OUTSIDE this cluster on its own bare instance (see
       # scripts/coturn-setup.sh) — a wide UDP relay port range doesn't suit
       # hostNetwork tricks on shared cluster nodes. Point at that box's public
@@ -240,6 +245,25 @@ valhalla:
   storage: 5Gi
   tileUrls: "https://download.geofabrik.de/asia/nepal-latest.osm.pbf"
   serverThreads: "4"
+
+# Self-hosted raster map tiles for the app's TileLayer — same Geofabrik
+# extract Valhalla/Pelias already use, rendered into a single vector
+# tileset with Planetiler (one-off Job, tiles-build-job.yaml) and served
+# raster-on-request by tileserver-gl (deployment, tileserver-gl-deployment.yaml).
+# The app was silently falling back to the public tile.openstreetmap.org —
+# not meant for app traffic — because nothing here ever stood this up; see
+# the local docker-compose.yml commit this was ported from for the full story.
+tiles:
+  build:
+    image: ghcr.io/onthegomap/planetiler:latest
+    area: nepal
+  server:
+    image: maptiler/tileserver-gl:latest
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: 1000m, memory: 1Gi }
+    hpa: { minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 75 }
+  storage: 5Gi
 
 pelias:
   # Despite the field/resource name, this runs real Elasticsearch, not

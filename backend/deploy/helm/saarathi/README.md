@@ -87,6 +87,38 @@ old Jobs first — Jobs are immutable once created:
 kubectl -n saarathi delete job pelias-import-openstreetmap pelias-import-whosonfirst
 ```
 
+## Map tiles bootstrap (one-time, after the first install)
+
+Same idea as Pelias above — `tileserver-gl` needs a tileset built before it
+has anything to serve, and building one is slow enough (a few hundred MB
+download plus a few minutes of processing) that it shouldn't block or
+re-run on every `helm upgrade`:
+
+```bash
+kubectl apply -f <(helm template saarathi backend/deploy/helm/saarathi -s templates/tiles-build-job.yaml)
+kubectl -n saarathi wait --for=condition=complete job/tiles-build --timeout=20m
+```
+
+Then a normal `helm upgrade --install` rolls out `tileserver-gl` (it mounts
+the same PVC the Job just wrote to). Point the app's
+`SAARATHI_TILE_URL` build define at
+`https://tiles.<domain>/styles/basic-preview/{z}/{x}/{y}.png`.
+
+Without this, the app's `TileLayer` has no explicit `tileProvider` and
+silently falls back to the public `tile.openstreetmap.org` — not meant for
+app traffic, and the root cause of a persistent map-blur issue found and
+fixed this same pass (see `saarathi_map_view.dart`'s `overrideFreshAge`
+comment for the other half of that fix: the built-in tile cache was active
+the whole time, it just never considered anything fresh because this
+server doesn't send cache-freshness headers).
+
+Re-running later (e.g. to refresh with newer OSM data) means deleting the
+old Job first — Jobs are immutable once created:
+
+```bash
+kubectl -n saarathi delete job tiles-build
+```
+
 Everything above was verified end-to-end against a real cluster-equivalent
 local stack (not just written from the upstream Pelias docs) — a few things
 the upstream examples don't make obvious, all already fixed in these
