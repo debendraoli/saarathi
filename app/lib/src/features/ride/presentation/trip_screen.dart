@@ -223,10 +223,6 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                         id: 'self',
                       ),
                   ];
-                  // Navigation-mode camera (zoom in, follow, heading-up
-                  // rotate) for either leg — driving to pickup or to the
-                  // destination — but not while still searching/unassigned.
-                  final navTarget = trip.isActive ? driverPos : null;
                   return Stack(
                     children: [
                       searching
@@ -262,14 +258,28 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                               locateButtonBottomOffset:
                                   MediaQuery.of(context).size.height *
                                       _sheetClearance,
-                              navigationTarget: navTarget,
-                              // Keep this small in-trip map north-up — the
-                              // vehicle pin now rotates in place via its own
-                              // `heading` instead. The fullscreen
-                              // NavigationScreen is the one place that still
-                              // spins the map itself (its own dedicated
-                              // heading-up turn-by-turn view).
-                              rotateMap: false,
+                              // Deliberately not `navigationTarget` — that
+                              // drives its camera glide off every heading
+                              // update, and the device compass fires many
+                              // times a second even stationary. On this
+                              // small in-trip map that churn was reliably
+                              // producing a `_dependents.isEmpty` framework
+                              // crash and a momentarily-flipped marker
+                              // (confirmed live, reproduced while
+                              // rotating/testing the phone) — a >3° throttle
+                              // on the animation restart wasn't enough to
+                              // fully rule it out. `autoFitPins` instead:
+                              // its own change-detection only looks at pin
+                              // *positions*, never heading, so compass noise
+                              // can't trigger it at all — it only re-fits
+                              // when the driver's point actually moves
+                              // (~5s GPS ping cadence). The vehicle pin
+                              // still turns in place via its own `heading`;
+                              // only the *camera* auto-follow moved to the
+                              // fullscreen NavigationScreen, the one place
+                              // that dedicated heading-up nav experience
+                              // actually belongs.
+                              autoFitPins: true,
                             ),
                       // Invisible: routes incoming calls to the call screen.
                       _CallWatcher(tripId: tripId),
