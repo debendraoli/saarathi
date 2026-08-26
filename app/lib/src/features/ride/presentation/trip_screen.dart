@@ -1987,6 +1987,7 @@ class _RiderLocationPublisherState
   }
 
   Future<void> _post(Position pos) async {
+    final previous = _lastPosted;
     _lastPosted = pos;
     try {
       await ref.read(rideRepositoryProvider).postLocation(
@@ -1997,7 +1998,13 @@ class _RiderLocationPublisherState
             speed: pos.speed,
           );
     } catch (_) {
-      // Best-effort — see the class doc comment for why no retry queue.
+      // Roll back so the next moved-30m check is measured from the last
+      // position that actually reached the backend, not this failed one —
+      // same reasoning as _DriverLocationPublisherState._post. Without this,
+      // a single failed post silently rebased the threshold onto a point
+      // the backend never saw, swallowing the rider's next 30m of movement
+      // until the keep-alive tick happened to catch up.
+      _lastPosted = previous;
     }
   }
 
