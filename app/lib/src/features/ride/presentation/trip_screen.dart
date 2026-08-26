@@ -146,6 +146,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                 data: (trip) {
                   final myId = ref.watch(authControllerProvider).user?.id;
                   final iAmDriver = myId != null && myId == trip.driverId;
+                  final iAmRider = myId != null && myId == trip.riderId;
                   // The driver's own device always prefers its own local GPS
                   // fix (see `localDriverPositionProvider`) over the one
                   // that's round-tripped through `POST location` → backend →
@@ -184,6 +185,16 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                       _lastRouteGeometry ?? [trip.origin, trip.dest];
                   final searching = trip.status == TripStatus.searching ||
                       trip.status == TripStatus.requested;
+                  // The rider's own "you are here" arrow, shown only while
+                  // there's no driver marker yet to orient by instead —
+                  // superseded the instant one is assigned (`driverLoc`
+                  // above already prefers the driver once available). Not
+                  // for a driver (that's just their own live GPS dot, no
+                  // separate marker needed) or a merchant (who only cares
+                  // about the courier's heading, not their own).
+                  final selfPos = iAmRider && driverLoc == null
+                      ? ref.watch(localSelfPositionProvider)
+                      : null;
                   final fixedPins = [
                     MapPin(
                       trip.origin,
@@ -202,6 +213,14 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                         Theme.of(context).colorScheme.tertiary,
                         heading: driverPos?.heading,
                         id: 'driver',
+                      ),
+                    if (selfPos != null)
+                      MapPin(
+                        selfPos.point,
+                        Icons.navigation_rounded,
+                        routeLineColor,
+                        heading: selfPos.heading,
+                        id: 'self',
                       ),
                   ];
                   // Navigation-mode camera (zoom in, follow, heading-up
@@ -254,6 +273,10 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                             ),
                       // Invisible: routes incoming calls to the call screen.
                       _CallWatcher(tripId: tripId),
+                      // Invisible: feeds the rider's own "you are here"
+                      // arrow above until a driver is assigned.
+                      if (iAmRider && driverLoc == null && trip.isActive)
+                        const _SelfLocationWatcher(),
                       if (!online)
                         const SafeArea(
                           child: Align(
@@ -1735,6 +1758,92 @@ class _DriverLocationPublisherState
     // or the driver going idle) — the local nav camera should show nothing
     // until a fresh trip actually starts reporting again.
     ref.read(localDriverPositionProvider.notifier).state = null;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+/// Invisible: feeds the rider's own live position + device heading to
+/// [localSelfPositionProvider] while there's no driver marker yet to show
+/// instead — the rider's "own compass" during the search/pre-assignment
+/// phase. Same GPS/compass blend as [_DriverLocationPublisher] but nothing
+/// is posted to the backend — this is purely a local display concern, the
+/// rider's own location was never something the backend needed.
+class _SelfLocationWatcher extends ConsumerStatefulWidget {
+  const _SelfLocationWatcher();
+
+  @override
+  ConsumerState<_SelfLocationWatcher> createState() =>
+      _SelfLocationWatcherState();
+}
+
+class _SelfLocationWatcherState extends ConsumerState<_SelfLocationWatcher> {
+  static const _minHeadingSpeedMs = 1.0;
+
+  StreamSubscription<Position>? _sub;
+  ProviderSubscription<AsyncValue<double?>>? _compassSub;
+  Position? _latest;
+  double? _compassHeading;
+  double? _lastHeading;
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+  }
+
+  Future<void> _start() async {
+    if (!await ensureLocationPermission() ||
+        !await Geolocator.isLocationServiceEnabled()) {
+      return;
+    }
+    if (!mounted) return;
+    _sub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+      ),
+    ).listen(_onPosition);
+    _compassSub = ref.listenManual(compassHeadingProvider, (prev, next) {
+      // Same in-flight-event-vs-dispose race noted on
+      // `_DriverLocationPublisherState`'s own compass listener.
+      if (!mounted) return;
+      final heading = next.valueOrNull;
+      if (heading == null) return;
+      _compassHeading = heading;
+      final pos = _latest;
+      if (pos != null && pos.speed <= _minHeadingSpeedMs) {
+        _lastHeading = heading;
+        ref.read(localSelfPositionProvider.notifier).state = DriverPosition(
+          point: LatLng(pos.latitude, pos.longitude),
+          heading: _lastHeading,
+          speed: pos.speed,
+        );
+      }
+    });
+  }
+
+  void _onPosition(Position pos) {
+    _latest = pos;
+    if (pos.speed > _minHeadingSpeedMs) {
+      _lastHeading = pos.heading;
+    } else if (_compassHeading != null) {
+      _lastHeading = _compassHeading;
+    }
+    ref.read(localSelfPositionProvider.notifier).state = DriverPosition(
+      point: LatLng(pos.latitude, pos.longitude),
+      heading: _lastHeading,
+      speed: pos.speed,
+    );
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _compassSub?.close();
+    ref.read(localSelfPositionProvider.notifier).state = null;
     super.dispose();
   }
 

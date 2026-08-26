@@ -44,6 +44,14 @@ const _minHeadingSpeedMs = 1.0;
 final localDriverPositionProvider =
     StateProvider<DriverPosition?>((ref) => null);
 
+/// The rider's own live position + device heading — shown as their own
+/// "you are here" arrow while waiting for a driver, since there's nothing
+/// else on the map yet to orient by (see `_SelfLocationWatcher` in
+/// trip_screen.dart). Superseded by the driver's own marker the moment one
+/// is assigned; `null` otherwise, including for a driver or merchant (who
+/// see the *other* party's heading instead, not their own).
+final localSelfPositionProvider = StateProvider<DriverPosition?>((ref) => null);
+
 final tripDriverPositionProvider =
     StreamProvider.autoDispose.family<DriverPosition, String>((ref, tripId) {
   final channel = ref.watch(tripChannelProvider(tripId));
