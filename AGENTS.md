@@ -29,6 +29,23 @@ They must be enforced **server-side and are final** — never trust the client, 
 
 If a change would weaken any of the above, stop and flag it.
 
+## Domain invariants (not legal, but load-bearing)
+
+**Job-type segregation.** There is **one dispatch queue** for both RIDE and DELIVERY, and each driver
+declares which types they accept at KYC (`drivers.service_types`, a non-empty subset of
+`{ride, delivery}`, editable by staff from the dashboard). Dispatch must honour that declaration
+*everywhere*, not just at match time:
+
+- Candidate matching filters on the trip's `trip_type` against the driver's presence `job_types`.
+- **So do the supply counts** — the rider app's "no drivers nearby" booking gate and the merchant's
+  "no couriers nearby" warning each count only drivers eligible for *that* job type. A new caller of
+  `dispatch::nearby_count` must pass the job type it actually means; getting this wrong doesn't fail
+  loudly, it just quietly reports the wrong availability.
+- Merchant orders reach couriers by being `delivery`-typed trips on this same queue. Do not add a
+  second dispatcher for them.
+
+See [05 §5.5.1–5.5.2](docs/research/05-technical-architecture.md) for the full design.
+
 ## Stack (confirmed)
 
 | Layer | Choice |
@@ -36,7 +53,7 @@ If a change would weaken any of the above, stop and flag it.
 | Backend | **Rust** microservices (`axum`, `tokio`, `sqlx`) in a Cargo workspace monorepo |
 | Bus | **NATS JetStream** (event-driven; gRPC where needed) |
 | DB | **PostgreSQL + PostGIS** (per-service schemas, shared instance early) |
-| Cache/geo | **Redis** (GEOSEARCH driver index, sessions, rate limits) |
+| Cache/geo | **Redis** (H3-cell driver presence index, sessions, rate limits) |
 | Object storage | MinIO / in-country S3-compatible |
 | Mobile | **Flutter** (rider + driver, Android + iOS) — the #1 build risk |
 | Admin | **React / Next.js** |
@@ -46,32 +63,52 @@ If a change would weaken any of the above, stop and flag it.
 
 ## Repo layout
 
-```
+```text
 docs/research/     # Source-of-truth dossier (00-index.md is the map)
 backend/           # Rust Cargo workspace (monorepo)
-  crates/          # Shared libraries (saarathi-core: money, legal caps, pricing clamp)
+  crates/          # Shared libraries (saarathi-core: money, legal caps, pricing clamp,
+                   #   authn extractors, H3 geo helpers, Pelias indexing)
   services/        # Coarse-grained services
-    auth/          # Identity + KYC + location: OTP/JWT, driver verification, PostGIS
-      migrations/  # sqlx SQL migrations
-    rides/         # Trips, fare estimate (routing), campaigns, realtime WS + WebRTC signaling
-  docker-compose.yml  # Local dev infra: Postgres+PostGIS, Redis, NATS
+    auth/          # Identity + KYC + location: OTP/JWT, driver verification, admin/staff
+      migrations/  #   RBAC endpoints, PostGIS. Owns `users`/`drivers`/`vehicles`.
+    rides/         # Trips, dispatch + matching, fare estimate, bidding, surge, campaigns,
+                   #   realtime WS + WebRTC signaling. Also owns rider admin endpoints.
+    merchant/      # Marketplace domain (food + grocery): merchants, menus, orders, zones
+    payments/      # Top-ups, payouts, PSP callbacks
+    partners/      # Fleet/partner domain (corporate tabs, partner-owned drivers)
+    campaigns/     # Discount/bonus campaign management
+    notify/        # Push/notification fan-out
+    places/        # Community map contributions (user-submitted places)
+    routing/       # Fare distance/duration only (Valhalla-backed)
+  docker-compose.yml  # Local dev infra: Postgres+PostGIS, Redis, NATS, Valhalla, Pelias, tiles
 dashboard/         # Next.js staff dashboard (driver verification, campaigns, RBAC-gated)
+app/               # Flutter app — rider, driver, and merchant surfaces in one binary
 ```
+
+> ⚠️ Domain ownership is not always where you'd guess: **rider** admin endpoints live in `rides`
+> (`routes/insights.rs`), not `auth`, even though `auth` owns the `users` table. **Driver** admin
+> endpoints live in `auth`. Grep before assuming.
 
 ## Running locally
 
 ```bash
-# Backend (needs Docker for Postgres+PostGIS/Redis/NATS)
+# Backend — compose runs the infra *and* every service, behind a Traefik gateway on :8080
 cd backend && cp .env.example .env   # then set JWT_SECRET (openssl rand -hex 32)
-docker compose up -d
+docker compose up -d                 # each service applies its own schema on boot
+docker compose up -d --build auth    # rebuild + restart one service after a code change
+
+# ...or run a single service on the host against compose infra:
 cargo run -p saarathi-auth           # :8081, runs migrations + seeds a dev super-admin
-cargo run -p saarathi-rides          # :8082, applies its schema; fare/trip/campaign/WS APIs
+cargo run -p saarathi-rides          # :8082, fare/trip/dispatch/campaign/WS APIs
 
 # Dashboard
 cd dashboard && cp .env.local.example .env.local && npm install
 npm run dev                          # :3000 — sign in with +9779800000000 (OTP_DEV_MODE echoes the code)
 ```
 
+> Test through the **gateway on :8080** (that's what the apps use). Internal routes (`/v1/internal/*`)
+> are deliberately **not** gateway-routed — hit those on the service port with the `x-internal-secret` header.
+>
 > macOS note: `ring`/`cc` need the SDK path; `backend/.cargo/config.toml` sets `SDKROOT` so `cargo build` works.
 
 ## Conventions
@@ -85,6 +122,16 @@ npm run dev                          # :3000 — sign in with +9779800000000 (OT
 - **Security:** OWASP-aware. Parameterized queries only, validate at boundaries, rate-limit OTP, verify
   webhook signatures, idempotency keys on payment ops.
 - **Errors:** `thiserror` for library errors, `anyhow` at binary boundaries.
+- **Wire strings are not Dart/Rust identifiers.** The API speaks `snake_case` (`in_progress`, `no_driver`).
+  Never match an enum by its language-level name against a wire value — use the explicit `fromWire`/
+  `FromStr`-style mapper. (A `.name ==` comparison silently yielding `unknown` has already cost this repo
+  a multi-session debugging spiral.)
+- **Every staff mutation is audit-logged.** Any new admin endpoint writes an `audit_log` row (actor, action,
+  entity, detail) alongside its `UPDATE` — this is DoTM defensibility, not bookkeeping. `auth` has an
+  `audit` module; `rides`/`merchant` carry a small local `audit_record` helper for the same table.
+- **Phone numbers are identity, not a profile field.** Phone is the OTP login key; no endpoint edits a
+  rider's or driver's phone post-signup. Admin record-editing deliberately excludes it. (A merchant's
+  `phone` is a business contact field — that one *is* editable.)
 - **Tests:** unit-test the legal clamp and any money math exhaustively; contract-test the DoTM connector
   and payment webhooks (the riskiest external edges).
 

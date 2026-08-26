@@ -108,7 +108,11 @@ flowchart LR
 ## 5. Dispatch, pricing & money (how delivery plugs into what exists)
 
 ### 5.1 Unified dispatch
-One queue, a `type` tag. A driver opts into the job types they'll take (ride / parcel / food). A free rider near a restaurant can be offered a food job — **cross-vertical dispatch is the whole point**. Prep-time gating for food; **batching** (2 nearby orders) is a Phase-4 optimization once density exists ([04 §2](04-operational-procedures.md)).
+One queue, a `type` tag. A driver opts into the job types they'll take, **declared at KYC and stored on the driver record** (`service_types`), correctable by Ops from the dashboard ([05 §5.5.1](05-technical-architecture.md)). A free rider near a restaurant *who opted into delivery* can be offered a food job — **cross-vertical dispatch is the whole point**, and it pays off exactly in proportion to how many drivers accept both. Prep-time gating for food; **batching** (2 nearby orders) is a Phase-4 optimization once density exists ([04 §2](04-operational-procedures.md)).
+
+The filter runs both ways and is strict: a **delivery-only** driver never receives a ride request, and a **ride-only** driver never receives a merchant order. Merchant orders reach couriers by being `delivery`-typed trips on this same queue — there is no second dispatcher. The same job-type filter also governs the availability probes (see [04 §2](04-operational-procedures.md)), so "no couriers nearby" means no *delivery-capable* driver nearby, not merely no driver.
+
+> ⚠️ **Supply-side watch item:** every driver who takes only one vertical shrinks the pool for the other. In a market this thin, a large ride-only majority would quietly starve delivery of couriers long before the demand side is the problem. Track the both-opted share from launch ([04 §7](04-operational-procedures.md)) and treat a decline as a supply incident, not a reporting curiosity.
 
 ### 5.2 Delivery pricing
 - **Delivery fee = base + distance × per-km delivery rate** (+ optional size/weight tier, + small-order fee). Computed by the same routing→pricing path as rides ([05 §5](05-technical-architecture.md)), so it stays config-driven and auditable.

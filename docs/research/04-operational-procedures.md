@@ -11,7 +11,9 @@
 ```mermaid
 flowchart TD
     A[Lead: walk-in / referral / field agent] --> B[App signup: phone OTP]
-    B --> C[Collect docs]
+    B --> B1[Details: name, license no., address,<br/>vehicle class + plate + model]
+    B1 --> B2[Declare job types:<br/>rides / delivery / both]
+    B2 --> C[Collect docs]
     C --> C1[Citizenship/ID]
     C --> C2[Commercial driving license]
     C --> C3[Vehicle Bluebook + fitness cert]
@@ -31,6 +33,9 @@ flowchart TD
 - **Convert, don't reject.** Many Dang riders have *private* licenses/bikes. Run a **"get-compliant" assist desk**: help them obtain commercial license, fitness, insurance, tax clearance. This is your supply moat — incumbents won't hand-hold tier-3 drivers.
 - **Field onboarding** beats digital-only: a person at a Ghorahi/Tulsipur desk + WhatsApp follow-up converts far better.
 - **Document vault:** store license/fitness/insurance/tax with **expiry tracking** and auto-reminders.
+- **Identity fields are mandatory, not "nice to have":** name, license number, address, vehicle plate and model are **required** on both intake paths — the driver's own in-app registration *and* the dashboard's walk-in KYC form. Enforced server-side on both, so a field agent can't half-fill a record and leave Compliance chasing it later. Only vehicle make/colour/year and date of birth stay optional.
+- **Ask the job-type question out loud:** "rides, deliveries, or both?" is part of the intake script, not a checkbox the agent silently defaults. Default and recommend **both** ([03 §3.3](03-user-flows.md)); a driver who picks one is choosing to sit out the other queue entirely.
+- **Fixing a record:** typos in name/licence/address/vehicle and a wrong job-type selection are all correctable from the dashboard afterwards ([05 §5.5](05-technical-architecture.md)) — every edit is audit-logged. No need to reject-and-redo a KYC over a mistyped plate.
 - **Training:** 3-day orientation (app use, safety, etiquette, female-passenger policy, fraud/offline-ride rules) + 4-month refreshers, per the 2082 standard.
 
 ### 1.2 Merchant onboarding
@@ -65,7 +70,8 @@ flowchart TD
 
 - **Sequential offer with short timeout** (e.g., 15–20s) keeps ETAs honest in low-density areas.
 - **Fairness vs efficiency:** weight idle-time so earnings spread across drivers (retention in a small fleet matters more than micro-optimizing each ETA).
-- **Cross-vertical dispatch:** a free rider near a restaurant can be offered a food job — the engine treats RIDE and DELIVERY as one queue with a type tag.
+- **Cross-vertical dispatch:** a free rider near a restaurant can be offered a food job — the engine treats RIDE and DELIVERY as one queue with a type tag. It reaches only drivers who **declared that job type at KYC** ([§1.1](#11-driver-onboarding-the-hardest-most-important-pipeline)), so the cross-vertical win is only as large as the share of drivers who opted into both. Watch that share as an operational metric: if it slides, utilization slides with it.
+- **Supply signals are per-job-type too:** the "no drivers nearby" gate the rider app shows before booking, and the "no couriers nearby" warning a merchant sees when marking an order ready, each count **only drivers eligible for that job type**. A car park full of ride-only drivers is correctly reported as zero couriers.
 - **Manual override:** Ops can hand-assign during outages or VIP/edge cases (essential at small scale).
 - **Pre-positioning:** nudge drivers toward demand hotspots (bazaar, bus park, college areas) at peak times.
 
@@ -153,7 +159,7 @@ flowchart LR
 
 | Category | Metric |
 |----------|--------|
-| **Liquidity** | Active drivers/day, online hours, % requests fulfilled, avg ETA |
+| **Liquidity** | Active drivers/day, online hours, % requests fulfilled, avg ETA, **% of drivers opted into both job types** (and delivery-capable driver count separately — a thin courier pool starves delivery before demand does; see [08 §5.1](08-delivery-system.md)) |
 | **Demand** | Daily trips/orders, repeat-rate, CAC, referral share |
 | **Economics** | Avg fare, trips/driver/day, driver take-home/day, contribution margin |
 | **Quality** | Cancellation rate, complaint rate, avg rating, SOS incidents |

@@ -7,7 +7,7 @@
 ## 1. Architecture principles (derived from prior docs)
 
 1. **Compliance is a core service, not a feature.** Nepali-server hosting, DoTM central-system API, immutable fare ledger, QR verification, SOS — all first-class. (See [02](02-regulatory-compliance.md).)
-2. **One dispatch engine, two job types** (RIDE, DELIVERY). (See [03](03-user-flows.md).)
+2. **One dispatch engine, two job types** (RIDE, DELIVERY) — with each driver declaring at KYC which of them they accept, and dispatch filtering on that declaration end-to-end (§5.5.1). (See [03](03-user-flows.md).)
 3. **Offline-tolerant clients** — patchy connectivity in Dang; cache + reconcile.
 4. **Cash-first money model** — driver balance wallet + pluggable PSPs.
 5. **Parameterize the law** — fare caps, commission %, fund %, fees are config, not hardcode. Every pricing knob is **runtime-adjustable from the admin dashboard** (see §5).
@@ -150,7 +150,8 @@ The admin dashboard is a first-class product surface, not an afterthought. It is
 | Area | Capabilities |
 |------|--------------|
 | **User & access management** | Create/suspend staff accounts; assign **roles** (Super Admin, Admin, Dispatcher, Finance, Compliance, Support, Analyst); full audit trail. (See §5.4.) |
-| **Driver registration & verification** | Review KYC docs, run/track background checks, approve/reject, issue QR stickers, manage document-expiry & re-verification — the legal onboarding pipeline. (See §5.5.) |
+| **Driver registration & verification** | Review KYC docs, run/track background checks, approve/reject, issue QR stickers, manage document-expiry & re-verification — the legal onboarding pipeline. Also on-site walk-in KYC capture for drivers who onboard at a desk rather than in the app. (See §5.5.) |
+| **Record correction** | Fix a rider's name; a driver's name, licence number, address and vehicle (plate/make/model/year/colour); a merchant's name, vertical, contact and prep time. Also re-set a driver's accepted **job types**. Phone numbers are *not* editable — they're the OTP login identity. Every edit is audit-logged. (See §5.5.) |
 | **Live tracking** | Real-time map of every active driver/trip; watch an individual ride, view route/ETA, intervene on SOS. (See §5.6.) |
 | **Pricing config** | Set base fare, per-km rate, minimum-distance base, commission %, accident-fund %, platform fees — **per city, per vehicle type, per vertical** — all live, no redeploy. |
 | **Dynamic pricing rules** | Configure surge curves (supply/demand), night-time windows & multipliers, weather/wait surcharges, and caps. Toggle auto-pricing on/off. |
@@ -219,7 +220,7 @@ Every privileged action is written to an **immutable audit log** (who, what, whe
 
 ### 5.5 Driver registration & verification (legal workflow)
 
-The dashboard drives the legally-mandated onboarding pipeline ([02 §3](02-regulatory-compliance.md), [04 §1.1](04-operational-procedures.md)). The driver submits documents in the app; staff verify here.
+The dashboard drives the legally-mandated onboarding pipeline ([02 §3](02-regulatory-compliance.md), [04 §1.1](04-operational-procedures.md)). The driver submits documents in the app; staff verify here. Staff can also capture the whole thing on the driver's behalf for a **walk-in** (an on-site KYC form that creates the user, driver, and vehicle in one shot, then takes document photos from a webcam).
 
 ```mermaid
 flowchart LR
@@ -242,6 +243,25 @@ flowchart LR
 - **Document vault** with expiry reminders; auto-suspend a driver on expiry until re-verified.
 - **Re-verification** on document expiry and on the standard's periodic cycle.
 - Rejections always carry a reason the driver sees, with a re-submit path.
+- **Required identity fields** — name, licence number, address, vehicle plate and model — are validated **server-side on both intake paths** (the driver's in-app form and the staff walk-in form), so neither can produce a half-filled record. Make/colour/year and date of birth remain optional.
+- **Job types** (rides / delivery / both) are captured at registration and stored on the driver row, not inferred. See §5.5.1.
+
+#### 5.5.1 Job-type declaration & correction
+
+`drivers.service_types` is the **persisted source of truth** for which queues a driver belongs to. Its shape and lifecycle:
+
+- Set at registration (in-app or walk-in); constrained to a non-empty subset of `{ride, delivery}` by both a server-side check and a DB `CHECK` constraint. Existing rows default to `{ride}`, so the migration can't silently drop a working driver out of the ride queue.
+- Editable afterwards by staff from the driver's dashboard page — the correction path for "the field agent ticked the wrong box" and for a driver who later wants to add or drop a vertical.
+- The driver app **re-reads it on every go-online**, so a dashboard change takes effect on the driver's next shift with no separate push or sync mechanism to keep alive.
+- Dispatch reads it via the driver's live presence record, not the DB, on the hot path — see §5.5.2.
+
+#### 5.5.2 How dispatch enforces it
+
+Presence (the Redis record written when a driver goes online and refreshed by heartbeat) carries the driver's job types alongside their position. Every dispatch path filters on it:
+
+- **Matching** — the candidate scan for a trip filters by the trip's own type (`ride` | `delivery`) while it fetches positions, so a driver in the wrong queue is never even ranked, let alone offered.
+- **Supply counts** — the same filter applies to the "how many drivers are nearby" probes that back the rider app's booking gate and the merchant's "no couriers nearby" warning. These are counted **per job type**: ride-only drivers do not inflate courier availability, and vice versa. (This matters the moment the two populations diverge; before the split they were the same set and the distinction was invisible.)
+- Merchant/marketplace orders create `delivery`-typed trips, which is what confines them to delivery-capable drivers — there's no separate courier dispatcher to keep in sync.
 
 ### 5.6 Live tracking console
 
@@ -297,6 +317,14 @@ erDiagram
     ORDER ||--|| LEDGER_ENTRY : generates
     LEDGER_ENTRY ||--o| DOTM_REPORT : reported_as
     DRIVER ||--|| DRIVER_WALLET : owns
+    DRIVER {
+      uuid id
+      uuid user_id
+      enum kyc_status
+      set service_types "RIDE|DELIVERY, non-empty"
+      text license_number
+      text address
+    }
     TRIP {
       uuid id
       enum type "RIDE|DELIVERY"
@@ -325,6 +353,7 @@ erDiagram
 **Why this shape:**
 
 - **Trip and Order share a ledger** → unified compliance + economics.
+- **`DRIVER.service_types` is a set, not an enum** → a driver is normally in *both* queues; single-vertical is the narrowing case, not the default. Matching `TRIP.type` against it is the whole segregation mechanism (§5.5.2).
 - **Documents carry expiry** → drives onboarding reminders ([04](04-operational-procedures.md)).
 - **QR sticker tied to vehicle** with validity → safety + legal verification.
 - **Driver wallet** models the cash/digital owe-vs-owed balance.
