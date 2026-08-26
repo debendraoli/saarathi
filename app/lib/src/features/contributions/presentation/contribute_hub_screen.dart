@@ -33,6 +33,11 @@ class _ContributeHubScreenState extends ConsumerState<ContributeHubScreen> {
     if (ok == true) {
       ref.invalidate(myContributionsProvider);
       ref.invalidate(pointsSummaryProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppL10n.of(context).contributionSubmitted)),
+        );
+      }
     }
   }
 

@@ -349,6 +349,7 @@
   "storeRejected": "Application rejected",
   "merchantOpen": "Open",
   "merchantClosed": "Closed",
+  "itemSoldOut": "Sold out",
   "merchantOrders": "Orders",
   "merchantMenu": "Menu",
   "merchantIncomingOrders": "Incoming orders",

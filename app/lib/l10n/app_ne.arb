@@ -347,6 +347,7 @@
   "storeRejected": "आवेदन अस्वीकृत",
   "merchantOpen": "खुला",
   "merchantClosed": "बन्द",
+  "itemSoldOut": "सकियो",
   "merchantOrders": "अर्डरहरू",
   "merchantMenu": "मेनु",
   "merchantIncomingOrders": "आउँदै गरेका अर्डरहरू",

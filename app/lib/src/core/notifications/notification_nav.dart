@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/auth/application/auth_controller.dart';
+import '../../features/auth/domain/models.dart' show AuthStatus;
 import '../../features/notifications/data/notifications_repository.dart';
 import '../router/app_router.dart';
 import '../router/deep_links.dart';
@@ -19,10 +20,30 @@ import 'push_service.dart';
 final notificationNavProvider = Provider<void>((ref) {
   final router = ref.watch(goRouterProvider);
 
+  // A tap arriving before the startup auth check resolves (cold-started by
+  // tapping a notification) used to be lost outright: `router.go(target)`
+  // fired immediately, then the very next redirect pass — still seeing
+  // `AuthStatus.unknown` — silently forced the location back to splash with
+  // nothing to replay it once auth actually resolved. Queue it instead and
+  // replay once auth leaves `unknown`.
+  String? pendingLink;
+
   void handle(String link) {
+    if (ref.read(authControllerProvider).status == AuthStatus.unknown) {
+      pendingLink = link;
+      return;
+    }
     final target = routeForDeepLink(Uri.parse(link));
     if (target != null) router.go(target);
   }
+
+  ref.listen(authControllerProvider, (prev, next) {
+    final link = pendingLink;
+    if (link != null && next.status != AuthStatus.unknown) {
+      pendingLink = null;
+      handle(link);
+    }
+  });
 
   // A scheduled notification (e.g. the merchant-review reminder) can launch
   // the app from fully killed — that link was captured during `init()`,

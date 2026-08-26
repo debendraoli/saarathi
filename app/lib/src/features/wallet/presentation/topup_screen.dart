@@ -30,6 +30,15 @@ class _TopupScreenState extends ConsumerState<TopupScreen>
   TopupIntent? _intent;
   double? _confirmedBalance;
   bool _awaitingResume = false;
+  // Guards both `_startTopup` and `_checkStatus` against a double-tap firing
+  // two in-flight requests — `_phase` alone doesn't catch this because both
+  // methods set it to `waiting` synchronously before their first `await`,
+  // and the "waiting" phase's own "Check status" button stays visible (and
+  // tappable) for the whole time a confirm call is outstanding. A second tap
+  // on `_startTopup` in particular would mint a brand-new idempotency key
+  // and could create a second real checkout session, not just retry the
+  // first one.
+  bool _busy = false;
 
   @override
   void initState() {
@@ -53,9 +62,13 @@ class _TopupScreenState extends ConsumerState<TopupScreen>
   }
 
   Future<void> _startTopup() async {
+    if (_busy) return;
     final amount = double.tryParse(_amount.text.trim());
     if (amount == null || amount <= 0) return;
-    setState(() => _phase = _Phase.waiting);
+    setState(() {
+      _phase = _Phase.waiting;
+      _busy = true;
+    });
     try {
       final intent =
           await ref.read(currentWalletRepositoryProvider).topup(amount);
@@ -74,21 +87,34 @@ class _TopupScreenState extends ConsumerState<TopupScreen>
         // Resume back into the app (browser closed/backgrounded) triggers
         // the confirm check — see didChangeAppLifecycleState.
         _awaitingResume = true;
+        setState(() => _busy = false);
       } else {
         // Dev/mock provider (a non-http checkout_url) or the browser
-        // couldn't be launched — just check immediately.
-        await _checkStatus();
+        // couldn't be launched — just check immediately. `_busy` stays
+        // true; `_checkStatus` clears it itself.
+        await _checkStatus(internal: true);
       }
     } catch (_) {
       Haptics.error();
-      if (mounted) setState(() => _phase = _Phase.failed);
+      if (mounted) {
+        setState(() {
+          _phase = _Phase.failed;
+          _busy = false;
+        });
+      }
     }
   }
 
-  Future<void> _checkStatus() async {
+  /// [internal]: called from `_startTopup`, which already holds `_busy` —
+  /// skips the re-entrancy guard so it doesn't block on its own caller.
+  Future<void> _checkStatus({bool internal = false}) async {
+    if (_busy && !internal) return;
     final intent = _intent;
     if (intent == null) return;
-    setState(() => _phase = _Phase.waiting);
+    setState(() {
+      _phase = _Phase.waiting;
+      _busy = true;
+    });
     final result = await ref
         .read(currentWalletRepositoryProvider)
         .confirmTopup(intent.reference);
@@ -98,14 +124,23 @@ class _TopupScreenState extends ConsumerState<TopupScreen>
         Haptics.success();
         _confirmedBalance = result.balance;
         ref.invalidate(walletBalanceProvider);
-        setState(() => _phase = _Phase.success);
+        setState(() {
+          _phase = _Phase.success;
+          _busy = false;
+        });
       case TopupStatus.pending:
         // Still not done from the provider's side — let the user check
         // again rather than polling forever in the background.
-        setState(() => _phase = _Phase.waiting);
+        setState(() {
+          _phase = _Phase.waiting;
+          _busy = false;
+        });
       case TopupStatus.failed:
         Haptics.error();
-        setState(() => _phase = _Phase.failed);
+        setState(() {
+          _phase = _Phase.failed;
+          _busy = false;
+        });
     }
   }
 
@@ -127,7 +162,7 @@ class _TopupScreenState extends ConsumerState<TopupScreen>
               action: _intent == null
                   ? null
                   : FilledButton(
-                      onPressed: _checkStatus,
+                      onPressed: _busy ? null : _checkStatus,
                       child: Text(l.checkPaymentStatus),
                     ),
             ),

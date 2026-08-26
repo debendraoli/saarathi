@@ -285,13 +285,21 @@ class _ItemCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l = AppL10n.of(context);
     final cart = ref.read(cartControllerProvider.notifier);
     final scheme = Theme.of(context).colorScheme;
+    // Previously unconditional — a customer could add items and reach
+    // checkout from a store that had just closed, or one whose item had
+    // gone unavailable, only to get a generic "order failed" error from the
+    // backend (which does correctly reject both server-side) instead of
+    // being stopped at the point of adding to cart.
+    final canOrder = merchant.isOpen && item.isAvailable;
     void add() =>
         cart.add(item, merchantId: merchant.id, merchantName: merchant.name);
 
     return ListTile(
-      onTap: qty == 0 ? add : null,
+      enabled: canOrder,
+      onTap: canOrder && qty == 0 ? add : null,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: _ItemThumb(imageUrl: item.imageUrl, vertical: merchant.vertical),
       title: Text(
@@ -310,18 +318,27 @@ class _ItemCard extends ConsumerWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           const SizedBox(height: 4),
-          Text(
-            'NPR ${item.price.toStringAsFixed(0)}',
-            style:
-                TextStyle(fontWeight: FontWeight.w800, color: scheme.primary),
-          ),
+          if (!item.isAvailable)
+            Text(
+              l.itemSoldOut,
+              style: TextStyle(
+                  fontWeight: FontWeight.w700, color: scheme.error, fontSize: 12),
+            )
+          else
+            Text(
+              'NPR ${item.price.toStringAsFixed(0)}',
+              style: TextStyle(
+                  fontWeight: FontWeight.w800, color: scheme.primary),
+            ),
         ],
       ),
-      trailing: _QtyControl(
-        qty: qty,
-        onAdd: add,
-        onRemove: () => cart.decrement(item.id),
-      ),
+      trailing: canOrder
+          ? _QtyControl(
+              qty: qty,
+              onAdd: add,
+              onRemove: () => cart.decrement(item.id),
+            )
+          : null,
     );
   }
 }

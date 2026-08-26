@@ -108,12 +108,11 @@ class _ContributeScreenState extends ConsumerState<ContributeScreen> {
           );
       Haptics.success();
       ref.invalidate(myContributionsProvider);
+      // The success message is shown by the caller (`ContributeHubScreen`,
+      // which awaits this `pop(true)`), not here — a SnackBar posted on this
+      // screen's own context right as it's being popped doesn't reliably
+      // land on the screen the user actually ends up looking at.
       if (mounted) Navigator.of(context).pop(true);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l.contributionSubmitted)),
-        );
-      }
     } on ApiException catch (e) {
       Haptics.error();
       if (mounted) {
