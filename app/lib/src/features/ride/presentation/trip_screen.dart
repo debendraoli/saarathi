@@ -80,6 +80,23 @@ class _TripScreenState extends ConsumerState<TripScreen> {
   static const _routeRequeryMeters = 25.0;
   LatLng? _routeQueryPoint;
 
+  // Shared with BiddingSheet/_StatusSheet's own DraggableScrollableSheet so
+  // the back/fullscreen-nav buttons below (positioned just above the
+  // sheet's *collapsed* edge) can track its *live* extent instead. Without
+  // this they were positioned using the sheet's fixed minimum size
+  // (`_sheetClearance`) regardless of how far the user had actually dragged
+  // it open — since the sheet paints after (on top of) these buttons in the
+  // Stack, dragging it past its collapsed size silently covered both
+  // buttons entirely, confirmed live as "no fullscreen button for
+  // navigation" after the sheet ended up expanded.
+  final _sheetController = DraggableScrollableController();
+
+  @override
+  void dispose() {
+    _sheetController.dispose();
+    super.dispose();
+  }
+
   LatLng _throttledRoutePoint(LatLng liveLoc) {
     final last = _routeQueryPoint;
     if (last == null ||
@@ -379,48 +396,66 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                           ),
                         ),
                       // Back (leave trip) and fullscreen nav both dock just
-                      // above the status/bidding sheet's collapsed top edge
-                      // (`_sheetClearance`) instead of the top corners — one-
-                      // handed, thumb-reachable, same reasoning the map's own
-                      // locate button already uses this offset for.
-                      Positioned(
-                        left: 12,
-                        bottom: MediaQuery.of(context).size.height *
-                                _sheetClearance +
-                            12,
-                        child: SafeArea(
-                          top: false,
-                          child: MapCircleButton(
-                            icon: Icons.arrow_back_rounded,
-                            onTap: () => _leaveTrip(context, ref, tripId),
-                          ),
-                        ),
-                      ),
-                      if (iAmDriver && trip.isActive)
-                        Positioned(
-                          right: 12,
-                          bottom: MediaQuery.of(context).size.height *
-                                  _sheetClearance +
-                              76,
-                          child: SafeArea(
-                            top: false,
-                            child: MapCircleButton(
-                              icon: Icons.fullscreen_rounded,
-                              tooltip: l.navFullscreen,
-                              onTap: () => context.push(
-                                '${Routes.tripNavigate}/$tripId/navigate',
-                                extra: NavigationScreenArgs(
-                                  target: routeTarget,
-                                  vehicleClass:
-                                      trip.vehicleClass ?? 'two_wheeler',
+                      // above the status/bidding sheet's *live* top edge —
+                      // tracked via `_sheetController` instead of the fixed
+                      // `_sheetClearance` minimum, since the sheet paints on
+                      // top of these buttons and dragging it open past its
+                      // minimum previously covered both entirely.
+                      AnimatedBuilder(
+                        animation: _sheetController,
+                        builder: (context, _) {
+                          final extent = _sheetController.isAttached
+                              ? _sheetController.size
+                              : _sheetClearance;
+                          final base =
+                              MediaQuery.of(context).size.height * extent;
+                          return Stack(
+                            children: [
+                              Positioned(
+                                left: 12,
+                                bottom: base + 12,
+                                child: SafeArea(
+                                  top: false,
+                                  child: MapCircleButton(
+                                    icon: Icons.arrow_back_rounded,
+                                    onTap: () =>
+                                        _leaveTrip(context, ref, tripId),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
-                        ),
+                              if (iAmDriver && trip.isActive)
+                                Positioned(
+                                  right: 12,
+                                  bottom: base + 76,
+                                  child: SafeArea(
+                                    top: false,
+                                    child: MapCircleButton(
+                                      icon: Icons.fullscreen_rounded,
+                                      tooltip: l.navFullscreen,
+                                      onTap: () => context.push(
+                                        '${Routes.tripNavigate}/$tripId/navigate',
+                                        extra: NavigationScreenArgs(
+                                          target: routeTarget,
+                                          vehicleClass:
+                                              trip.vehicleClass ??
+                                                  'two_wheeler',
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          );
+                        },
+                      ),
                       trip.isBidding && trip.status == TripStatus.requested
-                          ? BiddingSheet(trip: trip)
-                          : _StatusSheet(trip: trip, driverLoc: driverLoc),
+                          ? BiddingSheet(
+                              trip: trip, sheetController: _sheetController)
+                          : _StatusSheet(
+                              trip: trip,
+                              driverLoc: driverLoc,
+                              sheetController: _sheetController,
+                            ),
                     ],
                   );
                 },
@@ -571,9 +606,14 @@ Future<void> showCancelReasonSheet(
 }
 
 class _StatusSheet extends ConsumerWidget {
-  const _StatusSheet({required this.trip, this.driverLoc});
+  const _StatusSheet({
+    required this.trip,
+    this.driverLoc,
+    required this.sheetController,
+  });
   final Trip trip;
   final LatLng? driverLoc;
+  final DraggableScrollableController sheetController;
 
   /// Short status line only — the route (pickup/destination), live ETA, and
   /// fare each get their own dedicated row now instead of being crammed into
@@ -644,6 +684,7 @@ class _StatusSheet extends ConsumerWidget {
     final driverDetail = !iAmDriver ? participants.valueOrNull?.driver : null;
 
     return DraggableScrollableSheet(
+      controller: sheetController,
       initialChildSize: 0.32,
       minChildSize: 0.32,
       maxChildSize: 0.85,

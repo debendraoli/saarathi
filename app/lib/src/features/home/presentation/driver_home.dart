@@ -643,6 +643,15 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
     // backend had already expired/reassigned, surfacing as a generic
     // network/error snackbar instead of a clear "offer expired" message.
     final expired = _expired;
+    // How long until this driver could actually reach the pickup point —
+    // previously the offer card only showed the trip's own origin→dest
+    // distance, nothing about how far *this driver* is from pickup, which
+    // is what actually matters for deciding whether to accept.
+    final driverLoc = ref.watch(driverControllerProvider).lastLocation;
+    final pickupEta = driverLoc == null
+        ? null
+        : ref.watch(tripEtaProvider(EtaQuery(driverLoc, offer.origin))).valueOrNull;
+    final pickupEtaMins = pickupEta?.durationMins;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -689,12 +698,35 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
               label: _destLabel ?? '…',
               color: Theme.of(context).colorScheme.secondary,
             ),
-            if (offer.distanceKm != null) ...[
+            if (offer.distanceKm != null || pickupEtaMins != null) ...[
               const SizedBox(height: 6),
-              Text(
-                '${offer.distanceKm!.toStringAsFixed(1)} km',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+              Row(
+                children: [
+                  if (offer.distanceKm != null)
+                    Text(
+                      '${offer.distanceKm!.toStringAsFixed(1)} km',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  if (offer.distanceKm != null && pickupEtaMins != null)
+                    Text(' · ',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant)),
+                  // Distinct from `offer.distanceKm` above (the trip's own
+                  // origin→dest distance) — this is how far *this driver*
+                  // is from the pickup point right now, previously shown
+                  // nowhere on the offer card at all.
+                  if (pickupEtaMins != null)
+                    Text(
+                      l.etaArriving(pickupEtaMins),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                ],
               ),
             ],
             const SizedBox(height: 12),
@@ -757,27 +789,40 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                   ],
                 ),
               ] else
-                Row(
+                Column(
                   children: [
-                    TextButton(
-                      onPressed: _busy ? null : _decline,
-                      child: Text(l.decline),
+                    // Three controls (decline/counter/swipe-accept) crammed
+                    // into one Row left the swipe control too narrow to
+                    // read or use at longer locale text lengths (confirmed
+                    // live in Nepali: the counter-offer button pushed the
+                    // swipe control's own label behind its thumb) — decline
+                    // and counter-offer get their own row now so the swipe
+                    // control always gets the full width it needs.
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            onPressed: _busy ? null : _decline,
+                            child: Text(l.decline),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _busy || expired
+                                ? null
+                                : () => setState(() => _showCounter = true),
+                            child: Text(l.counterOffer),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    OutlinedButton(
-                      onPressed: _busy || expired
-                          ? null
-                          : () => setState(() => _showCounter = true),
-                      child: Text(l.counterOffer),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: SwipeToConfirm(
-                        label: l.accept,
-                        busy: _busy || expired,
-                        onConfirmed: () =>
-                            _placeBid(offer.askFare ?? offer.finalFare),
-                      ),
+                    const SizedBox(height: 8),
+                    SwipeToConfirm(
+                      label: l.accept,
+                      busy: _busy || expired,
+                      onConfirmed: () =>
+                          _placeBid(offer.askFare ?? offer.finalFare),
                     ),
                   ],
                 ),
