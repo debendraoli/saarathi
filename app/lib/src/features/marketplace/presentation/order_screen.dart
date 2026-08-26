@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../core/network/api_client.dart' show ApiException;
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
 import '../../ride/application/ride_controller.dart';
@@ -112,6 +113,21 @@ class OrderScreen extends ConsumerWidget {
                           icon: const Icon(Icons.map_rounded),
                           label: Text(l.trackCourier),
                         ),
+                      // Matches the backend's own window exactly
+                      // (marketplace.rs `update_order_status`): only while
+                      // the merchant hasn't started preparing it yet. There
+                      // was previously no way to reach this from the app at
+                      // all — a customer who placed an order by mistake had
+                      // no in-app path to cancel it.
+                      if (o.status == 'placed' || o.status == 'confirmed')
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: OutlinedButton.icon(
+                            onPressed: () => _cancelOrder(context, ref),
+                            icon: const Icon(Icons.close_rounded),
+                            label: Text(l.cancelOrder),
+                          ),
+                        ),
                       if (o.status == 'delivered' &&
                           o.tripId != null &&
                           !o.rated)
@@ -202,6 +218,43 @@ class OrderScreen extends ConsumerWidget {
       await repo.rateMerchant(orderId, result.stars, tags: result.tags);
     } catch (_) {/* non-blocking */}
     await repo.cancelReviewReminder(orderId);
+    ref.invalidate(orderProvider(orderId));
+  }
+
+  Future<void> _cancelOrder(BuildContext context, WidgetRef ref) async {
+    final l = AppL10n.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(l.cancelOrder),
+        content: Text(l.cancelOrderConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(l.actionCancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l.cancelOrder),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await ref.read(marketplaceRepositoryProvider).cancelOrder(orderId);
+    } on ApiException catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.isNetwork ? l.errorNetwork : e.message)),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(l.errorGeneric)));
+      }
+    }
     ref.invalidate(orderProvider(orderId));
   }
 

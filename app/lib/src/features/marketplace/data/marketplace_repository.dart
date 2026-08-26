@@ -129,6 +129,18 @@ class MarketplaceRepository {
         body: {'stars': stars, 'tags': tags},
       );
 
+  /// The backend only accepts this while the order is still `placed` or
+  /// `confirmed` (i.e. before the merchant starts preparing it) — matches
+  /// `update_order_status`'s own rule in marketplace.rs, not re-checked
+  /// here since the server is the actual authority.
+  Future<CustomerOrder> cancelOrder(String orderId) async {
+    final res = await _api.post(
+      '/v1/orders/$orderId/status',
+      body: {'status': 'cancelled'},
+    ) as Map<String, dynamic>;
+    return _parseOrder(res);
+  }
+
   static int _reminderId(String orderId) => orderId.hashCode & 0x7fffffff;
 
   /// Schedules the "how was your order?" restaurant-rating nudge ~30 minutes

@@ -487,6 +487,8 @@
   "yourOrder": "Your order",
   "trackCourier": "Track courier",
   "orderCancelled": "Order cancelled",
+  "cancelOrder": "Cancel order",
+  "cancelOrderConfirmBody": "Cancel this order? The merchant hasn't started preparing it yet, so this is free.",
   "orderPlaced": "Order placed",
   "orderConfirmed": "Confirmed",
   "orderPreparing": "Preparing",

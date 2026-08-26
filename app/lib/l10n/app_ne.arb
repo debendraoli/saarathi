@@ -485,6 +485,8 @@
   "yourOrder": "तपाईंको अर्डर",
   "trackCourier": "कुरियर ट्र्याक गर्नुहोस्",
   "orderCancelled": "अर्डर रद्द भयो",
+  "cancelOrder": "अर्डर रद्द गर्नुहोस्",
+  "cancelOrderConfirmBody": "यो अर्डर रद्द गर्ने हो? पसलेले अझै तयार गर्न सुरु गरेको छैन, त्यसैले यो निःशुल्क छ।",
   "orderPlaced": "अर्डर राखियो",
   "orderConfirmed": "पुष्टि भयो",
   "orderPreparing": "तयार हुंदै",
