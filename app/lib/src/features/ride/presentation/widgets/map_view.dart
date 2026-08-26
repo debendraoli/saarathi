@@ -17,6 +17,34 @@ import '../../application/trip_ws.dart' show DriverPosition;
 /// mismatched brand-color pins against a blue line.
 const routeLineColor = Color(0xFF1A73E8);
 
+/// Persists fetched tiles to disk via flutter_map's own built-in caching
+/// (on by default for `NetworkTileProvider` — nothing extra to add as a
+/// dependency), but with freshness forced to a long fixed window instead of
+/// trusting the self-hosted tile server's own HTTP cache headers.
+///
+/// Without `overrideFreshAge`, the built-in cache still *stores* every
+/// tile, but treats freshness however the server's `Cache-Control`/`Expires`
+/// headers say to — and our self-hosted server doesn't set those
+/// meaningfully, so every tile view still triggered a full re-fetch despite
+/// bytes already sitting on disk. That's the actual cause of the blurry
+/// upscaled-placeholder-then-sharpen flicker reported live on a fresh trip
+/// screen and even the fullscreen nav view: it isn't that caching was
+/// missing, it's that the cache never considered anything fresh. Road
+/// layout is stable enough that a stale tile from last week is still the
+/// right tile — that's the whole point of raising this rather than fixing
+/// the tile server's headers, which we don't control end-to-end (public OSM
+/// fallback included).
+///
+/// A single shared instance (not per-`MapView`) so every screen's map draws
+/// from — and writes to — the same on-disk cache; this is also why a route
+/// seen once (during a ride, or even a previous app run before a crash) is
+/// immediately available again without a network round trip.
+final _tileProvider = NetworkTileProvider(
+  cachingProvider: BuiltInMapCachingProvider.getOrCreateInstance(
+    overrideFreshAge: const Duration(days: 30),
+  ),
+);
+
 /// A pin to render on the map.
 class MapPin {
   const MapPin(this.point, this.icon, this.color,
@@ -265,7 +293,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
       final prev = oldWidget.navigationTarget;
       if (prev == null ||
           prev.point != target.point ||
-          prev.heading != target.heading) {
+          _headingChangedEnough(prev.heading, target.heading)) {
         _animateTo(target);
       }
     } else if (widget.autoFitPins) {
@@ -353,6 +381,26 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
     final heading = target.heading;
     if (heading == null) return target.point;
     return _distance.offset(target.point, _lookAheadMeters, heading);
+  }
+
+  /// Whether two headings differ enough to be worth restarting the camera
+  /// glide for. The device compass fires many times a second — confirmed
+  /// live, well over 10/s even while genuinely stationary — and without
+  /// this threshold, every single one of those (sub-degree, pure sensor
+  /// noise) ticks tore down and rebuilt [_animateTo]'s `AnimationController`
+  /// via [didUpdateWidget]. That churn is what actually produced the
+  /// symptoms reported live during "moving/testing the compass": a
+  /// momentarily flipped-looking marker and, in the worst case, a
+  /// `_dependents.isEmpty` framework crash — not a rotation-math bug (the
+  /// shortest-angular-path handling in [_animateCamera] was already
+  /// correct), but sheer per-frame animation-controller pressure on top of
+  /// everything else already rebuilding (GPS pin glides, position state).
+  bool _headingChangedEnough(double? a, double? b) {
+    if (a == null || b == null) return a != b;
+    var delta = (b - a) % 360;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    return delta.abs() > 3;
   }
 
   void _animateTo(DriverPosition target) {
@@ -800,6 +848,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
                 urlTemplate: tileUrl,
                 userAgentPackageName: 'com.saarathi.app',
                 maxZoom: 19,
+                tileProvider: _tileProvider,
               ),
               if (widget.circles.isNotEmpty)
                 CircleLayer(

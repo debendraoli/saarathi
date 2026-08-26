@@ -445,6 +445,57 @@ services:
       timeout: 5s
       retries: 20
 
+  # Self-hosted map tiles — the app's raster TileLayer was silently falling
+  # back to the public tile.openstreetmap.org (rate-limited, not meant for
+  # app traffic — the persistent "blurry until it catches up" symptom
+  # reported live was largely this, not just missing caching) because
+  # nothing here ever actually built the "self-hosted tile server" the
+  # client's SAARATHI_TILE_URL config comment already assumed existed.
+  #
+  # One-off build step (same Geofabrik extract Valhalla/Pelias already use):
+  # renders it into a single vector tileset with Planetiler — minutes, not
+  # the hours a classic osm2pgsql+mod_tile raster pipeline would take, and a
+  # few hundred MB instead of that pipeline's 10-20GB PostGIS import.
+  #   docker compose --profile routing run --rm tiles-build
+  # Re-run whenever the extract should be refreshed; skipped automatically
+  # on a normal `up` since it's a one-shot job, not a daemon.
+  tiles-build:
+    image: ghcr.io/onthegomap/planetiler:latest
+    profiles: ["routing"]
+    command:
+      - --download
+      - --area=nepal
+      - --output=/data/nepal.mbtiles
+    volumes:
+      - ./.data/tiles:/data
+
+  # Serves the tileset tiles-build produces, rasterizing vector → PNG on
+  # request with its own on-disk render cache — the app's TileLayer needs no
+  # changes at all, still just a plain {z}/{x}/{y}.png URL. Point the app at
+  # it with --dart-define=SAARATHI_TILE_URL=http://<host>:8091/styles/basic-preview/{z}/{x}/{y}.png
+  # ("basic-preview" confirmed live — tileserver-gl auto-generates this style
+  # id from the mbtiles when no config.json is supplied; re-check via
+  # http://<host>:8091 if it's ever regenerated with a custom config).
+  tileserver-gl:
+    image: maptiler/tileserver-gl:latest
+    profiles: ["routing"]
+    restart: unless-stopped
+    # No `depends_on` on `tiles-build` deliberately — same reasoning as
+    # Pelias's own one-off import steps just above: it's a manual, deliberate
+    # "run once, then start the daemon" flow, not something `up` should
+    # silently re-trigger (which a completion-based dependency would, since
+    # `tiles-build` always re-downloads/rebuilds rather than skipping when
+    # the mbtiles already exists).
+    ports:
+      - "8091:8080"
+    command: ["--mbtiles", "/data/nepal.mbtiles"]
+    volumes:
+      - ./.data/tiles:/data
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
   # Self-hosted geocoder (replaces the public photon.komoot.io dependency).
   # Nepal-only data: same Geofabrik extract Valhalla uses, filtered
   # WhosOnFirst admin boundaries. Start with:  docker compose --profile routing up -d
