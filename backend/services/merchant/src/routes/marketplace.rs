@@ -744,9 +744,23 @@ async fn update_order_status(
     // stop, since the order is already made and prep already happened.
     let mut resp = order_json(&st, id, claims.sub, claims.is_staff()).await?;
     if body.status == "ready" {
-        if let Some(0) = spawn_courier(&st, id).await? {
-            if let Value::Object(map) = &mut resp.0 {
-                map.insert("no_couriers_nearby".into(), Value::Bool(true));
+        // A rejected/failed trip creation (delivery paused via the
+        // `delivery.enabled` flag, or a transient rides-service hiccup)
+        // must not turn into a hard error here — the order status change
+        // above already committed, so surface it as a heads-up on the
+        // response instead, same as the "no couriers nearby" case below.
+        match spawn_courier(&st, id).await {
+            Ok(Some(0)) => {
+                if let Value::Object(map) = &mut resp.0 {
+                    map.insert("no_couriers_nearby".into(), Value::Bool(true));
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(order_id = %id, error = %e, "spawn_courier failed on order-ready");
+                if let Value::Object(map) = &mut resp.0 {
+                    map.insert("courier_dispatch_failed".into(), Value::Bool(true));
+                }
             }
         }
     }

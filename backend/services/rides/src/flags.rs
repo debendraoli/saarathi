@@ -15,7 +15,6 @@ pub const SURGE: &str = "pricing.surge";
 /// Run the automatic dispatch / matching engine.
 pub const DISPATCH: &str = "dispatch.enabled";
 /// Accept parcel / delivery jobs.
-#[allow(dead_code)] // read by the delivery vertical (Phase 3a); exposed via the flags API now
 pub const DELIVERY: &str = "delivery.enabled";
 
 /// Is `key` enabled? Falls back to `default` if the flag is unknown or the

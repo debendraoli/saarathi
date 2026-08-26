@@ -70,6 +70,14 @@ async fn create_delivery_trip(
 ) -> AppResult<Json<CreateDeliveryTripResponse>> {
     check_internal_secret(&st, &headers)?;
 
+    // Circuit breaker: ops can freeze delivery intake from the dashboard —
+    // same pattern as rides.rs::create's RIDES_NEW_REQUESTS check.
+    if !crate::flags::is_enabled(&st, crate::flags::DELIVERY, true).await {
+        return Err(AppError::disabled(
+            "delivery is temporarily paused; please try again shortly",
+        ));
+    }
+
     let route = st
         .router
         .route_path(&[body.origin, body.dest], RouteProfile::Motorcycle)

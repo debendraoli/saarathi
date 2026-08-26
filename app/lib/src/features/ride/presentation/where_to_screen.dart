@@ -88,6 +88,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
   /// Maps-link deep link/share hands over (see [_rawCoordPattern]) and the
   /// background reverse-geocode to a human label hasn't landed yet.
   bool _resolvingDest = false;
+
   /// Same, for [_pickupLabel] when [WhereToScreen.initialPickup] came from a
   /// Directions link.
   bool _resolvingPickup = false;
@@ -266,8 +267,8 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
 
   /// "now + [durationMins]" formatted as a local HH:mm clock time, for the
   /// "arrive at …" callout floated over the destination pin.
-  String _arrivalTime(int durationMins) =>
-      DateFormat.Hm().format(DateTime.now().add(Duration(minutes: durationMins)));
+  String _arrivalTime(int durationMins) => DateFormat.Hm()
+      .format(DateTime.now().add(Duration(minutes: durationMins)));
 
   /// The current draft — null until pickup + destination are both set and
   /// distinct, so this doubles as the "can we price/book yet" gate.
@@ -585,11 +586,14 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                 }),
                 onPayment: (p) => setState(() => _payment = p),
                 onAsk: (v) => setState(() => _ask = v),
+                bargainingEnabled: featureEnabled(ref, 'rides.bargaining'),
                 onBook: selectedEstimate?.valueOrNull == null ||
                         _booking ||
-                        selectedEstimate!.valueOrNull!.nearbyDrivers == 0
+                        selectedEstimate!.valueOrNull!.nearbyDrivers == 0 ||
+                        !featureEnabled(ref, 'rides.new_requests')
                     ? null
                     : () => _book(selectedEstimate.valueOrNull!.finalFare),
+                ridesPaused: !featureEnabled(ref, 'rides.new_requests'),
                 onSave: _dest == null ? null : _saveDest,
                 onClearDest: _dest == null
                     ? null
@@ -642,7 +646,9 @@ class _Sheet extends StatelessWidget {
     required this.onVehicle,
     required this.onPayment,
     required this.onAsk,
+    required this.bargainingEnabled,
     required this.onBook,
+    required this.ridesPaused,
     required this.onSave,
     required this.onClearDest,
     required this.deliveryEstimate,
@@ -692,7 +698,18 @@ class _Sheet extends StatelessWidget {
   final ValueChanged<VehicleClass> onVehicle;
   final ValueChanged<String> onPayment;
   final ValueChanged<double> onAsk;
+
+  /// `rides.bargaining` dashboard flag — false hides the drag-to-offer
+  /// stepper in favour of a plain fixed-price display, since the backend
+  /// silently ignores any custom ask while the flag is off.
+  final bool bargainingEnabled;
   final VoidCallback? onBook;
+
+  /// `rides.new_requests` dashboard flag (inverted) — true replaces the
+  /// book button's label/state the same way a zero-nearby-drivers gate
+  /// already does, instead of letting the rider tap and only find out
+  /// booking is paused from the resulting error.
+  final bool ridesPaused;
   final VoidCallback? onSave;
   final VoidCallback? onClearDest;
 
@@ -819,18 +836,44 @@ class _Sheet extends StatelessWidget {
                     data: (fare) => Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        FareStepper(
-                          amount: ask ?? fare.finalFare,
-                          min: fare.finalFare,
-                          max: fare.fareCeiling > 0
-                              ? fare.fareCeiling
-                              : fare.finalFare * 2,
-                          onChanged: onAsk,
-                          caption: l.distanceDuration(
-                            fare.distanceKm.toStringAsFixed(1),
-                            fare.durationMins,
+                        if (bargainingEnabled)
+                          FareStepper(
+                            amount: ask ?? fare.finalFare,
+                            min: fare.finalFare,
+                            max: fare.fareCeiling > 0
+                                ? fare.fareCeiling
+                                : fare.finalFare * 2,
+                            onChanged: onAsk,
+                            caption: l.distanceDuration(
+                              fare.distanceKm.toStringAsFixed(1),
+                              fare.durationMins,
+                            ),
+                          )
+                        else
+                          // Bargaining is off — the backend ignores any
+                          // custom ask, so don't offer a stepper that
+                          // silently wouldn't do anything.
+                          Column(
+                            children: [
+                              Text(
+                                '$currencySymbol ${fare.finalFare.toStringAsFixed(0)}',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                              Text(
+                                l.distanceDuration(
+                                  fare.distanceKm.toStringAsFixed(1),
+                                  fare.durationMins,
+                                ),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: scheme.onSurfaceVariant),
+                              ),
+                            ],
                           ),
-                        ),
                         if (payment == 'wallet') ...[
                           const SizedBox(height: 8),
                           WalletBalanceHint(amount: fare.finalFare),
@@ -868,14 +911,17 @@ class _Sheet extends StatelessWidget {
                                     CircularProgressIndicator(strokeWidth: 2.4),
                               )
                             : Text(
-                                mode == RideMode.ride &&
-                                        selected?.valueOrNull?.nearbyDrivers ==
-                                            0
-                                    ? l.noDriversNearby
-                                    : estimates.isEmpty
-                                        ? l.actionContinue
-                                        : '${l.confirmRide} · $currencySymbol '
-                                            '${(ask ?? selected?.valueOrNull?.finalFare)?.toStringAsFixed(0) ?? ''}',
+                                mode == RideMode.ride && ridesPaused
+                                    ? l.ridesPaused
+                                    : mode == RideMode.ride &&
+                                            selected?.valueOrNull
+                                                    ?.nearbyDrivers ==
+                                                0
+                                        ? l.noDriversNearby
+                                        : estimates.isEmpty
+                                            ? l.actionContinue
+                                            : '${l.confirmRide} · $currencySymbol '
+                                                '${(ask ?? selected?.valueOrNull?.finalFare)?.toStringAsFixed(0) ?? ''}',
                               ),
                       ),
                     ),
@@ -883,8 +929,8 @@ class _Sheet extends StatelessWidget {
                     _CtaIconButton(
                       icon: Icons.tune_rounded,
                       tooltip: l.requestSpecificDriver,
-                      onTap: () =>
-                          _showRequestDriverSheet(context, onPreferredDriverPhone),
+                      onTap: () => _showRequestDriverSheet(
+                          context, onPreferredDriverPhone),
                     ),
                   ],
                 ),
@@ -1249,11 +1295,12 @@ void _showRequestDriverSheet(
                   Expanded(
                     child: Text(
                       l.driverWillBeNotified,
-                      style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(sheetContext)
-                                .colorScheme
-                                .onSurfaceVariant,
-                          ),
+                      style:
+                          Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(sheetContext)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
                     ),
                   ),
                 ],
@@ -1357,7 +1404,8 @@ class _VehicleChip extends StatelessWidget {
                   // spinner — the number then lands in the space already
                   // held for it instead of popping the layout.
                   loading: () => const SkeletonBox(width: 40, height: 12),
-                  error: (_, __) => Text('—', style: TextStyle(fontSize: 11.5, color: fg)),
+                  error: (_, __) =>
+                      Text('—', style: TextStyle(fontSize: 11.5, color: fg)),
                   data: (fare) => Text(
                     '$currencySymbol ${fare.finalFare.toStringAsFixed(0)}',
                     style: TextStyle(
@@ -1603,7 +1651,8 @@ class _AddressLine extends StatelessWidget {
                       style: isPlaceholder
                           ? TextStyle(color: Theme.of(context).hintColor)
                           : TextStyle(
-                              fontWeight: dim ? FontWeight.w500 : FontWeight.w700,
+                              fontWeight:
+                                  dim ? FontWeight.w500 : FontWeight.w700,
                               fontSize: 13.5,
                             ),
                     ),
@@ -1635,7 +1684,8 @@ class _RailButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         child: Padding(
           padding: const EdgeInsets.all(4),
-          child: Icon(icon, size: 18, color: Theme.of(context).colorScheme.outline),
+          child: Icon(icon,
+              size: 18, color: Theme.of(context).colorScheme.outline),
         ),
       ),
     );

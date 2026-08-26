@@ -174,6 +174,7 @@
   "noActivityYet": "No activity yet",
   "confirmRide": "Confirm ride",
   "noDriversNearby": "No drivers nearby",
+  "ridesPaused": "Ride requests are paused",
   "noCouriersNearbyWarning": "Order marked ready — no couriers nearby right now, pickup may be delayed.",
   "surgeNotice": "Prices went up — high demand right now",
   "resolvingSharedLink": "Opening shared location…",

@@ -296,6 +296,14 @@ class RideRepository {
         LatLng(asDouble((p as Map)['lat']), asDouble(p['lng'])),
     ];
   }
+
+  /// Dashboard-controlled circuit breakers (`rides.new_requests`,
+  /// `rides.bargaining`, ...) — see `backend/services/rides/src/flags.rs`.
+  /// Missing key = enabled (matches the backend's own fail-open default).
+  Future<Map<String, bool>> flags() async {
+    final res = await _api.get('/v1/flags');
+    return (res as Map).map((k, v) => MapEntry(k as String, v as bool));
+  }
 }
 
 final rideRepositoryProvider = Provider<RideRepository>((ref) {
@@ -304,3 +312,20 @@ final rideRepositoryProvider = Provider<RideRepository>((ref) {
     ref.watch(sharedPreferencesProvider),
   );
 });
+
+/// Fetched once per app session (not autoDispose) — flags change rarely
+/// enough that a stale read for the rest of a session is an acceptable
+/// trade for not re-fetching on every screen. A missing/failed fetch reads
+/// as "everything enabled" via [featureEnabled], matching the backend's
+/// own fail-open default so a network hiccup never blocks booking.
+final featureFlagsProvider = FutureProvider<Map<String, bool>>((ref) async {
+  return ref.watch(rideRepositoryProvider).flags();
+});
+
+/// `true` unless the flag is fetched and explicitly `false` — mirrors the
+/// backend's `flags::is_enabled` fail-open default (unknown key, or the
+/// flags fetch itself still loading/failed, both mean "enabled").
+bool featureEnabled(WidgetRef ref, String key) {
+  final flags = ref.watch(featureFlagsProvider).valueOrNull;
+  return flags?[key] ?? true;
+}
