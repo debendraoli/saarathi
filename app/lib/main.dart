@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -12,6 +13,12 @@ import 'src/core/prefs.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Nothing in this app's UI is designed for landscape — a live-tracking
+  // map, swipe sheets, and the fullscreen nav screen all assume portrait.
+  // Locked before the first frame so it never even flashes landscape on a
+  // device that starts rotated.
+  await SystemChrome.setPreferredOrientations(
+      [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
   final prefs = await SharedPreferences.getInstance();
   // Fast/local only — `NotificationService.consumePendingLaunchLink()`
   // (drained once, synchronously, by `notificationNavProvider` on the very
