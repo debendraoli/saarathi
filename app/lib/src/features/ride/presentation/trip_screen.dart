@@ -227,6 +227,30 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                   if (freshRoute != null) _lastRouteGeometry = freshRoute;
                   final routeGeometry =
                       _lastRouteGeometry ?? [trip.origin, trip.dest];
+                  // Same ETA `EtaFareRow` already shows as sheet text —
+                  // also floated right on the map next to the point it's
+                  // about, previously visible only by having the sheet
+                  // expanded (or knowing to look for it there at all).
+                  final routingToPickup = trip.status == TripStatus.accepted ||
+                      trip.status == TripStatus.arriving;
+                  final etaMins =
+                      (routingToPickup || trip.status == TripStatus.inProgress) &&
+                              driverLoc != null
+                          ? ref
+                              .watch(
+                                  tripEtaProvider(EtaQuery(driverLoc, routeTarget)))
+                              .valueOrNull
+                              ?.durationMins
+                          : null;
+                  final mapCallouts = <MapCallout>[
+                    if (etaMins != null)
+                      MapCallout(
+                        point: routeTarget,
+                        text: routingToPickup
+                            ? l.etaArriving(etaMins)
+                            : l.etaToDestination(etaMins),
+                      ),
+                  ];
                   final searching = trip.status == TripStatus.searching ||
                       trip.status == TripStatus.requested;
                   // The rider's own "you are here" arrow, shown only while
@@ -299,6 +323,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                               center: driverLoc ?? trip.origin,
                               route: routeGeometry,
                               pins: fixedPins,
+                              callouts: mapCallouts,
                               showRecenterButton: true,
                               locateButtonBottomOffset:
                                   MediaQuery.of(context).size.height *
@@ -1303,22 +1328,40 @@ class _DriverNextSwipeState extends ConsumerState<_DriverNextSwipe> {
   /// clean and ready in case this exact widget somehow gets a *different*
   /// `next` transition to show before the trip poll catches up.
   Future<void> _confirm() async {
-    ref.read(tripStatusUpdaterProvider(widget.tripId)).update(widget.next.$1);
-    Haptics.success();
-    setState(() => _busy = true);
+    try {
+      ref.read(tripStatusUpdaterProvider(widget.tripId)).update(widget.next.$1);
+      Haptics.success();
+    } catch (_) {
+      // Fall through regardless — the busy-cycle below is what resets
+      // SwipeToConfirm's own `_confirmed` flag (see its didUpdateWidget).
+      // Skipping it on an exception here would leave the thumb visually
+      // locked in "confirmed" forever with no way to retry, confirmed live
+      // as a stuck "I've arrived" swipe.
+    }
+    if (mounted) setState(() => _busy = true);
     await Future<void>.delayed(Duration.zero);
     if (mounted) setState(() => _busy = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    return SwipeToConfirm(
-      label: widget.next.$2,
-      busy: _busy,
-      onConfirmed: _confirm,
-      // Green — reads as "go/forward" opposite the cancel button's red,
-      // instead of both actions sharing the same brand-amber look.
-      color: Colors.green.shade600,
+    return Center(
+      // Previously stretched to the sheet's full width (minus its 18px
+      // margins) — on a typical phone that's most of the screen, both
+      // reading as visually oversized and requiring a swipe long enough
+      // that it was easy to under-drag past the commit threshold and land
+      // right back at the start, confirmed live as feeling "stuck".
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 260),
+        child: SwipeToConfirm(
+          label: widget.next.$2,
+          busy: _busy,
+          onConfirmed: _confirm,
+          // Green — reads as "go/forward" opposite the cancel button's red,
+          // instead of both actions sharing the same brand-amber look.
+          color: Colors.green.shade600,
+        ),
+      ),
     );
   }
 }
