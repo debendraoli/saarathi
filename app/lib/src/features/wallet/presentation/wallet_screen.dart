@@ -111,10 +111,17 @@ class _TxnTile extends StatelessWidget {
   const _TxnTile({required this.txn});
   final WalletTxn txn;
 
+  // An unrecognized type (any new backend txn kind — a refund, a promo
+  // credit) fell all the way through to an ambiguous swap icon regardless
+  // of its actual amount sign, giving no visual cue at all for something
+  // this tile otherwise already colors by sign. Fall back to the same
+  // sign-based direction instead.
   IconData get _icon => switch (txn.type) {
         'topup' => Icons.add_circle_outline_rounded,
         'ride_charge' || 'order_charge' => Icons.remove_circle_outline_rounded,
-        _ => Icons.swap_horiz_rounded,
+        _ => txn.amount >= 0
+            ? Icons.add_circle_outline_rounded
+            : Icons.remove_circle_outline_rounded,
       };
 
   @override

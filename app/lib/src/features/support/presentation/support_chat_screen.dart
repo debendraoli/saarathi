@@ -192,8 +192,19 @@ class _TripContextCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
-    final trip = ref.watch(tripDetailsProvider(tripId)).valueOrNull;
-    if (trip == null) return const SizedBox.shrink();
+    final async = ref.watch(tripDetailsProvider(tripId));
+    // Loading and "fetch failed/trip gone" used to render identically (both
+    // just vanished) — a rider/staff member couldn't tell "still loading"
+    // from "this reference is actually gone", which matters here since the
+    // whole point of the card is confirming what the thread is about.
+    if (async.isLoading) return const SizedBox.shrink();
+    final trip = async.valueOrNull;
+    if (trip == null) {
+      return _ContextCard(
+        icon: Icons.two_wheeler_rounded,
+        label: l.supportContextUnavailable,
+      );
+    }
     final date = trip.createdAt?.toLocal();
     final dateLabel = date == null
         ? ''
@@ -211,8 +222,16 @@ class _OrderContextCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final order = ref.watch(orderProvider(orderId)).valueOrNull;
-    if (order == null) return const SizedBox.shrink();
+    final l = AppL10n.of(context);
+    final async = ref.watch(orderProvider(orderId));
+    if (async.isLoading) return const SizedBox.shrink();
+    final order = async.valueOrNull;
+    if (order == null) {
+      return _ContextCard(
+        icon: Icons.inventory_2_rounded,
+        label: l.supportContextUnavailable,
+      );
+    }
     return _ContextCard(
       icon: Icons.inventory_2_rounded,
       label: '${order.merchantName} · NPR ${order.total.toStringAsFixed(0)}',

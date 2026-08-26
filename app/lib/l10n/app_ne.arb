@@ -579,6 +579,7 @@
   "supportEmptyState": "यात्रा वा अर्डरबारे प्रश्न छ? हामीलाई सन्देश पठाउनुहोस्, हाम्रो टोलीले जवाफ दिनेछ।",
   "supportAbout": "बारेमा",
   "supportAboutTrip": "यात्रा",
+  "supportContextUnavailable": "सन्दर्भ अब उपलब्ध छैन",
   "getHelp": "सहयोग लिनुहोस्",
   "supportSend": "पठाउनुहोस्",
   "navFullscreen": "पूर्ण स्क्रिन नेभिगेसन",
