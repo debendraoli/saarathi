@@ -197,7 +197,15 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   late final MapController _controller = widget.controller ?? MapController();
   bool _locating = false;
 
-  AnimationController? _navAnim;
+  // Persistent, created once and reused for the whole widget lifetime — see
+  // [_retargetNavAnimation]'s doc comment for why this doesn't dispose and
+  // recreate a controller on every retarget the way [_animateCamera]
+  // (still used by [_maybeFitPins]) does.
+  AnimationController? _navAnimCtrl;
+  LatLng? _navFromCenter, _navToCenter;
+  double _navFromZoom = 0, _navToZoom = 0;
+  double _navFromRotation = 0, _navToRotation = 0;
+
   AnimationController? _fitAnim;
   List<LatLng>? _lastFitPoints;
   Timer? _resizeFitDebounce;
@@ -407,7 +415,6 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
     final toRotationRaw =
         _mapRotationFor(target.heading) ?? _controller.camera.rotation;
     final toCenter = _lookAheadCenter(target);
-    _navAnim?.dispose();
     final camera = _controller.camera;
     final currentCenterValid =
         camera.center.latitude.isFinite && camera.center.longitude.isFinite;
@@ -418,26 +425,90 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
       // glide above — panning the whole accumulated gap at the usual speed
       // would look like a slow, unrealistic crawl instead of the camera
       // just being where the driver actually is.
+      _navAnimCtrl?.stop();
       _controller.moveAndRotate(toCenter, widget.navigationZoom, toRotationRaw);
       return;
     }
-    _animateCamera(
+    _retargetNavAnimation(
       toCenter: toCenter,
       toZoom: widget.navigationZoom,
       toRotation: toRotationRaw,
-      controllerSlot: (c) => _navAnim = c,
-      // Deliberately shorter than `_pinMoveDuration` (the marker's own
-      // glide, which stays linear/full-duration) — raster map tiles blur
-      // while actively panning/rotating (confirmed live: sharpens the
-      // instant a manual drag interrupts it), and matching the camera's
-      // glide to the *entire* ~4.2s inter-ping gap left it almost
-      // permanently mid-motion, so it was blurry nearly all the time.
-      // This still reads as a continuous, eased pan (nowhere near the
-      // original abrupt 600ms hop) while leaving real settled time each
-      // cycle for tiles to render sharp before the next ping moves it again.
-      duration: const Duration(milliseconds: 1800),
-      curve: Curves.easeOutCubic,
     );
+  }
+
+  /// Retargets the persistent nav-follow animation instead of disposing and
+  /// creating a fresh `AnimationController` (what [_animateCamera] below
+  /// still does, fine for [_maybeFitPins]'s much lower call rate). This one
+  /// backs [_animateTo], which the fullscreen turn-by-turn screen calls on
+  /// every `navigationTarget` update — and the device compass fires many
+  /// times a second even stationary. Disposing+recreating a controller (and
+  /// its listener closure) that often was reliably producing a
+  /// `_dependents.isEmpty` framework crash, confirmed live even after
+  /// throttling restarts to only >3° heading changes — the churn itself,
+  /// not just its frequency, was the problem. One controller for this
+  /// widget's whole lifetime, just re-`forward(from: 0)`'d with new
+  /// from/to values on each call, has no dispose/recreate cycle left to
+  /// race on at all.
+  void _retargetNavAnimation({
+    required LatLng toCenter,
+    required double toZoom,
+    required double toRotation,
+  }) {
+    if (!toCenter.latitude.isFinite ||
+        !toCenter.longitude.isFinite ||
+        !toZoom.isFinite) {
+      return;
+    }
+    final camera = _controller.camera;
+    var fromCenter = camera.center;
+    var fromZoom = camera.zoom;
+    if (!fromCenter.latitude.isFinite ||
+        !fromCenter.longitude.isFinite ||
+        !fromZoom.isFinite) {
+      fromCenter = toCenter;
+      fromZoom = toZoom;
+    }
+    final fromRotation = camera.rotation.isFinite ? camera.rotation : 0.0;
+    // Shortest angular path — same reasoning as `_animateCamera`.
+    var delta = (toRotation - fromRotation) % 360;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+
+    _navFromCenter = fromCenter;
+    _navToCenter = toCenter;
+    _navFromZoom = fromZoom;
+    _navToZoom = toZoom;
+    _navFromRotation = fromRotation;
+    _navToRotation = fromRotation + delta;
+
+    // Deliberately shorter than `_pinMoveDuration` (the marker's own glide,
+    // which stays linear/full-duration) — raster map tiles blur while
+    // actively panning/rotating (confirmed live: sharpens the instant a
+    // manual drag interrupts it), and matching the camera's glide to the
+    // *entire* ~4.2s inter-ping gap left it almost permanently mid-motion,
+    // so it was blurry nearly all the time. This still reads as a
+    // continuous, eased pan while leaving real settled time each cycle for
+    // tiles to render sharp before the next ping moves it again.
+    final ctrl = _navAnimCtrl ??= AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..addListener(_onNavAnimTick);
+    ctrl.forward(from: 0);
+  }
+
+  void _onNavAnimTick() {
+    if (!mounted) return;
+    final fromC = _navFromCenter;
+    final toC = _navToCenter;
+    final ctrl = _navAnimCtrl;
+    if (fromC == null || toC == null || ctrl == null) return;
+    final t = Curves.easeOutCubic.transform(ctrl.value);
+    final lat = fromC.latitude + (toC.latitude - fromC.latitude) * t;
+    final lng = fromC.longitude + (toC.longitude - fromC.longitude) * t;
+    final zoom = _navFromZoom + (_navToZoom - _navFromZoom) * t;
+    final rotation =
+        _navFromRotation + (_navToRotation - _navFromRotation) * t;
+    _controller.moveAndRotate(LatLng(lat, lng), zoom, rotation);
   }
 
   /// The set of points the camera should keep visible — every current pin's
@@ -737,7 +808,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    _navAnim?.dispose();
+    _navAnimCtrl?.dispose();
     _fitAnim?.dispose();
     _routeAnim?.dispose();
     _resizeFitDebounce?.cancel();
