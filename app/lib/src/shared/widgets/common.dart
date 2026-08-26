@@ -177,3 +177,45 @@ class _OfflineBannerState extends State<OfflineBanner>
     );
   }
 }
+
+/// "Locating…" pill — shown while waiting for the first GPS fix, so a
+/// compass/vehicle-heading that isn't moving yet reads as "still acquiring
+/// location" instead of looking broken. That first-fix wait is genuinely
+/// variable (near-instant with a warm GPS radio, several seconds cold) and
+/// not something to eliminate in software — this only makes the wait
+/// legible instead of silent, which is what made an intermittent "compass
+/// doesn't respond" report hard to tell apart from an actual bug.
+class LocatingIndicator extends StatelessWidget {
+  const LocatingIndicator({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(20),
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: scheme.primary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              AppL10n.of(context).locatingYou,
+              style: TextStyle(color: scheme.onSurface, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

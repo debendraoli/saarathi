@@ -311,6 +311,26 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                             ),
                           ),
                         ),
+                      // Own-position/heading only starts updating once the
+                      // first GPS fix lands — genuinely variable timing
+                      // (near-instant warm, several seconds cold). Without
+                      // this, that wait looked identical to a broken
+                      // compass; confirmed live as an intermittent,
+                      // hard-to-reproduce "compass doesn't respond" report.
+                      if ((iAmDriver && trip.isActive && driverLoc == null) ||
+                          (iAmRider &&
+                              trip.isActive &&
+                              driverLoc == null &&
+                              selfPos == null))
+                        const SafeArea(
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: Padding(
+                              padding: EdgeInsets.only(top: 12),
+                              child: LocatingIndicator(),
+                            ),
+                          ),
+                        ),
                       // Invisible: the driver streams position during an active trip.
                       if (iAmDriver && trip.isActive)
                         _DriverLocationPublisher(tripId: tripId),

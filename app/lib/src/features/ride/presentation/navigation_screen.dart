@@ -151,6 +151,26 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> {
               navigationTarget: driverPos,
             ),
           ),
+          // Own-position/heading only starts updating once the first GPS fix
+          // lands — genuinely variable timing (near-instant warm, several
+          // seconds cold). Without this, that wait looked identical to a
+          // broken compass; confirmed live as an intermittent, hard-to-
+          // reproduce "compass doesn't respond" report.
+          if (driverLoc == null)
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Padding(
+                    padding: EdgeInsets.only(top: 12),
+                    child: LocatingIndicator(),
+                  ),
+                ),
+              ),
+            ),
           if (currentStep != null)
             Positioned(
               left: 0,
