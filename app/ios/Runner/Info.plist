@@ -34,6 +34,8 @@
 	<string>Saarathi uses your camera to scan QR codes and capture KYC/shop photos.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Saarathi uses your microphone for in-app voice and video calls with your driver or rider.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Saarathi uses motion &amp; orientation data to point the vehicle icon on the map in the right direction.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Saarathi uses your photo library to attach documents and shop/item photos.</string>
 	<key>UIBackgroundModes</key>
