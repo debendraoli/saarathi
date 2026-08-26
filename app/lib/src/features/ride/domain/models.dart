@@ -147,6 +147,7 @@ class FareEstimate {
     this.routeSource = '',
     this.fareFloor = 0,
     this.fareCeiling = 0,
+    this.nearbyDrivers = 0,
   });
 
   final double distanceKm;
@@ -162,6 +163,11 @@ class FareEstimate {
   final double fareFloor;
   final double fareCeiling;
 
+  /// Online drivers within dispatch's max search radius of the pickup point,
+  /// as of this estimate — lets the booking sheet disable Confirm instead of
+  /// letting the rider wait out a 10-minute search that could never succeed.
+  final int nearbyDrivers;
+
   int get durationMins => (durationSecs / 60).ceil();
 
   factory FareEstimate.fromJson(Map<String, dynamic> j) => FareEstimate(
@@ -174,6 +180,7 @@ class FareEstimate {
         routeSource: (j['route_source'] as String?) ?? '',
         fareFloor: asDouble(j['fare_floor']),
         fareCeiling: asDouble(j['fare_ceiling']),
+        nearbyDrivers: (j['nearby_drivers'] as num?)?.toInt() ?? 0,
       );
 }
 

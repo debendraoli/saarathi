@@ -585,9 +585,11 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                 }),
                 onPayment: (p) => setState(() => _payment = p),
                 onAsk: (v) => setState(() => _ask = v),
-                onBook: selectedEstimate?.valueOrNull == null || _booking
+                onBook: selectedEstimate?.valueOrNull == null ||
+                        _booking ||
+                        selectedEstimate!.valueOrNull!.nearbyDrivers == 0
                     ? null
-                    : () => _book(selectedEstimate!.valueOrNull!.finalFare),
+                    : () => _book(selectedEstimate.valueOrNull!.finalFare),
                 onSave: _dest == null ? null : _saveDest,
                 onClearDest: _dest == null
                     ? null
@@ -866,10 +868,14 @@ class _Sheet extends StatelessWidget {
                                     CircularProgressIndicator(strokeWidth: 2.4),
                               )
                             : Text(
-                                estimates.isEmpty
-                                    ? l.actionContinue
-                                    : '${l.confirmRide} · $currencySymbol '
-                                        '${(ask ?? selected?.valueOrNull?.finalFare)?.toStringAsFixed(0) ?? ''}',
+                                mode == RideMode.ride &&
+                                        selected?.valueOrNull?.nearbyDrivers ==
+                                            0
+                                    ? l.noDriversNearby
+                                    : estimates.isEmpty
+                                        ? l.actionContinue
+                                        : '${l.confirmRide} · $currencySymbol '
+                                            '${(ask ?? selected?.valueOrNull?.finalFare)?.toStringAsFixed(0) ?? ''}',
                               ),
                       ),
                     ),

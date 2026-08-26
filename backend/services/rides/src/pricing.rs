@@ -47,6 +47,12 @@ pub struct Estimate {
     pub fare_ceiling: Decimal,
     /// The surge multiplier actually applied (already clamped to the legal +20%).
     pub surge_multiplier: Decimal,
+    /// Online drivers within dispatch's max search radius of the pickup
+    /// point, right now — lets the app disable the booking button ("no
+    /// drivers nearby") before wasting a 10-minute search timeout on a trip
+    /// nothing could ever be dispatched to. Same radius/definition of
+    /// "nearby" real dispatch's supply-surge signal already uses.
+    pub nearby_drivers: usize,
     /// Feedback when a promo code was supplied but could not be applied.
     pub note: Option<String>,
     pub currency: &'static str,
@@ -133,8 +139,14 @@ pub async fn estimate(
     let route = st.router.route_path(&path, profile).await;
 
     let per_km = effective_per_km_rate(st, vclass).await;
+    // Computed once here — feeds both the supply-surge signal below and the
+    // `nearby_drivers` count returned to the app for the booking-button gate.
+    let nearby_drivers =
+        crate::dispatch::nearby_count(st, origin.lng, origin.lat, st.config.dispatch_max_radius_km)
+            .await
+            .unwrap_or(0);
     // Dynamic surge (time windows + supply scarcity); the core clamps it to +20%.
-    let surge = crate::surge::effective_multiplier(st, vehicle_class, origin).await;
+    let surge = crate::surge::effective_multiplier(st, vehicle_class, nearby_drivers).await;
     let quote = quote_fare(
         vclass,
         route.distance_km,
@@ -185,6 +197,7 @@ pub async fn estimate(
             fare_floor,
             fare_ceiling,
             surge_multiplier: quote.effective_surge,
+            nearby_drivers,
             note,
             currency: "NPR",
         },

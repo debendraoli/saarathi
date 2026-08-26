@@ -10,7 +10,6 @@
 //! the legal +20% ceiling — surge can never breach the law.
 
 use crate::flags;
-use crate::routing::LatLng;
 use crate::state::AppState;
 use chrono::{Datelike, FixedOffset, TimeZone, Timelike, Utc};
 use rust_decimal::Decimal;
@@ -70,16 +69,16 @@ pub fn supply_multiplier(nearby: usize) -> Decimal {
 }
 
 /// The raw surge multiplier to hand to the pricing clamp. Returns 1.0 when the
-/// surge feature flag is off.
-pub async fn effective_multiplier(st: &AppState, vclass: &str, origin: LatLng) -> Decimal {
+/// surge feature flag is off. `nearby` is the caller's own already-computed
+/// driver count (see `dispatch::nearby_count`) — callers that also need that
+/// count for another purpose (e.g. gating the booking button on driver
+/// availability) compute it once and pass it in here, rather than this
+/// function silently re-querying it.
+pub async fn effective_multiplier(st: &AppState, vclass: &str, nearby: usize) -> Decimal {
     if !flags::is_enabled(st, flags::SURGE, true).await {
         return dec!(1.0);
     }
     let by_time = time_window_multiplier(st, vclass).await;
-    let nearby =
-        crate::dispatch::nearby_count(st, origin.lng, origin.lat, st.config.dispatch_max_radius_km)
-            .await
-            .unwrap_or(0);
     by_time.max(supply_multiplier(nearby))
 }
 
