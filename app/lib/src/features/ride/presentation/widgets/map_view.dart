@@ -589,7 +589,13 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
         !targetZoom.isFinite) {
       return;
     }
+    // Cleared, not just disposed — same reasoning as `_animateRouteReveal`:
+    // `_animateCamera` below has its own (here practically unreachable,
+    // since the same check already ran just above) early-return finite
+    // check that would otherwise leave `_fitAnim` pointing at this disposed
+    // instance instead of a fresh one.
     _fitAnim?.dispose();
+    _fitAnim = null;
     _animateCamera(
       toCenter: fitted.center,
       toZoom: targetZoom,
@@ -674,7 +680,15 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   /// itself changing — e.g. switching from routing-to-pickup to
   /// routing-to-destination) gets the growth reveal.
   void _animateRouteReveal(List<LatLng> target, List<LatLng>? previous) {
+    // Cleared, not just disposed — both early returns below used to leave
+    // `_routeAnim` pointing at this now-disposed controller instead of
+    // replacing it (only the fall-through path at the end did that).
+    // Reproduced live: a later deactivate() call `_routeAnim?.stop()`-ing
+    // that stale reference threw "AnimationController.stop() called after
+    // AnimationController.dispose()" — nothing to do with widget teardown
+    // timing at all, just a dangling reference from here.
     _routeAnim?.dispose();
+    _routeAnim = null;
     if (target.length < 2) {
       setState(() => _revealedRoute = target);
       return;
