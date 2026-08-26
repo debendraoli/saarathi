@@ -5,8 +5,10 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../shared/widgets/common.dart';
+import '../../ride/application/ride_controller.dart';
 import '../../ride/data/ride_repository.dart';
 import '../../ride/domain/rating_tags.dart';
+import '../../ride/presentation/widgets/mini_route_map.dart';
 import '../../ride/presentation/widgets/rating_sheet.dart';
 import '../data/marketplace_repository.dart';
 
@@ -126,6 +128,15 @@ class OrderScreen extends ConsumerWidget {
                             icon: const Icon(Icons.storefront_rounded),
                             label: Text(l.rateRestaurantAction),
                           ),
+                        ),
+                      // Only once a courier's actually been dispatched — the
+                      // pickup point here is that courier's own trip origin
+                      // (the merchant), not something this order carries
+                      // itself; nothing to show before dispatch.
+                      if (o.tripId != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 16),
+                          child: _CourierRouteMap(tripId: o.tripId!),
                         ),
                       const Divider(height: 32),
                       for (final item in o.items)
@@ -263,6 +274,22 @@ class _Step extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// The courier's route (merchant → this order's delivery address), reusing
+/// the trip's own origin/dest — an order carries no coordinates of its own.
+/// Quietly renders nothing while loading/on error rather than a spinner or
+/// error banner; this is a secondary detail, not the point of the screen.
+class _CourierRouteMap extends ConsumerWidget {
+  const _CourierRouteMap({required this.tripId});
+  final String tripId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final trip = ref.watch(tripDetailsProvider(tripId)).valueOrNull;
+    if (trip == null) return const SizedBox.shrink();
+    return MiniRouteMap(origin: trip.origin, dest: trip.dest);
   }
 }
 

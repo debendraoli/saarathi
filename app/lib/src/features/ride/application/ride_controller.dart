@@ -94,6 +94,17 @@ final tripEtaProvider =
   return ref.watch(rideRepositoryProvider).routeEta(q.from, q.to);
 });
 
+/// One-shot fetch for a finished trip's details page — a completed,
+/// cancelled, or no-driver trip's status/fare never changes again, so
+/// there's nothing worth the live-poll machinery below re-fetching for.
+/// (Participant/driver info for the same page can still reuse the existing
+/// [tripParticipantsProvider] further below — it only re-fetches on a
+/// status change, which a finished trip's details page will never see.)
+final tripDetailsProvider =
+    FutureProvider.autoDispose.family<Trip, String>((ref, id) {
+  return ref.watch(rideRepositoryProvider).trip(id);
+});
+
 /// Single underlying poll loop for a trip — [tripStreamProvider] and
 /// [tripStaleProvider] both derive from this one fetch cycle rather than
 /// each polling independently.

@@ -82,7 +82,14 @@ class _TripTileState extends ConsumerState<TripTile> {
     final isDelivery = trip.tripType == 'delivery';
     return Card(
       child: ListTile(
-        onTap: () => context.push('${Routes.trip}/${trip.id}'),
+        // A finished trip (completed/cancelled/no-driver) has nothing left
+        // for the live trip screen's swipe controls/map-follow/call-message
+        // affordances to do — it gets the static details screen instead.
+        // Still-active trips (rare here, but possible right after booking)
+        // keep going to the live view.
+        onTap: () => context.push(trip.isActive
+            ? '${Routes.trip}/${trip.id}'
+            : '${Routes.tripDetails}/${trip.id}'),
         leading: CircleAvatar(
           backgroundColor: scheme.surfaceContainerHighest,
           child: Icon(

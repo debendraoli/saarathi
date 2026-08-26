@@ -47,6 +47,7 @@ import '../../features/wallet/presentation/wallet_screen.dart';
 import '../../features/ride/presentation/driver_earnings_screen.dart';
 import '../../features/ride/presentation/rider_stats_screen.dart';
 import '../../features/ride/presentation/navigation_screen.dart';
+import '../../features/ride/presentation/trip_details_screen.dart';
 import '../../features/ride/presentation/trip_screen.dart';
 import '../../features/ride/presentation/where_to_screen.dart';
 import '../prefs.dart';
@@ -62,6 +63,7 @@ class Routes {
   static const account = '/account';
   static const whereTo = '/ride/where-to';
   static const trip = '/ride/trip'; // /ride/trip/:id
+  static const tripDetails = '/ride/trip-details'; // /ride/trip-details/:id
   static const tripNavigate = '/ride/trip'; // /ride/trip/:id/navigate
   static const becomeDriver = '/driver/register';
   static const kyc = '/driver/kyc';
@@ -242,6 +244,13 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '${Routes.trip}/:id',
         pageBuilder: (_, state) => _page(
           TripScreen(tripId: state.pathParameters['id']!),
+          key: state.pageKey,
+        ),
+      ),
+      GoRoute(
+        path: '${Routes.tripDetails}/:id',
+        pageBuilder: (_, state) => _page(
+          TripDetailsScreen(tripId: state.pathParameters['id']!),
           key: state.pageKey,
         ),
       ),
