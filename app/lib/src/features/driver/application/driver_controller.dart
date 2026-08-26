@@ -16,6 +16,12 @@ import '../data/driver_repository.dart';
 import '../domain/models.dart';
 import 'driver_channel.dart';
 
+/// Thrown instead of silently going online at the Dang-district fallback
+/// point when a real GPS fix isn't available — appearing "online" at a fake
+/// location would mean receiving offers for trips nowhere near the driver
+/// with no indication anything was wrong.
+class LocationUnavailableException implements Exception {}
+
 class DriverStatus {
   const DriverStatus(
       {this.online = false,
@@ -113,7 +119,15 @@ class DriverController extends Notifier<DriverStatus> {
   Future<void> _attemptResumePresence() async {
     _resumeRetryTimer?.cancel();
     try {
-      final at = await currentLatLng();
+      final loc = await currentLocation();
+      if (loc.isFallback) {
+        // Resuming "online" at a fake location is worse than not resuming
+        // at all — retry instead of reporting Dang-district presence to the
+        // backend as if it were real.
+        _scheduleResumeRetry();
+        return;
+      }
+      final at = loc.point;
       state = state.copyWith(lastLocation: at);
       await _repo.goOnline(at, state.jobTypes);
       await ref.read(sharedPreferencesProvider).setBool(_wasOnlineKey, true);
@@ -151,7 +165,12 @@ class DriverController extends Notifier<DriverStatus> {
     _resumeRetryTimer?.cancel();
     state = state.copyWith(busy: true);
     try {
-      final at = await currentLatLng();
+      final loc = await currentLocation();
+      if (loc.isFallback) {
+        state = state.copyWith(busy: false);
+        throw LocationUnavailableException();
+      }
+      final at = loc.point;
       state = state.copyWith(lastLocation: at);
       await _repo.goOnline(at, state.jobTypes);
       state = state.copyWith(online: true, busy: false);

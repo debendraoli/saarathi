@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' show pi;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';

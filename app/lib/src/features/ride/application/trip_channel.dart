@@ -45,10 +45,15 @@ class TripChannel {
         Uri.parse('${AppConfig.wsBase}/v1/ws?token=$token&trip=$tripId');
     final ws = WebSocketChannel.connect(uri);
     _ws = ws;
-    // A fresh connection attempt means whatever backoff built up from an
-    // earlier outage no longer applies — the next drop should retry
-    // quickly again, not inherit a stale multi-attempt delay.
-    _reconnectAttempt = 0;
+    // `connect()` returns before the handshake actually succeeds or fails —
+    // only reset the backoff once `ready` confirms the connection is real,
+    // otherwise a persistently-down backend gets this reset on every single
+    // attempt (before its own failure is even observed) and backoff never
+    // grows past 1s, hammering the endpoint indefinitely instead of backing
+    // off.
+    ws.ready.then((_) {
+      if (!_disposed) _reconnectAttempt = 0;
+    }).catchError((_) {});
     ws.stream.listen(
       (raw) {
         try {

@@ -79,18 +79,34 @@ Future<bool> requestLocationService() async {
   }
 }
 
+/// A resolved position plus whether it's the Dang-district fallback rather
+/// than a real GPS fix — callers that would otherwise act on a fake location
+/// as if it were real (e.g. a driver going online) need to know the
+/// difference; callers that just want a best-effort point for search/display
+/// (the common case) can ignore it via [currentLatLng].
+class LocationResult {
+  const LocationResult(this.point, {required this.isFallback});
+  final LatLng point;
+  final bool isFallback;
+}
+
 /// Best-effort current position, degrading to the Dang district centre when
 /// location is unavailable/denied (offline-tolerant, Nepal rural reality).
-Future<LatLng> currentLatLng() async {
-  const fallback = LatLng(AppConfig.defaultLat, AppConfig.defaultLng);
+Future<LocationResult> currentLocation() async {
+  const fallback =
+      LocationResult(LatLng(AppConfig.defaultLat, AppConfig.defaultLng), isFallback: true);
   try {
     if (!await ensureLocationPermission()) return fallback;
     if (!await Geolocator.isLocationServiceEnabled()) return fallback;
     final pos = await Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
     );
-    return LatLng(pos.latitude, pos.longitude);
+    return LocationResult(LatLng(pos.latitude, pos.longitude), isFallback: false);
   } catch (_) {
     return fallback;
   }
 }
+
+/// Best-effort current position, degrading to the Dang district centre when
+/// location is unavailable/denied (offline-tolerant, Nepal rural reality).
+Future<LatLng> currentLatLng() async => (await currentLocation()).point;

@@ -1651,6 +1651,15 @@ class _DriverLocationPublisherState
   Position? _pendingRetry;
   int _retryAttempt = 0;
 
+  // The position stream itself can die mid-trip — most commonly the OS
+  // location permission being revoked live (Android allows this without
+  // killing the app) or the GPS toggle turned off. Previously this just
+  // silently stopped: no `onError` meant the stream terminated and the
+  // driver's marker froze in place for the rest of the trip with no
+  // indication anything was wrong. Restarting re-checks permission/service
+  // each time, so it recovers on its own the moment either is restored.
+  Timer? _streamRestartTimer;
+
   @override
   void initState() {
     super.initState();
@@ -1692,7 +1701,7 @@ class _DriverLocationPublisherState
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
       ),
-    ).listen(_onPosition);
+    ).listen(_onPosition, onError: (_) => _restartStream(), onDone: _restartStream);
     _compassSub = ref.listenManual(compassHeadingProvider, (prev, next) {
       // `compassHeadingProvider` is a keep-alive, app-lifetime provider — an
       // event can still be in flight the instant this widget's dispose()
@@ -1791,12 +1800,23 @@ class _DriverLocationPublisherState
     });
   }
 
+  void _restartStream() {
+    _sub?.cancel();
+    _sub = null;
+    if (!mounted) return;
+    _streamRestartTimer?.cancel();
+    _streamRestartTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) _start();
+    });
+  }
+
   @override
   void dispose() {
     _sub?.cancel();
     _compassSub?.close();
     _keepAliveTimer?.cancel();
     _retryTimer?.cancel();
+    _streamRestartTimer?.cancel();
     _connSub?.close();
     // Don't leak this trip's last fix into whatever comes next (a new trip,
     // or the driver going idle) — the local nav camera should show nothing
@@ -1832,6 +1852,12 @@ class _SelfLocationWatcherState extends ConsumerState<_SelfLocationWatcher> {
   double? _compassHeading;
   double? _lastHeading;
 
+  // See `_DriverLocationPublisherState._streamRestartTimer` — without an
+  // `onError`/`onDone` handler, a live permission revocation or GPS toggle
+  // silently kills this stream and the rider's own position/heading arrow
+  // freezes for the rest of the trip.
+  Timer? _streamRestartTimer;
+
   @override
   void initState() {
     super.initState();
@@ -1849,7 +1875,7 @@ class _SelfLocationWatcherState extends ConsumerState<_SelfLocationWatcher> {
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
       ),
-    ).listen(_onPosition);
+    ).listen(_onPosition, onError: (_) => _restartStream(), onDone: _restartStream);
     _compassSub = ref.listenManual(compassHeadingProvider, (prev, next) {
       // Same in-flight-event-vs-dispose race noted on
       // `_DriverLocationPublisherState`'s own compass listener.
@@ -1883,10 +1909,21 @@ class _SelfLocationWatcherState extends ConsumerState<_SelfLocationWatcher> {
     );
   }
 
+  void _restartStream() {
+    _sub?.cancel();
+    _sub = null;
+    if (!mounted) return;
+    _streamRestartTimer?.cancel();
+    _streamRestartTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) _start();
+    });
+  }
+
   @override
   void dispose() {
     _sub?.cancel();
     _compassSub?.close();
+    _streamRestartTimer?.cancel();
     ref.read(localSelfPositionProvider.notifier).state = null;
     super.dispose();
   }

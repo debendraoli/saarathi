@@ -44,7 +44,13 @@ class DriverChannel {
     final uri = Uri.parse('${AppConfig.wsBase}/v1/driver/ws?token=$token');
     final ws = WebSocketChannel.connect(uri);
     _ws = ws;
-    _reconnectAttempt = 0;
+    // See TripChannel._connect: `connect()` returns before the handshake
+    // actually succeeds or fails, so only reset backoff once `ready`
+    // confirms it — otherwise a persistently-down backend gets the reset on
+    // every attempt and backoff never grows past 1s.
+    ws.ready.then((_) {
+      if (!_disposed) _reconnectAttempt = 0;
+    }).catchError((_) {});
     ws.stream.listen(
       (raw) {
         try {

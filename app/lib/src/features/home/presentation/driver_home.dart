@@ -190,9 +190,19 @@ class _OnlineBoard extends ConsumerWidget {
         _OnlineCard(
           online: status.online,
           busy: status.busy,
-          onToggle: () {
+          onToggle: () async {
             Haptics.success();
-            ref.read(driverControllerProvider.notifier).toggleOnline();
+            try {
+              await ref.read(driverControllerProvider.notifier).toggleOnline();
+            } on LocationUnavailableException {
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(l.goOnlineNeedsLocation)),
+              );
+            } catch (_) {
+              // Other failures (network, backend rejection) already update
+              // `status` themselves; nothing extra to show here.
+            }
           },
         ),
         const _TodayGoalCard(),

@@ -105,6 +105,13 @@ class ApiClient {
     try {
       final refresh = await _tokens.refresh;
       if (refresh == null) {
+        // No refresh token in storage — same unrecoverable state as a
+        // refresh call that fails below, so it needs the same fallout:
+        // clear whatever's left and force the app back to login, rather
+        // than leaving a "still authenticated" UI that can never again
+        // complete a request.
+        await _tokens.clear();
+        onSessionExpired?.call();
         completer.complete(false);
       } else {
         final res = await _bare.post<dynamic>(
