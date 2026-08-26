@@ -3,13 +3,11 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/foreground/driver_foreground_service.dart';
 import '../../../core/notifications/push_service.dart';
 import '../../../core/prefs.dart';
-import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../merchant/data/merchant_repository.dart';
@@ -75,17 +73,6 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ],
               ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text(l.aboutSection, style: sectionLabelStyle),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.info_outline_rounded),
-              title: Text(l.aboutSection),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => context.push(Routes.about),
             ),
           ),
         ],

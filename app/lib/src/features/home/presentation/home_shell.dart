@@ -287,6 +287,12 @@ class MenuScreen extends ConsumerWidget {
               title: Text(l.supportTitle),
               onTap: () => go(Routes.support),
             ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.info_outline_rounded),
+              title: Text(l.aboutSection),
+              onTap: () => go(Routes.about),
+            ),
           ],
         ),
       ),
