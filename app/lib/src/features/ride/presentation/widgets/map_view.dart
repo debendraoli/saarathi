@@ -807,6 +807,32 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   }
 
   @override
+  void deactivate() {
+    // `mounted` alone doesn't guard the animation listeners below (they all
+    // already check it) — it only flips `false` once `dispose()` actually
+    // runs, but `deactivate()` fires immediately when this widget is being
+    // removed (e.g. `Navigator.pop()` off the fullscreen nav screen), and a
+    // Ticker keeps firing every frame regardless of widget-tree state in
+    // between. Confirmed live: popping the fullscreen nav screen mid-glide
+    // left `_navAnimCtrl` (up to 1800ms remaining) still calling
+    // `_controller.moveAndRotate` once a frame into a FlutterMap element
+    // that was deactivated but not yet disposed — flutter_map's own
+    // internals then threw "Looking up a deactivated widget's ancestor is
+    // unsafe", every single frame, for as long as the animation had left to
+    // run (~240 consecutive errors observed, matching ~4s at 60fps). `stop()`
+    // (not `dispose()` — deactivation can theoretically be followed by
+    // reactivation elsewhere in the tree) silences the Ticker immediately;
+    // `dispose()` below still does the real cleanup once removal is final.
+    _navAnimCtrl?.stop();
+    _fitAnim?.stop();
+    _routeAnim?.stop();
+    for (final anim in _pinAnims.values) {
+      anim.stop();
+    }
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
     _navAnimCtrl?.dispose();
     _fitAnim?.dispose();
