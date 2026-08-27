@@ -1,0 +1,23 @@
+{
+  "options": {
+    "paths": {
+      "root": "",
+      "styles": "styles",
+      "fonts": "/usr/src/app/node_modules/tileserver-gl-styles/fonts",
+      "mbtiles": ""
+    }
+  },
+  "styles": {
+    "basic-preview": {
+      "style": "saarathi/style.json",
+      "tilejson": {
+        "bounds": [80.04913, 26.3445, 88.22213, 30.47822]
+      }
+    }
+  },
+  "data": {
+    "v3": {
+      "mbtiles": "nepal.mbtiles"
+    }
+  }
+}

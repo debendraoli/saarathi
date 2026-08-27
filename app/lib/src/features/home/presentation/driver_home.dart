@@ -267,7 +267,7 @@ class _DriverActiveTripCard extends ConsumerWidget {
   }
 }
 
-class _OnlineCard extends StatelessWidget {
+class _OnlineCard extends StatefulWidget {
   const _OnlineCard(
       {required this.online, required this.busy, required this.onToggle});
 
@@ -276,7 +276,44 @@ class _OnlineCard extends StatelessWidget {
   final VoidCallback onToggle;
 
   @override
+  State<_OnlineCard> createState() => _OnlineCardState();
+}
+
+class _OnlineCardState extends State<_OnlineCard> with WidgetsBindingObserver {
+  // Null until the first check resolves — the button stays hidden rather
+  // than flashing on then off, since most drivers will already have granted
+  // this on a previous session.
+  bool? _ignoringOptimizations;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Coming back from the system settings screen — pick up the new value.
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final ignoring = await DriverForegroundService.isBatteryOptimizationIgnored;
+    if (mounted) setState(() => _ignoringOptimizations = ignoring);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final online = widget.online;
+    final busy = widget.busy;
+    final onToggle = widget.onToggle;
     final l = AppL10n.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
     final statusContainer = online
@@ -335,19 +372,32 @@ class _OnlineCard extends StatelessWidget {
               online ? l.onlineBody : l.offlineBody,
               style: TextStyle(color: onStatusContainer),
             ),
-            const SizedBox(height: 10),
-            TextButton.icon(
-              onPressed: () async {
-                await DriverForegroundService.requestBatteryExclusion();
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(l.batteryExclusionDone)),
-                  );
-                }
-              },
-              icon: const Icon(Icons.battery_saver_rounded, size: 18),
-              label: Text(l.batteryExclusion),
-            ),
+            // Hidden once granted, and never popped automatically — the
+            // driver taps this on their own terms rather than an OS
+            // permission dialog appearing unprompted every time they go
+            // online. `OutlinedButton` (a visible border, not just text) is
+            // what actually signals "tappable" here, not a bare icon+label
+            // that can read as decoration.
+            if (_ignoringOptimizations == false) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: onStatusContainer,
+                  side: BorderSide(color: onStatusContainer),
+                ),
+                onPressed: () async {
+                  await DriverForegroundService.requestBatteryExclusion();
+                  await _refresh();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(l.batteryExclusionDone)),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.battery_saver_rounded, size: 18),
+                label: Text(l.batteryExclusion),
+              ),
+            ],
           ],
         ),
       ),

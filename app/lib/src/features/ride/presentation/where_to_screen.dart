@@ -552,7 +552,11 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                   MapPin(
                     _stops[i].point,
                     Icons.adjust_rounded,
-                    Theme.of(context).colorScheme.tertiary,
+                    // Not `colorScheme.tertiary` — this app's amber seed
+                    // derives a muddy brown/olive tertiary tone, which read
+                    // as unpolished against the map (see the driver-marker
+                    // fix in trip_screen.dart for the same issue).
+                    Colors.blueGrey.shade600,
                     id: 'stop-$i',
                     label: '${i + 1}',
                   ),

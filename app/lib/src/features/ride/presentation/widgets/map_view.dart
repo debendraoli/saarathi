@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter_map/flutter_map.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/retry.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../../core/config/app_config.dart';
@@ -38,7 +40,28 @@ const routeLineColor = Color(0xFF1A73E8);
 /// from — and writes to — the same on-disk cache; this is also why a route
 /// seen once (during a ride, or even a previous app run before a crash) is
 /// immediately available again without a network round trip.
+/// `NetworkTileProvider`'s own default (an unconfigured `RetryClient`) only
+/// retries an HTTP 503, 3 times, over ~2.4s total — not remotely enough for
+/// a moving vehicle on cellular, where a blip is a dropped/timed-out
+/// connection (a thrown exception, not a 503) and can easily outlast that
+/// window. Confirmed live: an uncached tile hit during a real ride came back
+/// blank and *stayed* blank — once `NetworkTileImageProvider` gives up on a
+/// tile, nothing re-requests it on its own; the only way it gets fixed is
+/// panning/zooming away and back. A cached tile is unaffected either way
+/// (served straight from disk, no network round trip) — this only matters
+/// for the first time a given tile is ever requested.
+final _tileHttpClient = RetryClient(
+  http.Client(),
+  retries: 6,
+  when: (r) => r.statusCode != 200,
+  whenError: (_, __) => true,
+  delay: (retryCount) => Duration(
+    milliseconds: (400 * (1 << retryCount)).clamp(400, 6000),
+  ),
+);
+
 final _tileProvider = NetworkTileProvider(
+  httpClient: _tileHttpClient,
   cachingProvider: BuiltInMapCachingProvider.getOrCreateInstance(
     overrideFreshAge: const Duration(days: 30),
   ),

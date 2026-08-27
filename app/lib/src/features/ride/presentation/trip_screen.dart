@@ -262,8 +262,21 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                     if (driverLoc != null)
                       MapPin(
                         driverLoc,
-                        vehicleIconFor(trip.vehicleClass),
-                        Theme.of(context).colorScheme.tertiary,
+                        // A rotating arrow reads as "heading this way" at a
+                        // glance, the way Google Maps' own nav puck does — a
+                        // vehicle-class silhouette (car/bike/rickshaw) is a
+                        // fixed side-profile glyph, so rotating it by
+                        // heading just looks like it's spinning in place
+                        // rather than pointing anywhere.
+                        Icons.navigation_rounded,
+                        // Same deliberate blue as the route line and the
+                        // rider's own-position arrow below, not
+                        // `colorScheme.tertiary` — Material 3's derived
+                        // tertiary role from this app's amber/saffron seed
+                        // lands in a muted brown/olive tone, which is
+                        // exactly what was reported live as an unpolished-
+                        // looking marker.
+                        routeLineColor,
                         heading: driverPos?.heading,
                         id: 'driver',
                       ),

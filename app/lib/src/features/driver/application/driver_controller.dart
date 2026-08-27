@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../core/foreground/driver_foreground_service.dart';
 import '../../../core/location.dart';
+import '../../../core/notifications/notification_service.dart';
 import '../../../core/network/api_client.dart' show ApiException;
 import '../../../core/offline/connectivity.dart';
 import '../../../core/prefs.dart';
@@ -269,8 +270,20 @@ final driverOffersProvider =
     final ids = offers.map((o) => o.tripId).toSet();
     final lastSeen = seen;
     if (lastSeen != null) {
-      if (ids.difference(lastSeen).isNotEmpty) {
+      final newIds = ids.difference(lastSeen);
+      if (newIds.isNotEmpty) {
         RequestRing.play();
+        // A real tray notification, not just the ring — the ring alone is
+        // easy to miss (silent phone, ambient noise while riding) and, on
+        // this app, is the only signal that ever fired while the app was
+        // in the foreground. `NotificationService.show` posts a heads-up
+        // notification regardless of foreground/background state.
+        unawaited(NotificationService.instance.show(
+          newIds.length > 1
+              ? '${newIds.length} new ride requests'
+              : 'New ride request',
+          'Tap to view and respond',
+        ));
       } else if (ids.isEmpty) {
         RequestRing.stop();
       }

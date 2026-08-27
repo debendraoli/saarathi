@@ -25,6 +25,11 @@ dependencies:
 
   # Maps (self-hosted OSM/Valhalla tiles) + location
   flutter_map: ^8.3.1
+  # Already pulled in transitively by flutter_map (its NetworkTileProvider's
+  # default RetryClient) — declared directly so map_view.dart can configure
+  # a more patient retry policy for tile fetches over an unreliable mobile
+  # connection instead of the default's ~2.4s/503-only retry.
+  http: ^1.6.0
   latlong2: ^0.10.1
   geolocator: ^14.0.3
   location: ^10.0.2

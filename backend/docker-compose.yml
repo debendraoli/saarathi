@@ -473,9 +473,6 @@ services:
   # request with its own on-disk render cache — the app's TileLayer needs no
   # changes at all, still just a plain {z}/{x}/{y}.png URL. Point the app at
   # it with --dart-define=SAARATHI_TILE_URL=http://<host>:8091/styles/basic-preview/{z}/{x}/{y}.png
-  # ("basic-preview" confirmed live — tileserver-gl auto-generates this style
-  # id from the mbtiles when no config.json is supplied; re-check via
-  # http://<host>:8091 if it's ever regenerated with a custom config).
   tileserver-gl:
     image: maptiler/tileserver-gl:latest
     profiles: ["routing"]
@@ -488,9 +485,20 @@ services:
     # the mbtiles already exists).
     ports:
       - "8091:8080"
-    command: ["--mbtiles", "/data/nepal.mbtiles"]
+    # Explicit config + our own recolored style, not the plain `--mbtiles`
+    # shorthand — that auto-picks tileserver-gl-styles' single bundled
+    # "basic-preview" style, which is an explicitly-named dev preview (warm
+    # khaki background/landuse, confirmed live as the muddy/brown look
+    # reported on-device) rather than something meant to ship. Same style
+    # *id* ("basic-preview") and data id ("v3") as that auto-generated
+    # config, so the app's tile URL didn't need to change — only the
+    # palette did. config.json/styles/ are tracked in git (small, hand-
+    # authored); .data/tiles holds only the large generated mbtiles.
+    command: ["-c", "/data/config.json"]
     volumes:
       - ./.data/tiles:/data
+      - ./deploy/tileserver/config.json:/data/config.json:ro
+      - ./deploy/tileserver/styles:/data/styles:ro
     deploy:
       resources:
         limits:

@@ -10,7 +10,6 @@ import '../../../shared/widgets/map_circle_button.dart';
 import '../application/ride_controller.dart';
 import '../application/trip_ws.dart';
 import '../domain/models.dart';
-import 'trip_screen.dart' show vehicleIconFor;
 import 'widgets/map_view.dart';
 
 /// Everything [NavigationScreen] needs beyond the trip id, passed through
@@ -143,8 +142,15 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> {
                 if (driverLoc != null)
                   MapPin(
                     driverLoc,
-                    vehicleIconFor(widget.vehicleClass),
-                    theme.colorScheme.tertiary,
+                    // See trip_screen.dart's driver MapPin: a rotating arrow
+                    // reads as directional travel the way Google Maps' own
+                    // nav puck does; a vehicle-class silhouette rotating by
+                    // heading just looks like it's spinning in place.
+                    Icons.navigation_rounded,
+                    // Deliberate blue, not `colorScheme.tertiary` — see
+                    // trip_screen.dart's driver MapPin for why (this app's
+                    // amber seed derives a muddy brown/olive tertiary).
+                    routeLineColor,
                     rotate: true,
                     id: 'driver',
                   ),

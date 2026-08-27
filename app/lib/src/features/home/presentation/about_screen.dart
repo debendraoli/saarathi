@@ -11,6 +11,33 @@ const _releaseDate = '2026-08-26';
 const _privacyPolicyUrl = 'https://saarathi.apexinfratech.com.np/legal/privacy';
 const _licenseAgreementUrl = 'https://saarathi.apexinfratech.com.np/legal/terms';
 
+class _Partner {
+  const _Partner({
+    required this.name,
+    required this.panVat,
+    required this.address,
+    required this.contact,
+  });
+
+  final String name;
+  final String panVat;
+  final String address;
+  final String contact;
+}
+
+// PLACEHOLDER — replace with each partner's real registered details before
+// release; Nepal's digital-service disclosure rules expect PAN/VAT, a
+// registered address, and a live contact number to actually be reachable,
+// not filler text.
+const _partners = [
+  _Partner(
+    name: 'PLACEHOLDER — Partner Pvt. Ltd.',
+    panVat: 'PLACEHOLDER — 000000000',
+    address: 'PLACEHOLDER — Ghorahi, Dang, Lumbini Province',
+    contact: 'PLACEHOLDER — +977-00-000000',
+  ),
+];
+
 /// Version/build/release-date + the legal links Play Store review expects
 /// to find surfaced somewhere in the app (Privacy Policy is a hard
 /// requirement; License Agreement/Terms alongside it). Split out of
@@ -106,6 +133,63 @@ class _AboutScreenState extends State<AboutScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 8),
+            child: Text(l.partnersSection,
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          for (final p in _partners) ...[
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(p.name,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 10),
+                    _PartnerRow(label: l.partnerPanVat, value: p.panVat),
+                    _PartnerRow(label: l.partnerAddress, value: p.address),
+                    _PartnerRow(label: l.partnerContact, value: p.contact),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PartnerRow extends StatelessWidget {
+  const _PartnerRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(label,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: scheme.outline)),
+          ),
+          Expanded(child: Text(value)),
         ],
       ),
     );

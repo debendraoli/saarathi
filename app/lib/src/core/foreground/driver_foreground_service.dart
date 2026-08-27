@@ -11,7 +11,23 @@ void driverServiceCallback() {
 /// alive while the app is backgrounded.
 class _DriverTaskHandler extends TaskHandler {
   @override
-  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    // `system` means the plugin itself restarted this service — after a
+    // device reboot (`autoRunOnBoot`) or the app process being killed out
+    // from under it — as opposed to our own `DriverForegroundService.start()`
+    // call from `goOnline()` (`developer`), where the app is already open.
+    // The restarted service is just this small background isolate: it can
+    // keep the notification looking "online", but the actual heartbeat and
+    // offer-polling loops live in the main app isolate, which a reboot kills
+    // outright. Relaunching the app (not just the service) is what lets
+    // `_attemptResumePresence` — already gated on the driver having been
+    // online before — actually resume real presence, instead of leaving a
+    // driver staring at a misleadingly "online" notification while genuinely
+    // offline and invisible to dispatch.
+    if (starter == TaskStarter.system) {
+      FlutterForegroundTask.launchApp();
+    }
+  }
 
   @override
   void onRepeatEvent(DateTime timestamp) {
@@ -45,7 +61,11 @@ class DriverForegroundService {
       iosNotificationOptions: const IOSNotificationOptions(),
       foregroundTaskOptions: ForegroundTaskOptions(
         eventAction: ForegroundTaskEventAction.repeat(30000),
-        autoRunOnBoot: false,
+        // Resume being reachable after a reboot instead of silently staying
+        // offline until the driver happens to reopen the app — paired with
+        // `_DriverTaskHandler.onStart` relaunching the app itself so this
+        // actually restores presence, not just the notification.
+        autoRunOnBoot: true,
         allowWakeLock: true,
         allowWifiLock: true,
       ),

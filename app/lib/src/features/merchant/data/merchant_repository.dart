@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/notifications/notification_service.dart';
 import '../../../core/offline/json_cache.dart';
 import '../../../core/prefs.dart';
 import '../../../shared/request_ring.dart';
@@ -213,6 +216,11 @@ final merchantOffersProvider = FutureProvider.autoDispose
 final _merchantOrdersPollProvider = StreamProvider.autoDispose
     .family<Poll<List<CustomerOrder>>, String>((ref, merchantId) {
   final repo = ref.watch(merchantRepositoryProvider);
+  // Stay alive with zero widget watchers — otherwise navigating away from
+  // the order queue (e.g. into an order's detail screen) disposes this
+  // (autoDispose's default) and silently stops the ring while new orders
+  // keep arriving. Same fix as `driverOffersProvider`.
+  ref.keepAlive();
   // Null (not empty) until the first fetch lands — an empty starting set
   // would make every order already open when this screen loads look "new"
   // against it, ringing on open instead of only on a genuine new arrival.
@@ -225,8 +233,19 @@ final _merchantOrdersPollProvider = StreamProvider.autoDispose
       final ids = mine.map((o) => o.id).toSet();
       final lastSeen = seen;
       if (lastSeen != null) {
-        if (ids.difference(lastSeen).isNotEmpty) {
+        final newIds = ids.difference(lastSeen);
+        if (newIds.isNotEmpty) {
           RequestRing.play();
+          // A real tray notification alongside the ring — same reasoning
+          // as `driverOffersProvider`: the ring alone is easy to miss on a
+          // busy counter, and is otherwise the only signal that fires while
+          // the app is in the foreground.
+          unawaited(NotificationService.instance.show(
+            newIds.length > 1
+                ? '${newIds.length} new orders'
+                : 'New order',
+            'Tap to view and respond',
+          ));
         } else if (ids.isEmpty) {
           RequestRing.stop();
         }
