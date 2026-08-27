@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:dio/dio.dart';
@@ -52,7 +53,20 @@ class ApiClient {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
-          final token = await _tokens.access;
+          var token = await _tokens.access;
+          // Proactively refresh a token that's about to expire (or already
+          // has — e.g. the app was backgrounded past it) *before* using it,
+          // rather than only reacting to the 401 this request would
+          // otherwise get — the previous behaviour, which worked but meant
+          // the first request after every ~15min access-token window paid
+          // for an extra failed-then-retried round trip. Skipped for the
+          // auth endpoints themselves (login, the refresh call this
+          // triggers) — same exclusion `onError` below already needs.
+          if (token != null &&
+              !_isAuthPath(options.path) &&
+              _expiresSoon(token)) {
+            if (await _refresh()) token = await _tokens.access;
+          }
           if (token != null && options.headers['authorization'] == null) {
             options.headers['authorization'] = 'Bearer $token';
           }
@@ -93,6 +107,30 @@ class ApiClient {
   Completer<bool>? _refreshing;
 
   bool _isAuthPath(String path) => path.contains('/v1/auth/');
+
+  static const _refreshAheadOf = Duration(seconds: 90);
+
+  /// Reads a JWT's own `exp` claim — no signature check, this is purely a
+  /// local "is it worth using as-is" hint; the backend is still the one
+  /// actual authority on validity. `true` (refresh) on anything that fails
+  /// to parse as a well-formed JWT, since that's not a case this app's own
+  /// tokens should ever hit and the safe fallback is the existing reactive
+  /// 401 path, not silently skipping the freshness check.
+  bool _expiresSoon(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return true;
+      final payload = json.decode(
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+      ) as Map<String, dynamic>;
+      final exp = payload['exp'] as num?;
+      if (exp == null) return true;
+      final expiresAt = DateTime.fromMillisecondsSinceEpoch(exp.toInt() * 1000);
+      return DateTime.now().isAfter(expiresAt.subtract(_refreshAheadOf));
+    } catch (_) {
+      return true;
+    }
+  }
 
   Future<Response<dynamic>> _retry(RequestOptions o) {
     // Drop the stale bearer so the interceptor re-injects the refreshed token.
