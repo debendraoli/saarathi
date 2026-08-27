@@ -25,6 +25,7 @@
   "partnerPanVat": "PAN / VAT",
   "partnerAddress": "Address",
   "partnerContact": "Contact",
+  "partnersEmpty": "No partners listed yet.",
   "chooseLanguage": "Choose your language",
   "languageEnglish": "English",
   "languageNepali": "नेपाली",

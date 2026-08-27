@@ -296,8 +296,20 @@ export const api = {
   adminCreatePartner: (body: NewPartner) =>
     request<Partner>("/v1/admin/partners", { method: "POST", body: JSON.stringify(body) }),
   adminPartnerDetail: (id: string) => request<PartnerDetail>(`/v1/admin/partners/${id}`),
-  adminUpdatePartner: (id: string, body: Partial<{ status: string; commission_share: number; city: string; contact_email: string }>) =>
-    request<Partner>(`/v1/admin/partners/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  adminUpdatePartner: (
+    id: string,
+    body: Partial<{
+      status: string;
+      commission_share: number;
+      name: string;
+      legal_name: string;
+      partner_type: PartnerType;
+      city: string;
+      contact_phone: string;
+      contact_email: string;
+      pan_vat: string;
+    }>,
+  ) => request<Partner>(`/v1/admin/partners/${id}`, { method: "PUT", body: JSON.stringify(body) }),
 
   // ── Partner portal (member-scoped) ─────────────────────────────────────────
   partnerMemberships: () => request<Membership[]>("/v1/partner/memberships"),
@@ -400,6 +412,7 @@ export interface PartnerDetail {
   partner: Partner;
   member_count: number;
   driver_count: number;
+  drivers: FleetDriver[];
 }
 
 export interface NewPartner {

@@ -650,17 +650,42 @@ class TripDriverPerson extends TripPerson {
       );
 }
 
+/// The merchant a delivery courier is fetching an order from — set only for
+/// a `trip_type: 'delivery'` trip's participants response.
+class TripMerchant {
+  const TripMerchant({required this.name, this.address, this.phone});
+
+  final String name;
+  final String? address;
+  final String? phone;
+
+  factory TripMerchant.fromJson(Map<String, dynamic> j) => TripMerchant(
+        name: j['name'] as String,
+        address: j['address'] as String?,
+        phone: j['phone'] as String?,
+      );
+
+  /// Reuses the same counterpart-card widget the driver/rider identity
+  /// already renders — the merchant only ever needs a name/phone shown the
+  /// same way, not a whole separate display for one extra field.
+  TripPerson asTripPerson() => TripPerson(name: name, phone: phone);
+}
+
 class TripParticipants {
-  const TripParticipants({required this.rider, this.driver});
+  const TripParticipants({required this.rider, this.driver, this.merchant});
 
   final TripPerson rider;
   final TripDriverPerson? driver;
+  final TripMerchant? merchant;
 
   factory TripParticipants.fromJson(Map<String, dynamic> j) => TripParticipants(
         rider: TripPerson.fromJson(j['rider'] as Map<String, dynamic>),
         driver: j['driver'] == null
             ? null
             : TripDriverPerson.fromJson(j['driver'] as Map<String, dynamic>),
+        merchant: j['merchant'] == null
+            ? null
+            : TripMerchant.fromJson(j['merchant'] as Map<String, dynamic>),
       );
 }
 

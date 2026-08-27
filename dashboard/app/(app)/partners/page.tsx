@@ -4,6 +4,7 @@ import { Modal } from "@/components/Modal";
 import { Pagination, SearchInput, usePaged } from "@/components/Toolbar";
 import { api, type NewPartner, type Partner } from "@/lib/api";
 import { Plus } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 const EMPTY: NewPartner = {
@@ -113,7 +114,9 @@ export default function PartnersPage() {
             {slice.map((p) => (
               <tr key={p.id}>
                 <td>
-                  <b>{p.name}</b>
+                  <Link href={`/partners/${p.id}`} className="muted-link">
+                    <b>{p.name}</b>
+                  </Link>
                 </td>
                 <td className="subtle">{p.type}</td>
                 <td className="subtle">{p.city ?? "—"}</td>

@@ -63,6 +63,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(routes::admin::routes())
         .merge(routes::portal::routes())
         .merge(routes::fleet::routes())
+        .merge(routes::public::routes())
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

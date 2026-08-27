@@ -689,8 +689,19 @@ class _StatusSheet extends ConsumerWidget {
     final driverNext = iAmDriver ? _driverNext(l) : null;
 
     final participants = ref.watch(tripParticipantsProvider(trip.id));
+    // A delivery trip's `origin` is the merchant's own location, not a
+    // rider's pickup point — while the courier's still heading there
+    // (`accepted`/`arriving`), the sheet should show who they're actually
+    // about to interact with (the merchant), not the eventual delivery
+    // recipient. Once `inProgress` (order in hand, heading to `dest`), it's
+    // the recipient that matters, same as it always has been.
+    final onPickupLeg =
+        trip.status == TripStatus.accepted || trip.status == TripStatus.arriving;
+    final merchant = participants.valueOrNull?.merchant;
     final TripPerson? counterpart = iAmDriver
-        ? participants.valueOrNull?.rider
+        ? (trip.tripType == 'delivery' && onPickupLeg && merchant != null
+            ? merchant.asTripPerson()
+            : participants.valueOrNull?.rider)
         : participants.valueOrNull?.driver;
     final driverDetail = !iAmDriver ? participants.valueOrNull?.driver : null;
 

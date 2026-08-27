@@ -25,7 +25,12 @@ struct Partner {
     id: Uuid,
     name: String,
     legal_name: Option<String>,
+    // `#[serde(rename = "type")]` too, not just sqlx — the dashboard's
+    // `Partner` type has always read `.type` off this response (confirmed
+    // live: the type column has rendered blank ever since, since the JSON
+    // key was `partner_type` with only the SQL-column side renamed).
     #[sqlx(rename = "type")]
+    #[serde(rename = "type")]
     partner_type: String,
     status: String,
     city: Option<String>,
@@ -130,6 +135,10 @@ async fn create(
 #[derive(Deserialize)]
 struct ListQuery {
     status: Option<String>,
+    #[serde(default)]
+    limit: Option<i64>,
+    #[serde(default)]
+    offset: Option<i64>,
 }
 
 async fn list(
@@ -137,19 +146,26 @@ async fn list(
     _admin: AdminUser,
     Query(q): Query<ListQuery>,
 ) -> AppResult<Json<Vec<Partner>>> {
+    let limit = q.limit.unwrap_or(20).clamp(1, 100);
+    let offset = q.offset.unwrap_or(0).max(0);
     let rows: Vec<Partner> = match q.status {
         Some(s) => {
             sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {PARTNER_COLS} FROM partners WHERE status::text = $1 ORDER BY created_at DESC"
+            "SELECT {PARTNER_COLS} FROM partners WHERE status::text = $1 \
+             ORDER BY created_at DESC LIMIT $2 OFFSET $3"
         )))
             .bind(s)
+            .bind(limit)
+            .bind(offset)
             .fetch_all(&st.db)
             .await?
         }
         None => {
             sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                "SELECT {PARTNER_COLS} FROM partners ORDER BY created_at DESC"
+                "SELECT {PARTNER_COLS} FROM partners ORDER BY created_at DESC LIMIT $1 OFFSET $2"
             )))
+            .bind(limit)
+            .bind(offset)
             .fetch_all(&st.db)
             .await?
         }
@@ -157,11 +173,26 @@ async fn list(
     Ok(Json(rows))
 }
 
+#[derive(Serialize, sqlx::FromRow)]
+struct FleetDriver {
+    driver_user_id: Uuid,
+    full_name: Option<String>,
+    phone: String,
+    status: String,
+    joined_at: DateTime<Utc>,
+}
+
 #[derive(Serialize)]
 struct PartnerDetail {
     partner: Partner,
     member_count: i64,
     driver_count: i64,
+    /// The partner's actual fleet roster, not just [driver_count] — the
+    /// dashboard's partner detail page lists who's actually in it, same as
+    /// it already does for a merchant's own driver-facing pages elsewhere.
+    /// Every driver ever attached (not just currently-`active`), so a staff
+    /// member can see who's left the fleet too — `status` distinguishes them.
+    drivers: Vec<FleetDriver>,
 }
 
 async fn detail(
@@ -187,10 +218,19 @@ async fn detail(
     .bind(id)
     .fetch_one(&st.db)
     .await?;
+    let drivers: Vec<FleetDriver> = sqlx::query_as(
+        "SELECT pd.driver_user_id, u.full_name, u.phone, pd.status::text AS status, pd.joined_at \
+         FROM partner_drivers pd JOIN users u ON u.id = pd.driver_user_id \
+         WHERE pd.partner_id = $1 ORDER BY pd.joined_at DESC",
+    )
+    .bind(id)
+    .fetch_all(&st.db)
+    .await?;
     Ok(Json(PartnerDetail {
         partner,
         member_count,
         driver_count,
+        drivers,
     }))
 }
 
@@ -198,8 +238,14 @@ async fn detail(
 struct UpdatePartner {
     status: Option<String>,
     commission_share: Option<Decimal>,
+    name: Option<String>,
+    legal_name: Option<String>,
+    #[serde(default)]
+    partner_type: Option<String>,
     city: Option<String>,
+    contact_phone: Option<String>,
     contact_email: Option<String>,
+    pan_vat: Option<String>,
 }
 
 async fn update(
@@ -216,6 +262,16 @@ async fn update(
             return Err(AppError::BadRequest("invalid status".into()));
         }
     }
+    if let Some(t) = &body.partner_type {
+        if !matches!(t.as_str(), "fleet" | "corporate" | "agent") {
+            return Err(AppError::BadRequest(
+                "partner_type must be 'fleet', 'corporate', or 'agent'".into(),
+            ));
+        }
+    }
+    if body.name.as_deref().is_some_and(|s| s.trim().is_empty()) {
+        return Err(AppError::BadRequest("name can't be blank".into()));
+    }
     let share = body
         .commission_share
         .map(|s| s.max(Decimal::ZERO).min(MAX_COMMISSION_RATE));
@@ -224,16 +280,26 @@ async fn update(
         "UPDATE partners SET \
             status = COALESCE($2::partner_status, status), \
             commission_share = COALESCE($3, commission_share), \
-            city = COALESCE($4, city), \
-            contact_email = COALESCE($5, contact_email), \
+            name = COALESCE($4, name), \
+            legal_name = COALESCE($5, legal_name), \
+            type = COALESCE($6::partner_type, type), \
+            city = COALESCE($7, city), \
+            contact_phone = COALESCE($8, contact_phone), \
+            contact_email = COALESCE($9, contact_email), \
+            pan_vat = COALESCE($10, pan_vat), \
             updated_at = now() \
          WHERE id = $1 RETURNING {PARTNER_COLS}"
     )))
     .bind(id)
     .bind(body.status)
     .bind(share)
+    .bind(body.name)
+    .bind(body.legal_name)
+    .bind(body.partner_type)
     .bind(body.city)
+    .bind(body.contact_phone)
     .bind(body.contact_email)
+    .bind(body.pan_vat)
     .fetch_optional(&st.db)
     .await?
     .ok_or(AppError::NotFound)?;

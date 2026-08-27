@@ -1,55 +1,54 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
-class Partner {
-  const Partner({
-    required this.name,
-    required this.panVat,
-    required this.address,
-    required this.contact,
-  });
+import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/paginated_list_view.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../data/partners_repository.dart';
 
-  final String name;
-  final String panVat;
-  final String address;
-  final String contact;
-}
-
-// PLACEHOLDER — replace with each partner's real registered details before
-// release; Nepal's digital-service disclosure rules expect PAN/VAT, a
-// registered address, and a live contact number to actually be reachable,
-// not filler text. Once partners are managed from the dashboard rather than
-// hardcoded here, swap this for a real paginated `GET /v1/partners` fetch —
-// the screen below is already built as a plain item-count `ListView.builder`
-// so that swap doesn't change its structure, only where `partners` comes
-// from.
-const _partners = [
-  Partner(
-    name: 'PLACEHOLDER — Partner Pvt. Ltd.',
-    panVat: 'PLACEHOLDER — 000000000',
-    address: 'PLACEHOLDER — Ghorahi, Dang, Lumbini Province',
-    contact: 'PLACEHOLDER — +977-00-000000',
-  ),
-];
-
-/// Full list of operating/business partners — split out of the About screen
-/// (which used to embed every partner's card inline) so the list scrolls on
-/// its own instead of growing the About screen without bound as partners are
-/// added.
-class PartnersScreen extends StatelessWidget {
+/// Full list of operating/business partners — a real paginated fetch
+/// against `GET /v1/partners` (see `partners_repository.dart`), infinite-
+/// scrolled the same way the Activity tab and notifications screen are.
+/// Split out of the About screen (which used to embed every partner's card
+/// inline) so the list scrolls on its own instead of growing About without
+/// bound as partners are added.
+class PartnersScreen extends ConsumerWidget {
   const PartnersScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
+    final state = ref.watch(partnersPagedProvider);
+
     return Scaffold(
       appBar: AppBar(title: Text(l.partnersSection)),
-      body: ListView.separated(
-        padding: EdgeInsets.fromLTRB(
-            16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
-        itemCount: _partners.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
-        itemBuilder: (context, i) => _PartnerCard(partner: _partners[i]),
+      body: state.when(
+        loading: () => const SkeletonList(padding: EdgeInsets.all(16)),
+        error: (_, __) => ErrorRetry(
+          message: l.errorNetwork,
+          onRetry: () => ref.invalidate(partnersPagedProvider),
+        ),
+        data: (page) {
+          if (page.items.isEmpty) {
+            return Center(
+              child: Text(l.partnersEmpty,
+                  style: TextStyle(color: Theme.of(context).colorScheme.outline)),
+            );
+          }
+          return RefreshIndicator(
+            onRefresh: () => ref.read(partnersPagedProvider.notifier).refresh(),
+            child: PaginatedListView<Partner>(
+              state: page,
+              padding: EdgeInsets.fromLTRB(
+                  16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
+              onLoadMore: () =>
+                  ref.read(partnersPagedProvider.notifier).loadMore(),
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, partner, i) => _PartnerCard(partner: partner),
+            ),
+          );
+        },
       ),
     );
   }
@@ -74,9 +73,12 @@ class _PartnerCard extends StatelessWidget {
                     .titleMedium
                     ?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 10),
-            _PartnerRow(label: l.partnerPanVat, value: partner.panVat),
-            _PartnerRow(label: l.partnerAddress, value: partner.address),
-            _PartnerRow(label: l.partnerContact, value: partner.contact),
+            if (partner.panVat != null)
+              _PartnerRow(label: l.partnerPanVat, value: partner.panVat!),
+            if (partner.city != null)
+              _PartnerRow(label: l.partnerAddress, value: partner.city!),
+            if (partner.contactPhone != null)
+              _PartnerRow(label: l.partnerContact, value: partner.contactPhone!),
           ],
         ),
       ),

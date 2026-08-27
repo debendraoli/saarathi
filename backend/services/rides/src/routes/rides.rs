@@ -944,10 +944,26 @@ struct DriverParticipant {
     photo_url: Option<String>,
 }
 
+#[derive(Serialize, sqlx::FromRow)]
+struct MerchantParticipant {
+    name: String,
+    address: Option<String>,
+    phone: Option<String>,
+}
+
 #[derive(Serialize)]
 struct Participants {
     rider: Person,
     driver: Option<DriverParticipant>,
+    /// Set only for a `trip_type = 'delivery'` trip — the merchant the
+    /// courier is fetching the order from. The client shows this instead of
+    /// `rider` while the courier's on the pickup leg (`accepted`/`arriving`,
+    /// heading to this trip's `origin`, which *is* the merchant's location
+    /// for a delivery trip); once `in_progress` (courier has the order,
+    /// heading to `dest`), it switches to `rider` — the actual delivery
+    /// recipient — same as it always has.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    merchant: Option<MerchantParticipant>,
 }
 
 /// Counterpart identity for the sticky in-trip card: both sides' name/phone/
@@ -1060,7 +1076,23 @@ async fn get_participants(
         None
     };
 
-    Ok(Json(Participants { rider, driver }))
+    // Cross-service read against the merchant service's own tables (shared
+    // Postgres instance) — same established convention as the rating-status
+    // lookups above and `merchant::my_orders`'s own reverse read against
+    // this service's `ratings` table.
+    let merchant: Option<MerchantParticipant> = if trip.trip_type == "delivery" {
+        sqlx::query_as(
+            "SELECT m.name, m.address, m.phone FROM orders o \
+             JOIN merchants m ON m.id = o.merchant_id WHERE o.trip_id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&st.db)
+        .await?
+    } else {
+        None
+    };
+
+    Ok(Json(Participants { rider, driver, merchant }))
 }
 
 /// Offset pagination for a list endpoint — `limit` capped well below what a
