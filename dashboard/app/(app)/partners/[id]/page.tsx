@@ -142,6 +142,10 @@ export default function PartnerDetailPage({ params }: { params: Promise<{ id: st
           <div className="label">Active drivers</div>
           <div className="value">{data.driver_count}</div>
         </div>
+        <div className="stat">
+          <div className="label">Merchants</div>
+          <div className="value">{data.merchants.length}</div>
+        </div>
       </div>
 
       <div className="card">
@@ -256,6 +260,42 @@ export default function PartnerDetailPage({ params }: { params: Promise<{ id: st
                   <td>{d.phone}</td>
                   <td><span className={`badge ${statusBadgeClass(d.status)}`}>{d.status}</span></td>
                   <td>{new Date(d.joined_at).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Merchants</h3>
+        <p className="subtle" style={{ marginTop: -8 }}>
+          Merchants have no direct partner link in the schema — this lists any merchant whose owner
+          account is also one of this partner's own members.
+        </p>
+        {data.merchants.length === 0 ? (
+          <p className="subtle">No merchants owned by this partner's members.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Vertical</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.merchants.map((m) => (
+                <tr key={m.id}>
+                  <td>
+                    <Link href={`/merchants/${m.id}`} className="muted-link">{m.name}</Link>
+                  </td>
+                  <td className="subtle">{m.vertical}</td>
+                  <td>
+                    <span className={`badge ${statusBadgeClass(m.is_open ? "active" : "suspended")}`}>
+                      {m.is_open ? "open" : "closed"}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>

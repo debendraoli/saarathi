@@ -182,6 +182,14 @@ struct FleetDriver {
     joined_at: DateTime<Utc>,
 }
 
+#[derive(Serialize, sqlx::FromRow)]
+struct OwnedMerchant {
+    id: Uuid,
+    name: String,
+    vertical: String,
+    is_open: bool,
+}
+
 #[derive(Serialize)]
 struct PartnerDetail {
     partner: Partner,
@@ -193,6 +201,15 @@ struct PartnerDetail {
     /// Every driver ever attached (not just currently-`active`), so a staff
     /// member can see who's left the fleet too — `status` distinguishes them.
     drivers: Vec<FleetDriver>,
+    /// There's no `merchants.partner_id` column — a merchant only records a
+    /// single `owner_user_id`, not a partner organization. The closest real
+    /// signal without a schema migration: a merchant counts as this
+    /// partner's if its owner is one of the partner's own members. Good
+    /// enough for "how many merchants does this partner run" today; if
+    /// partners start managing merchants through dedicated staff accounts
+    /// distinct from their membership roster, this will need the real
+    /// column instead.
+    merchants: Vec<OwnedMerchant>,
 }
 
 async fn detail(
@@ -226,11 +243,23 @@ async fn detail(
     .bind(id)
     .fetch_all(&st.db)
     .await?;
+    // Cross-service read against the merchant service's own table (shared
+    // Postgres instance) — see `rides::routes::rides::get_participants`'s
+    // identical reasoning for the equivalent merchant lookup there.
+    let merchants: Vec<OwnedMerchant> = sqlx::query_as(
+        "SELECT m.id, m.name, m.vertical, m.is_open FROM merchants m \
+         WHERE m.owner_user_id IN (SELECT user_id FROM partner_members WHERE partner_id = $1) \
+         ORDER BY m.name",
+    )
+    .bind(id)
+    .fetch_all(&st.db)
+    .await?;
     Ok(Json(PartnerDetail {
         partner,
         member_count,
         driver_count,
         drivers,
+        merchants,
     }))
 }
 

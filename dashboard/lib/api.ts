@@ -408,11 +408,19 @@ export interface Partner {
   created_at: string;
 }
 
+export interface OwnedMerchant {
+  id: string;
+  name: string;
+  vertical: string;
+  is_open: boolean;
+}
+
 export interface PartnerDetail {
   partner: Partner;
   member_count: number;
   driver_count: number;
   drivers: FleetDriver[];
+  merchants: OwnedMerchant[];
 }
 
 export interface NewPartner {
