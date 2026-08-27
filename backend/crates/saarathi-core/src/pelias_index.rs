@@ -125,11 +125,31 @@ pub async fn index_place(es_url: &str, id: Uuid, category: &str, name: &str, lat
         "{}/pelias/_doc/saarathi:venue:{id}?refresh=true",
         es_url.trim_end_matches('/')
     );
-    match http().put(&url).json(&doc).send().await {
-        Ok(resp) if !resp.status().is_success() => {
-            tracing::warn!(%id, status = %resp.status(), "pelias index write rejected");
+    // A single attempt with no retry meant a transient overload (confirmed
+    // live: the WhosOnFirst/OSM bulk import job saturating this single-node
+    // dev OpenSearch enough to 429 a concurrent single-doc write) silently
+    // and *permanently* dropped an approved contribution — nothing ever
+    // retries it, and staff have no way to know it happened short of
+    // reading this warning log. Three short, fixed-backoff attempts turns
+    // "briefly busy" into a non-issue without turning a genuinely dead
+    // Pelias into a long hang on the approval path.
+    const MAX_ATTEMPTS: u32 = 3;
+    for attempt in 1..=MAX_ATTEMPTS {
+        match http().put(&url).json(&doc).send().await {
+            Ok(resp) if resp.status().is_success() => return,
+            Ok(resp) if attempt < MAX_ATTEMPTS => {
+                tracing::warn!(%id, status = %resp.status(), attempt, "pelias index write rejected, retrying");
+            }
+            Ok(resp) => {
+                tracing::warn!(%id, status = %resp.status(), attempt, "pelias index write rejected, giving up");
+            }
+            Err(e) if attempt < MAX_ATTEMPTS => {
+                tracing::warn!(error = %e, %id, attempt, "pelias index write failed, retrying");
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, %id, attempt, "pelias index write failed, giving up");
+            }
         }
-        Err(e) => tracing::warn!(error = %e, %id, "pelias index write failed"),
-        Ok(_) => {}
+        tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
     }
 }
