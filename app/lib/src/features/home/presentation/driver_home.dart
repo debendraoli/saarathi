@@ -531,6 +531,14 @@ class _IdleRadar extends StatelessWidget {
                 origin: center!,
                 builder: (context, _, circles) => MapView(
                   center: center!,
+                  // Default zoom (14) was tuned to fit the whole 2.5km
+                  // search radius circle on screen, but at this widget's
+                  // actual size (320 tall) that left street names and
+                  // surrounding landmarks too sparse to read — confirmed
+                  // live, it showed almost nothing recognizable. 16 crops
+                  // the circle at the edges instead, in exchange for a map
+                  // that actually reads as "here's where I am".
+                  zoom: 16,
                   circles: circles,
                   pins: [
                     MapPin(center!, Icons.two_wheeler_rounded, scheme.primary)
