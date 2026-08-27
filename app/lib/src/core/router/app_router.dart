@@ -20,6 +20,7 @@ import '../../features/driver/presentation/kyc_documents_screen.dart';
 import '../../features/home/presentation/account_tab.dart';
 import '../../features/home/presentation/activity_tab.dart';
 import '../../features/home/presentation/about_screen.dart';
+import '../../features/home/presentation/partners_screen.dart';
 import '../../features/home/presentation/settings_screen.dart';
 import '../../features/safety/presentation/safety_info_screen.dart';
 import '../../features/safety/presentation/trusted_contacts_screen.dart';
@@ -73,6 +74,7 @@ class Routes {
   static const savedPlaces = '/places/saved';
   static const settings = '/settings';
   static const about = '/settings/about';
+  static const partners = '/settings/about/partners';
   static const safety = '/safety';
   static const trustedContacts = '/safety/trusted-contacts';
   static const support = '/support';
@@ -327,6 +329,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: Routes.about,
         pageBuilder: (_, state) =>
             _page(const AboutScreen(), key: state.pageKey),
+      ),
+      GoRoute(
+        path: Routes.partners,
+        pageBuilder: (_, state) =>
+            _page(const PartnersScreen(), key: state.pageKey),
       ),
       GoRoute(
         path: Routes.safety,

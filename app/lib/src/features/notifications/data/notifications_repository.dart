@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/prefs.dart';
+import '../../../shared/paged_notifier.dart';
 
 class AppNotification {
   const AppNotification({
@@ -69,6 +70,21 @@ class NotificationsRepository {
 
   Future<void> markRead(String id) => _api.post('/v1/notifications/$id/read');
   Future<void> markAllRead() => _api.post('/v1/notifications/read-all');
+
+  /// One page of notifications for the inbox screen's infinite scroll — a
+  /// plain live fetch, not the cached-whole-inbox [inbox] above (which stays
+  /// as-is for the unread badge and the notification-tap-nav lookup, which
+  /// just need "the recent set", not a scrollable list).
+  Future<List<AppNotification>> inboxPage(
+      {required int limit, required int offset}) async {
+    final res = await _api.get('/v1/notifications', query: {
+      'limit': limit.toString(),
+      'offset': offset.toString(),
+    }) as Map<String, dynamic>;
+    final items =
+        (res['items'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    return items.map(AppNotification.fromJson).toList();
+  }
 }
 
 final notificationsRepositoryProvider =
@@ -82,3 +98,17 @@ final notificationsRepositoryProvider =
 final inboxProvider = FutureProvider.autoDispose<Inbox>((ref) {
   return ref.watch(notificationsRepositoryProvider).inbox();
 });
+
+/// Infinite-scroll version of [inboxProvider] for the notifications screen's
+/// actual list rendering — [inboxProvider] above stays for the unread badge
+/// and notification-tap navigation lookup.
+class InboxPaged extends PagedNotifier<AppNotification> {
+  @override
+  Future<List<AppNotification>> fetchPage(int offset, int limit) => ref
+      .read(notificationsRepositoryProvider)
+      .inboxPage(limit: limit, offset: offset);
+}
+
+final inboxPagedProvider =
+    AsyncNotifierProvider.autoDispose<InboxPaged, PagedState<AppNotification>>(
+        InboxPaged.new);

@@ -9,6 +9,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/notifications/notification_service.dart';
 import '../../../core/offline/json_cache.dart';
 import '../../../core/prefs.dart';
+import '../../../shared/paged_notifier.dart';
 import '../../../shared/resilient_poll.dart';
 import '../../merchant/domain/models.dart' show MerchantOffer;
 import '../domain/models.dart';
@@ -117,6 +118,20 @@ class MarketplaceRepository {
         parse: (j) => CustomerOrder.fromJson(j),
       );
 
+  /// One page of order history for the Activity tab's infinite scroll — see
+  /// `RideRepository.myTripsPage`'s doc comment for why this bypasses
+  /// `cacheThroughList` rather than reusing [myOrders].
+  Future<List<CustomerOrder>> myOrdersPage(
+      {required int limit, required int offset}) async {
+    final res = await _api.get('/v1/orders', query: {
+      'limit': limit.toString(),
+      'offset': offset.toString(),
+    });
+    return (res as List)
+        .map((e) => CustomerOrder.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<CustomerOrder> order(String id) async {
     final res = await _api.get('/v1/orders/$id') as Map<String, dynamic>;
     return _parseOrder(res);
@@ -203,6 +218,21 @@ final nearbyOffersProvider = FutureProvider.autoDispose
 final myOrdersProvider = FutureProvider.autoDispose<List<CustomerOrder>>((ref) {
   return ref.watch(marketplaceRepositoryProvider).myOrders();
 });
+
+/// Infinite-scroll version of [myOrdersProvider] for the Activity tab's
+/// actual list rendering — see `TripsPaged`'s doc comment for the same
+/// reasoning (the plain provider above stays for whole-list/small-peek uses
+/// elsewhere).
+class OrdersPaged extends PagedNotifier<CustomerOrder> {
+  @override
+  Future<List<CustomerOrder>> fetchPage(int offset, int limit) => ref
+      .read(marketplaceRepositoryProvider)
+      .myOrdersPage(limit: limit, offset: offset);
+}
+
+final myOrdersPagedProvider =
+    AsyncNotifierProvider.autoDispose<OrdersPaged, PagedState<CustomerOrder>>(
+        OrdersPaged.new);
 
 final orderStatsProvider = FutureProvider.autoDispose<OrderStats>((ref) {
   return ref.watch(marketplaceRepositoryProvider).myOrderStats();

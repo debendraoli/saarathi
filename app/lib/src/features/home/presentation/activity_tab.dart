@@ -12,21 +12,55 @@ import '../../ride/application/ride_controller.dart';
 import '../../ride/presentation/trip_history.dart';
 
 /// Activity: food/grocery orders and ride/delivery trips, most-recent first.
-class ActivityTab extends ConsumerWidget {
+/// Both sources page independently (orders and trips are unrelated lists,
+/// each with their own "hasMore") — scrolling near the bottom asks each for
+/// its next page; one that's already exhausted or mid-fetch just no-ops.
+class ActivityTab extends ConsumerStatefulWidget {
   const ActivityTab({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ActivityTab> createState() => _ActivityTabState();
+}
+
+class _ActivityTabState extends ConsumerState<ActivityTab> {
+  final _scroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scroll.removeListener(_onScroll);
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scroll.hasClients) return;
+    final remaining = _scroll.position.maxScrollExtent - _scroll.position.pixels;
+    if (remaining < 400) {
+      ref.read(myOrdersPagedProvider.notifier).loadMore();
+      ref.read(myTripsPagedProvider.notifier).loadMore();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final l = AppL10n.of(context);
-    final orders = ref.watch(myOrdersProvider).valueOrNull ?? const [];
-    final trips = ref.watch(myTripsProvider);
+    final ordersState = ref.watch(myOrdersPagedProvider);
+    final tripsState = ref.watch(myTripsPagedProvider);
 
     return RefreshIndicator(
       onRefresh: () async {
-        ref.invalidate(myOrdersProvider);
-        ref.invalidate(myTripsProvider);
+        await Future.wait([
+          ref.read(myOrdersPagedProvider.notifier).refresh(),
+          ref.read(myTripsPagedProvider.notifier).refresh(),
+        ]);
       },
-      child: trips.when(
+      child: tripsState.when(
         loading: () =>
             const SkeletonList(padding: EdgeInsets.symmetric(vertical: 8)),
         error: (_, __) => ListView(
@@ -34,12 +68,14 @@ class ActivityTab extends ConsumerWidget {
             const SizedBox(height: 120),
             ErrorRetry(
               message: l.errorNetwork,
-              onRetry: () => ref.invalidate(myTripsProvider),
+              onRetry: () => ref.invalidate(myTripsPagedProvider),
             ),
           ],
         ),
-        data: (tripList) {
-          if (orders.isEmpty && tripList.isEmpty) {
+        data: (tripsPage) {
+          final orders = ordersState.valueOrNull?.items ?? const [];
+          final trips = tripsPage.items;
+          if (orders.isEmpty && trips.isEmpty) {
             return ListView(
               children: [
                 const SizedBox(height: 140),
@@ -47,17 +83,31 @@ class ActivityTab extends ConsumerWidget {
               ],
             );
           }
+          final loadingMore = tripsPage.loading ||
+              (ordersState.valueOrNull?.loading ?? false);
           return ListView(
+            controller: _scroll,
             padding: const EdgeInsets.symmetric(vertical: 8),
             children: [
               if (orders.isNotEmpty) ...[
                 _SectionHeader(l.merchantOrders),
                 for (final o in orders) _OrderTile(order: o),
               ],
-              if (tripList.isNotEmpty) ...[
+              if (trips.isNotEmpty) ...[
                 _SectionHeader(l.tabActivity),
-                for (final t in tripList) TripTile(trip: t),
+                for (final t in trips) TripTile(trip: t),
               ],
+              if (loadingMore)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20),
+                  child: Center(
+                    child: SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2.4),
+                    ),
+                  ),
+                ),
             ],
           );
         },

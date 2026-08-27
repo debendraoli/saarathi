@@ -37,6 +37,8 @@ dependencies:
   # below walking speed, so the nav camera/vehicle icon blends in compass
   # heading while stopped/crawling instead of freezing on stale GPS heading.
   flutter_compass: ^0.8.1
+  # Spoken turn-by-turn announcements on the fullscreen nav screen.
+  flutter_tts: ^4.2.3
 
   # Platform integration
   app_links: ^7.2.1

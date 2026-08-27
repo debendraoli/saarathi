@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/offline/connectivity.dart';
 import '../../../shared/geocode_cache.dart';
+import '../../../shared/paged_notifier.dart';
 import '../../../shared/resilient_poll.dart';
 import '../../places/data/places_repository.dart';
 import '../data/ride_repository.dart';
@@ -300,6 +301,20 @@ final tripOriginLabelProvider =
 final myTripsProvider = FutureProvider.autoDispose<List<Trip>>((ref) {
   return ref.watch(rideRepositoryProvider).myTrips();
 });
+
+/// Infinite-scroll version of [myTripsProvider] for the Activity tab's
+/// actual list rendering — [myTripsProvider] above stays as the small
+/// cached/whole-list fetch other screens (e.g. the "ongoing ride" banner)
+/// already depend on.
+class TripsPaged extends PagedNotifier<Trip> {
+  @override
+  Future<List<Trip>> fetchPage(int offset, int limit) =>
+      ref.read(rideRepositoryProvider).myTripsPage(limit: limit, offset: offset);
+}
+
+final myTripsPagedProvider =
+    AsyncNotifierProvider.autoDispose<TripsPaged, PagedState<Trip>>(
+        TripsPaged.new);
 
 /// The signed-in rider's lifetime ride stats (My Stats screen).
 final riderStatsProvider = FutureProvider.autoDispose<RiderStats>((ref) {

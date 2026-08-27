@@ -104,10 +104,19 @@ class MerchantRepository {
     return (res['is_open'] as bool?) ?? isOpen;
   }
 
-  Future<List<CustomerOrder>> orders({String? status}) async {
+  /// [limit]/[offset] are left unset by the ring/notification poll loop
+  /// below (`_merchantOrdersPollProvider`), which needs the *whole* active
+  /// set every tick to detect a genuinely new order id — only the order
+  /// queue screen's own infinite-scroll list passes them.
+  Future<List<CustomerOrder>> orders(
+      {String? status, int? limit, int? offset}) async {
     final res = await _api.get(
       '/v1/merchant/orders',
-      query: {if (status != null) 'status': status},
+      query: {
+        if (status != null) 'status': status,
+        if (limit != null) 'limit': limit.toString(),
+        if (offset != null) 'offset': offset.toString(),
+      },
     ) as List;
     return res
         .cast<Map<String, dynamic>>()

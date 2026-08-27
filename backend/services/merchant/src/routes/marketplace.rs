@@ -470,18 +470,41 @@ async fn place_order(
     order_json(&st, order_id, claims.sub, false).await
 }
 
+/// Offset pagination for a list endpoint — same shape/reasoning as every
+/// other service's own small copy of this (e.g. `rides::routes::rides`'s
+/// `PageQuery`); not worth a shared crate for a few lines.
+#[derive(Deserialize)]
+struct PageQuery {
+    #[serde(default)]
+    limit: Option<i64>,
+    #[serde(default)]
+    offset: Option<i64>,
+}
+
+impl PageQuery {
+    fn limit(&self) -> i64 {
+        self.limit.unwrap_or(20).clamp(1, 100)
+    }
+    fn offset(&self) -> i64 {
+        self.offset.unwrap_or(0).max(0)
+    }
+}
+
 async fn my_orders(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
+    Query(page): Query<PageQuery>,
 ) -> AppResult<Json<Value>> {
     let rows: Vec<OrderRow> = sqlx::query_as(
         "SELECT o.id, o.customer_id, o.merchant_id, m.name AS merchant_name, o.status, o.subtotal, \
                 o.delivery_fee, o.total, o.discount_amount, o.payment_method, o.delivery_lat, o.delivery_lng, \
                 o.trip_id, o.created_at \
          FROM orders o JOIN merchants m ON m.id = o.merchant_id \
-         WHERE o.customer_id = $1 ORDER BY o.created_at DESC LIMIT 50",
+         WHERE o.customer_id = $1 ORDER BY o.created_at DESC LIMIT $2 OFFSET $3",
     )
     .bind(claims.sub)
+    .bind(page.limit())
+    .bind(page.offset())
     .fetch_all(&st.db)
     .await?;
 
@@ -1497,6 +1520,10 @@ async fn set_item_availability(
 #[derive(Deserialize)]
 struct MerchantOrderQuery {
     status: Option<String>,
+    #[serde(default)]
+    limit: Option<i64>,
+    #[serde(default)]
+    offset: Option<i64>,
 }
 
 async fn merchant_orders(
@@ -1510,11 +1537,13 @@ async fn merchant_orders(
                 o.trip_id, o.created_at \
          FROM orders o JOIN merchants m ON m.id = o.merchant_id \
          WHERE ($2 OR m.owner_user_id = $1) AND ($3::text IS NULL OR o.status = $3) \
-         ORDER BY o.created_at DESC LIMIT 100",
+         ORDER BY o.created_at DESC LIMIT $4 OFFSET $5",
     )
     .bind(claims.sub)
     .bind(claims.is_staff())
     .bind(q.status)
+    .bind(q.limit.unwrap_or(20).clamp(1, 100))
+    .bind(q.offset.unwrap_or(0).max(0))
     .fetch_all(&st.db)
     .await?;
     Ok(Json(json!(rows)))

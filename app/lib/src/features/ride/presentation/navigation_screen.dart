@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
+import '../../../core/navigation/turn_announcer.dart';
 import '../../../core/offline/connectivity.dart';
+import '../../../core/prefs.dart';
 import '../../../shared/widgets/common.dart';
 import '../../../shared/widgets/map_circle_button.dart';
 import '../application/ride_controller.dart';
@@ -85,6 +87,33 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> {
     return _routeQueryPoint!;
   }
 
+  // Identifies "which upcoming maneuver was last spoken" (maneuver kind +
+  // street), not the step object itself — every re-route tick yields a new
+  // `RouteStep` instance even when it's describing the exact same upcoming
+  // turn (just a shrinking distance-until), so comparing steps directly
+  // would re-announce "turn left onto X" every ~25m of approach instead of
+  // once when it first becomes the next thing to do.
+  String? _lastAnnouncedKey;
+
+  String _stepKey(RouteStep step) => '${step.maneuver}|${step.streetName}';
+
+  void _maybeAnnounce(RouteStep? step, AppL10n l) {
+    if (step == null) return;
+    final key = _stepKey(step);
+    if (key == _lastAnnouncedKey) return;
+    _lastAnnouncedKey = key;
+    final text = maneuverInstruction(l, step);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      TurnAnnouncer.instance.speak(text);
+    });
+  }
+
+  @override
+  void dispose() {
+    TurnAnnouncer.instance.stop();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
@@ -113,6 +142,11 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> {
     final route = _lastRoute;
     final currentStep =
         (route?.steps.isNotEmpty ?? false) ? route!.steps.first : null;
+
+    final appLocale = ref.watch(localeControllerProvider) ??
+        Localizations.localeOf(context);
+    TurnAnnouncer.instance.setLanguage(appLocale.languageCode);
+    _maybeAnnounce(currentStep, l);
 
     return Scaffold(
       body: Stack(
@@ -278,7 +312,7 @@ class _InstructionBanner extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    step.instruction,
+                    maneuverInstruction(AppL10n.of(context), step),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium,
@@ -356,3 +390,35 @@ IconData _maneuverIcon(ManeuverKind k) => switch (k) {
       ManeuverKind.roundabout => Icons.roundabout_left_rounded,
       ManeuverKind.merge => Icons.merge_rounded,
     };
+
+/// Builds the turn instruction ourselves from the structured maneuver +
+/// street name, rather than displaying/speaking Valhalla's own raw
+/// `instruction` text — that text is English-only (Valhalla's locale list
+/// doesn't cover Nepali), so anything we want translated has to come from
+/// our own templates instead.
+String maneuverInstruction(AppL10n l, RouteStep step) {
+  final street = step.streetName;
+  final hasStreet = street != null && street.isNotEmpty;
+  return switch (step.maneuver) {
+    ManeuverKind.depart => l.maneuverDepart,
+    ManeuverKind.arrive => l.maneuverArrive,
+    ManeuverKind.straight =>
+      hasStreet ? l.maneuverStraightOnto(street) : l.maneuverStraight,
+    ManeuverKind.slightLeft =>
+      hasStreet ? l.maneuverSlightLeftOnto(street) : l.maneuverSlightLeft,
+    ManeuverKind.left => hasStreet ? l.maneuverLeftOnto(street) : l.maneuverLeft,
+    ManeuverKind.sharpLeft =>
+      hasStreet ? l.maneuverSharpLeftOnto(street) : l.maneuverSharpLeft,
+    ManeuverKind.uturnLeft ||
+    ManeuverKind.uturnRight =>
+      hasStreet ? l.maneuverUturnOnto(street) : l.maneuverUturn,
+    ManeuverKind.slightRight =>
+      hasStreet ? l.maneuverSlightRightOnto(street) : l.maneuverSlightRight,
+    ManeuverKind.right => hasStreet ? l.maneuverRightOnto(street) : l.maneuverRight,
+    ManeuverKind.sharpRight =>
+      hasStreet ? l.maneuverSharpRightOnto(street) : l.maneuverSharpRight,
+    ManeuverKind.roundabout =>
+      hasStreet ? l.maneuverRoundaboutOnto(street) : l.maneuverRoundabout,
+    ManeuverKind.merge => hasStreet ? l.maneuverMergeOnto(street) : l.maneuverMerge,
+  };
+}

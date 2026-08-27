@@ -192,6 +192,21 @@ class RideRepository {
     return DriverEarnings.fromJson(res);
   }
 
+  /// One page of trip history for the Activity tab's infinite scroll — a
+  /// plain live fetch, not `cacheThroughList`, since that helper's offline
+  /// cache is keyed by a single fixed string per call site: caching each
+  /// page under the same key would have every page overwrite the last one
+  /// instead of accumulating. [myTrips] (the unpaginated, offline-cached
+  /// whole-list fetch below) stays as-is for the banners/checks elsewhere
+  /// that just need "the recent/active trips", not a scrollable list.
+  Future<List<Trip>> myTripsPage({required int limit, required int offset}) async {
+    final res = await _api.get('/v1/rides', query: {
+      'limit': limit.toString(),
+      'offset': offset.toString(),
+    });
+    return (res as List).map((e) => Trip.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
   Future<List<Trip>> myTrips() async {
     final trips = await cacheThroughList(
       prefs: _prefs,

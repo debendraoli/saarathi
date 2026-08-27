@@ -1063,14 +1063,40 @@ async fn get_participants(
     Ok(Json(Participants { rider, driver }))
 }
 
+/// Offset pagination for a list endpoint — `limit` capped well below what a
+/// single response should ever carry, `offset` unbounded (a deep scroll is
+/// just a slower query, not a correctness issue). Duplicated per-service
+/// rather than shared, same as `audit_record`/`validate_service_types` —
+/// each service already has its own small copy of this class of helper
+/// rather than a new cross-service dependency for a few lines.
+#[derive(Deserialize)]
+struct PageQuery {
+    #[serde(default)]
+    limit: Option<i64>,
+    #[serde(default)]
+    offset: Option<i64>,
+}
+
+impl PageQuery {
+    fn limit(&self) -> i64 {
+        self.limit.unwrap_or(20).clamp(1, 100)
+    }
+    fn offset(&self) -> i64 {
+        self.offset.unwrap_or(0).max(0)
+    }
+}
+
 async fn list_mine(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
+    Query(page): Query<PageQuery>,
 ) -> AppResult<Json<Vec<Value>>> {
     let trips: Vec<Trip> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {TRIP_COLS} FROM trips WHERE rider_id = $1 OR driver_id = $1 ORDER BY created_at DESC LIMIT 100"
+        "SELECT {TRIP_COLS} FROM trips WHERE rider_id = $1 OR driver_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
     )))
     .bind(claims.sub)
+    .bind(page.limit())
+    .bind(page.offset())
     .fetch_all(&st.db)
     .await?;
 

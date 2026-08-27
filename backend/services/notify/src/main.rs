@@ -6,7 +6,7 @@
 //! persists the durable inbox row, and escalates critical classes. Fully
 //! decoupled from the trip transaction — a natural first microservice split.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -16,7 +16,7 @@ use saarathi_core::authn::{AuthUser, HasJwtSecret};
 use saarathi_core::domain::notif;
 use saarathi_core::events::{NotifyRequest, NOTIFY_SUBJECT};
 use saarathi_core::hub::Hub;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
@@ -360,19 +360,43 @@ struct Notification {
     created_at: DateTime<Utc>,
 }
 
+/// Offset pagination — same shape as every other service's own small copy
+/// of this (e.g. `rides::routes::rides`'s `PageQuery`).
+#[derive(Deserialize)]
+struct PageQuery {
+    #[serde(default)]
+    limit: Option<i64>,
+    #[serde(default)]
+    offset: Option<i64>,
+}
+
 async fn inbox(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
+    Query(page): Query<PageQuery>,
 ) -> Result<Json<Value>, StatusCode> {
+    let limit = page.limit.unwrap_or(20).clamp(1, 100);
+    let offset = page.offset.unwrap_or(0).max(0);
     let items: Vec<Notification> = sqlx::query_as(
         "SELECT id, class, title, body, link, read_at, created_at FROM notifications \
-         WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100",
+         WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
     )
     .bind(claims.sub)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(&st.db)
     .await
     .map_err(internal)?;
-    let unread = items.iter().filter(|n| n.read_at.is_none()).count();
+    // A separate, unpaginated count — deriving "unread" from just the
+    // current page would undercount once there's more than one page of
+    // notifications, silently shrinking the bell badge as older unread
+    // notifications scroll out of the first page's window.
+    let unread: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM notifications WHERE user_id = $1 AND read_at IS NULL")
+            .bind(claims.sub)
+            .fetch_one(&st.db)
+            .await
+            .map_err(internal)?;
     Ok(Json(json!({ "unread": unread, "items": items })))
 }
 

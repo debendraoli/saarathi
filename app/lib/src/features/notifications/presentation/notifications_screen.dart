@@ -5,6 +5,7 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/router/deep_links.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/paginated_list_view.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../data/notifications_repository.dart';
 
@@ -14,7 +15,7 @@ class NotificationsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
-    final inbox = ref.watch(inboxProvider);
+    final inbox = ref.watch(inboxPagedProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -24,6 +25,7 @@ class NotificationsScreen extends ConsumerWidget {
             onPressed: () async {
               await ref.read(notificationsRepositoryProvider).markAllRead();
               ref.invalidate(inboxProvider);
+              ref.invalidate(inboxPagedProvider);
             },
             child: Text(l.markAllRead),
           ),
@@ -33,10 +35,10 @@ class NotificationsScreen extends ConsumerWidget {
         loading: () => const SkeletonList(),
         error: (_, __) => ErrorRetry(
           message: l.errorNetwork,
-          onRetry: () => ref.invalidate(inboxProvider),
+          onRetry: () => ref.invalidate(inboxPagedProvider),
         ),
-        data: (data) {
-          if (data.items.isEmpty) {
+        data: (page) {
+          if (page.items.isEmpty) {
             return Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -53,12 +55,12 @@ class NotificationsScreen extends ConsumerWidget {
             );
           }
           return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(inboxProvider),
-            child: ListView.separated(
-              itemCount: data.items.length,
+            onRefresh: () => ref.read(inboxPagedProvider.notifier).refresh(),
+            child: PaginatedListView<AppNotification>(
+              state: page,
+              onLoadMore: () => ref.read(inboxPagedProvider.notifier).loadMore(),
               separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (_, i) {
-                final n = data.items[i];
+              itemBuilder: (context, n, i) {
                 return ListTile(
                   leading: CircleAvatar(
                     backgroundColor: n.read
@@ -84,6 +86,7 @@ class NotificationsScreen extends ConsumerWidget {
                                 .read(notificationsRepositoryProvider)
                                 .markRead(n.id);
                             ref.invalidate(inboxProvider);
+                            ref.invalidate(inboxPagedProvider);
                           }
                           final link = n.link;
                           if (link == null) return;
