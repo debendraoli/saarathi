@@ -441,7 +441,7 @@ async fn create(
         let st = st.clone();
         let trip_id = trip.id;
         async move {
-            if let Err(e) = crate::dispatch::dispatch_trip(&st, trip_id).await {
+            if let Err(e) = crate::dispatch::dispatch_trip(&st, trip_id, false).await {
                 tracing::warn!(trip = %trip_id, error = %e, "initial dispatch_trip kick failed");
             }
         }

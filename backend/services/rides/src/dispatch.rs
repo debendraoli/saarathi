@@ -339,7 +339,19 @@ async fn eligible(st: &AppState, driver_id: Uuid, job_type: &str) -> anyhow::Res
 /// Offer a requested trip to the next-nearest eligible driver. Returns the
 /// offered driver, or `None` if none are available yet. Idempotent while an
 /// offer is live.
-pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Option<Uuid>> {
+/// Attempts to (re)offer `trip_id` to an eligible driver. `ignore_declines`
+/// controls whether a driver who already explicitly declined this trip can
+/// be re-offered it: normally `false` (a decline is a deliberate "not this
+/// one" signal, distinct from a timeout — see the `declined` exclusion
+/// below), but `true` when the terms actually changed underneath them —
+/// currently only `bidding::do_change_ask`'s redispatch after the rider
+/// raises their ask, since a driver who passed at the old price may well
+/// take the new one.
+pub async fn dispatch_trip(
+    st: &AppState,
+    trip_id: Uuid,
+    ignore_declines: bool,
+) -> anyhow::Result<Option<Uuid>> {
     let trip: Option<(
         String,
         Option<Uuid>,
@@ -407,6 +419,21 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
     .fetch_all(&st.db)
     .await?;
 
+    // A decline, unlike an expiry, is a deliberate driver signal — permanently
+    // exclude them from this trip's candidate pool (skipped entirely when
+    // `ignore_declines`, since a raised ask is new terms they never said no
+    // to).
+    let declined: Vec<Uuid> = if ignore_declines {
+        Vec::new()
+    } else {
+        sqlx::query_scalar(
+            "SELECT driver_id FROM trip_offers WHERE trip_id = $1 AND status = 'declined'",
+        )
+        .bind(trip_id)
+        .fetch_all(&st.db)
+        .await?
+    };
+
     // A rider explicitly requested this driver (see rides.rs::create /
     // resolve_preferred_driver) — try them alone, once, before falling back
     // to normal radius matching. "Once" = no trip_offers row has ever been
@@ -450,7 +477,10 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
         let mut candidates: Vec<Uuid> = Vec::new();
         while radius <= max_radius {
             for did in nearby_by_eta(st, lng, lat, radius, profile, &job_type).await? {
-                if already.contains(&did) || candidates.contains(&did) {
+                if already.contains(&did)
+                    || declined.contains(&did)
+                    || candidates.contains(&did)
+                {
                     continue;
                 }
                 if !eligible(st, did, &job_type).await? {
@@ -483,12 +513,12 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
 
     // Bid-mode invites need to stay visible in the driver's offer list for
     // as long as the auction is realistically open, not the tight 15s
-    // instant-offer TTL — the same `SEARCH_TIMEOUT_MINUTES` window the
+    // instant-offer TTL — the same `search_timeout_mins` window the
     // background loop uses as the trip's own give-up backstop. A personally
     // requested driver gets longer than the cold-broadcast TTL too — they
     // deserve more than a few seconds to notice and respond.
     let expires_at = if bid_mode {
-        chrono::Utc::now() + chrono::Duration::minutes(SEARCH_TIMEOUT_MINUTES)
+        chrono::Utc::now() + chrono::Duration::minutes(st.config.search_timeout_mins)
     } else if preferred_target.is_some() {
         chrono::Utc::now() + chrono::Duration::seconds((st.config.offer_ttl_secs * 3).max(60))
     } else {
@@ -590,14 +620,14 @@ pub async fn dispatch_trip(st: &AppState, trip_id: Uuid) -> anyhow::Result<Optio
 }
 
 /// Background loop: expire stale offers and (re)dispatch waiting trips.
-/// How long a trip stays in the matching pool before giving up. Past this, a
-/// still-unmatched trip used to just silently fall out of the dispatcher's
-/// polling query and sit at `requested` forever — the app's "no driver
-/// found" UI (`TripStatus.noDriver`) had nothing that ever set it. Now it's
-/// explicitly cancelled so the rider sees that state and (since the
-/// one-active-ride guard landed) can request again instead of being stuck.
-const SEARCH_TIMEOUT_MINUTES: i64 = 10;
-
+/// How long a trip stays in the matching pool before giving up
+/// (`config::search_timeout_mins`, env `DISPATCH_SEARCH_TIMEOUT_MINS`).
+/// Past this, a still-unmatched trip used to just silently fall out of the
+/// dispatcher's polling query and sit at `requested` forever — the app's
+/// "no driver found" UI (`TripStatus.noDriver`) had nothing that ever set
+/// it. Now it's explicitly cancelled so the rider sees that state and
+/// (since the one-active-ride guard landed) can request again instead of
+/// being stuck.
 pub async fn run_dispatcher(st: AppState) {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(3));
     loop {
@@ -635,7 +665,7 @@ pub async fn run_dispatcher(st: AppState) {
                AND created_at <= now() - make_interval(mins => $1) \
              RETURNING id, rider_id",
         )
-        .bind(SEARCH_TIMEOUT_MINUTES as i32)
+        .bind(st.config.search_timeout_mins as i32)
         .fetch_all(&st.db)
         .await
         .unwrap_or_else(|e| {
@@ -664,7 +694,7 @@ pub async fn run_dispatcher(st: AppState) {
                    WHERE o.trip_id = t.id AND o.status = 'offered' AND o.expires_at > now()) \
              LIMIT 20",
         )
-        .bind(SEARCH_TIMEOUT_MINUTES as i32)
+        .bind(st.config.search_timeout_mins as i32)
         .fetch_all(&st.db)
         .await
         .unwrap_or_else(|e| {
@@ -673,7 +703,7 @@ pub async fn run_dispatcher(st: AppState) {
         });
 
         for tid in waiting {
-            if let Err(e) = dispatch_trip(&st, tid).await {
+            if let Err(e) = dispatch_trip(&st, tid, false).await {
                 tracing::warn!(trip = %tid, error = %e, "dispatch tick failed");
             }
         }

@@ -362,7 +362,7 @@ async fn decline_offer(
     .execute(&st.db)
     .await?;
     // Immediately try the next-nearest driver.
-    if let Err(e) = dispatch::dispatch_trip(&st, id).await {
+    if let Err(e) = dispatch::dispatch_trip(&st, id, false).await {
         tracing::warn!(trip = %id, error = %e, "redispatch after decline_offer failed");
     }
     Ok(Json(json!({ "declined": true })))

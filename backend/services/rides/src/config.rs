@@ -45,6 +45,10 @@ pub struct Config {
     pub dispatch_broadcast_threshold: usize,
     /// How stale a driver heartbeat may be before we treat them as offline (secs).
     pub presence_ttl_secs: i64,
+    /// How long a ride request searches before giving up as "no driver
+    /// found" — also the bid-mode offer visibility window and the
+    /// background dispatcher's retry horizon (see dispatch::SEARCH_TIMEOUT).
+    pub search_timeout_mins: i64,
     /// Lowest fraction of the algorithmic fare a rider may bargain down to.
     pub bargain_floor_ratio: Decimal,
     /// How long a single driver bid stays live before it drops off the
@@ -95,6 +99,7 @@ impl Config {
             dispatch_max_radius_km: float_env("DISPATCH_MAX_RADIUS_KM", 8.0),
             dispatch_broadcast_threshold: int_env("DISPATCH_BROADCAST_THRESHOLD", 3) as usize,
             presence_ttl_secs: int_env("DISPATCH_PRESENCE_TTL_SECS", 60),
+            search_timeout_mins: int_env("DISPATCH_SEARCH_TIMEOUT_MINS", 5),
             bargain_floor_ratio: dec_env("BARGAIN_FLOOR_RATIO", "0.5"),
             bid_ttl_secs: int_env("BID_TTL_SECS", 60),
             bid_counter_max_ratio: dec_env("BID_COUNTER_MAX_RATIO", "2.0"),

@@ -438,7 +438,10 @@ pub(crate) async fn do_change_ask(
         id,
         json!({ "type": "ask", "trip_id": id, "amount": ask }).to_string(),
     );
-    if let Err(e) = dispatch::dispatch_trip(st, id).await {
+    // The rider raised (or lowered) the ask — that's new terms, so a driver
+    // who declined at the old price is fair game to be re-offered here,
+    // unlike a plain redispatch.
+    if let Err(e) = dispatch::dispatch_trip(st, id, true).await {
         tracing::warn!(trip = %id, error = %e, "redispatch after change_ask failed");
     }
     Ok(updated)

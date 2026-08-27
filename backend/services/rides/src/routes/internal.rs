@@ -113,7 +113,7 @@ async fn create_delivery_trip(
         let st = st.clone();
         let trip_id = trip.id;
         async move {
-            let _ = crate::dispatch::dispatch_trip(&st, trip_id).await;
+            let _ = crate::dispatch::dispatch_trip(&st, trip_id, false).await;
         }
     });
 

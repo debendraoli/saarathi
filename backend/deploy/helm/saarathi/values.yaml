@@ -38,6 +38,7 @@ config:
   dispatchRadiusKm: 2
   dispatchMaxRadiusKm: 8
   dispatchPresenceTtlSecs: 60
+  dispatchSearchTimeoutMins: 5
   routeCacheTtlSecs: 3600
   deliveryBaseFare: 30
   deliveryPerKm: 15

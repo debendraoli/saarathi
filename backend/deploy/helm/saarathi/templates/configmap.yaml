@@ -24,6 +24,7 @@ data:
   DISPATCH_RADIUS_KM: {{ .Values.config.dispatchRadiusKm | quote }}
   DISPATCH_MAX_RADIUS_KM: {{ .Values.config.dispatchMaxRadiusKm | quote }}
   DISPATCH_PRESENCE_TTL_SECS: {{ .Values.config.dispatchPresenceTtlSecs | quote }}
+  DISPATCH_SEARCH_TIMEOUT_MINS: {{ .Values.config.dispatchSearchTimeoutMins | quote }}
   ROUTE_CACHE_TTL_SECS: {{ .Values.config.routeCacheTtlSecs | quote }}
   DELIVERY_BASE_FARE: {{ .Values.config.deliveryBaseFare | quote }}
   DELIVERY_PER_KM: {{ .Values.config.deliveryPerKm | quote }}
