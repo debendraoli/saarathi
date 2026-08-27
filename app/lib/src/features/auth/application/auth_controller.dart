@@ -2,7 +2,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/notifications/push_service.dart';
+import '../../../core/offline/json_cache.dart';
+import '../../../core/prefs.dart';
 import '../../../core/storage/token_store.dart';
+import '../../driver/data/driver_kyc_repository.dart';
+import '../../merchant/data/merchant_repository.dart';
+import '../../notifications/data/notifications_repository.dart';
+import '../../places/data/places_repository.dart';
+import '../../ride/application/ride_controller.dart';
 import '../data/auth_repository.dart';
 import '../domain/models.dart';
 
@@ -84,6 +91,16 @@ class AuthController extends Notifier<AuthState> {
       user: session.user,
       mode: session.user.isDriver ? AppMode.driver : AppMode.rider,
     );
+    // Belt-and-suspenders alongside signOut()'s cache clear: these
+    // account-identity providers are plain `autoDispose` (one instance for
+    // the whole app, not scoped per-session), so force a fresh fetch here
+    // rather than trust that the widgets watching them always fully
+    // unmount-and-remount across a sign-out/sign-in on the same device.
+    ref.invalidate(myTripsProvider);
+    ref.invalidate(inboxProvider);
+    ref.invalidate(savedPlacesProvider);
+    ref.invalidate(driverKycProvider);
+    ref.invalidate(myMerchantsProvider);
     _registerPush();
   }
 
@@ -107,6 +124,14 @@ class AuthController extends Notifier<AuthState> {
     // session to prove which device/user pairing to drop.
     await PushService.instance.unregister(ref.read(apiClientProvider));
     await _tokens.clear();
+    // These `cacheThroughList` caches are device-local, keyed by endpoint
+    // rather than by account — without this, the next account to log in on
+    // this device could have its very first fetch fall back to *this*
+    // account's cached data (e.g. a transient network hiccup right after
+    // login), silently showing them someone else's rides/orders/merchant
+    // list. Confirmed live: this is exactly how a rider→merchant switch on
+    // the same device briefly showed the merchant account as the rider.
+    await clearAllCaches(ref.read(sharedPreferencesProvider));
     state = const AuthState(status: AuthStatus.unauthenticated);
   }
 

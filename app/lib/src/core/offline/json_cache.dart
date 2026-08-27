@@ -50,3 +50,19 @@ Future<List<T>> cacheThroughList<T>({
     rethrow;
   }
 }
+
+/// Wipes every [cacheThroughList] entry (all keys share the `cache.` prefix
+/// by convention). Call on sign-out — these caches are device-local and keyed
+/// by endpoint, not by account, so without this a fallback-to-cache on the
+/// *next* account's very first fetch (e.g. a token not yet propagated, a
+/// transient network blip right after login) would silently serve the
+/// previous account's data instead of failing or fetching fresh. Confirmed
+/// live: this is exactly how a rider→merchant switch on the same device
+/// briefly showed the merchant account as if it were the outgoing rider.
+Future<void> clearAllCaches(SharedPreferences prefs) async {
+  for (final key in prefs.getKeys()) {
+    if (key.startsWith('cache.')) {
+      await prefs.remove(key);
+    }
+  }
+}
