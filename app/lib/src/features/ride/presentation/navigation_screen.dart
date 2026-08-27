@@ -6,10 +6,11 @@ import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../../../core/offline/connectivity.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/map_circle_button.dart';
 import '../application/ride_controller.dart';
 import '../application/trip_ws.dart';
 import '../domain/models.dart';
-import 'trip_screen.dart' show MapCircleButton, vehicleIconFor;
+import 'trip_screen.dart' show vehicleIconFor;
 import 'widgets/map_view.dart';
 
 /// Everything [NavigationScreen] needs beyond the trip id, passed through

@@ -14,6 +14,7 @@ import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../../shared/widgets/currency_chip.dart';
 import '../../../shared/widgets/fare_stepper.dart';
+import '../../../shared/widgets/map_circle_button.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/wallet_balance_hint.dart';
 import '../../delivery/application/delivery_controller.dart';
@@ -290,6 +291,20 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     );
   }
 
+  /// This screen can be reached either by a normal push (Home's "Ride"/
+  /// "Send a parcel" tiles — something to pop back to) or via a shared
+  /// location link (`deep_links.dart` uses `router.go`, replacing the whole
+  /// stack — nothing to pop). A plain `context.pop()` would silently do
+  /// nothing in the second case, leaving no way back at all; falling back
+  /// to Home covers it either way.
+  void _goBack(BuildContext context) {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go(Routes.home);
+    }
+  }
+
   Future<void> _book(double defaultFare) async {
     if (_pickup != null &&
         _dest != null &&
@@ -503,123 +518,148 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                 fragile: _fragile,
               )))
             : null;
-    return Scaffold(
-      appBar: AppBar(title: Text(l.whereTo)),
-      body: Stack(
-        children: [
-          MapView(
-            controller: _mapController,
-            center: center,
-            route: route?.valueOrNull ?? (path.length >= 2 ? path : const []),
-            onTap: (p) => setState(() => _dest = p),
-            autoFitPins: true,
-            // Always on: acts as a plain "my location" button before a
-            // route exists, and swaps to "back to route" once one does and
-            // the rider has panned away from it — see MapView's doc comment.
-            showRecenterButton: true,
-            pins: [
-              if (_pickup != null)
-                MapPin(
-                  _pickup!,
-                  Icons.emoji_people_rounded,
-                  Theme.of(context).colorScheme.primary,
-                  id: 'pickup',
-                ),
-              for (var i = 0; i < _stops.length; i++)
-                MapPin(
-                  _stops[i].point,
-                  Icons.adjust_rounded,
-                  Theme.of(context).colorScheme.tertiary,
-                  id: 'stop-$i',
-                  label: '${i + 1}',
-                ),
-              if (_dest != null)
-                MapPin(
-                  _dest!,
-                  Icons.sports_score_rounded,
-                  Theme.of(context).colorScheme.secondary,
-                  id: 'dest',
-                ),
-            ],
-            callouts: [
-              if (_dest != null && selectedEstimate?.valueOrNull != null)
-                MapCallout(
-                  point: _dest!,
-                  text: l.arriveAt(_arrivalTime(
-                      selectedEstimate!.valueOrNull!.durationMins)),
-                ),
-            ],
-          ),
-          SafeArea(
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: _SavedPlacesBar(onPick: _pickSaved),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _goBack(context);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(l.whereTo),
+          automaticallyImplyLeading: false,
+        ),
+        body: Stack(
+          children: [
+            MapView(
+              controller: _mapController,
+              center: center,
+              route: route?.valueOrNull ?? (path.length >= 2 ? path : const []),
+              onTap: (p) => setState(() => _dest = p),
+              autoFitPins: true,
+              // Always on: acts as a plain "my location" button before a
+              // route exists, and swaps to "back to route" once one does and
+              // the rider has panned away from it — see MapView's doc comment.
+              showRecenterButton: true,
+              pins: [
+                if (_pickup != null)
+                  MapPin(
+                    _pickup!,
+                    Icons.emoji_people_rounded,
+                    Theme.of(context).colorScheme.primary,
+                    id: 'pickup',
+                  ),
+                for (var i = 0; i < _stops.length; i++)
+                  MapPin(
+                    _stops[i].point,
+                    Icons.adjust_rounded,
+                    Theme.of(context).colorScheme.tertiary,
+                    id: 'stop-$i',
+                    label: '${i + 1}',
+                  ),
+                if (_dest != null)
+                  MapPin(
+                    _dest!,
+                    Icons.sports_score_rounded,
+                    Theme.of(context).colorScheme.secondary,
+                    id: 'dest',
+                  ),
+              ],
+              callouts: [
+                if (_dest != null && selectedEstimate?.valueOrNull != null)
+                  MapCallout(
+                    point: _dest!,
+                    text: l.arriveAt(_arrivalTime(
+                        selectedEstimate!.valueOrNull!.durationMins)),
+                  ),
+              ],
             ),
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: SafeArea(
-              top: false,
-              child: _Sheet(
-                mode: _mode,
-                onMode: (m) => setState(() {
-                  _mode = m;
-                  _ask = null;
-                }),
-                pickupText: _pickupLabel ?? l.useCurrentLocation,
-                resolvingPickup: _resolvingPickup,
-                destText: _dest == null ? null : _destLabel.text,
-                resolvingDest: _resolvingDest,
-                stops: [for (final s in _stops) s.label],
-                vehicle: _vehicle,
-                estimates: estimates,
-                payment: _payment,
-                ask: _ask,
-                booking: _booking,
-                onPickupTap: () => _openSearch(forPickup: true),
-                onDestTap: () => _openSearch(forPickup: false),
-                onAddStop: _stops.length >= 3 ? null : _addStop,
-                onRemoveStop: _removeStop,
-                onVehicle: (v) => setState(() {
-                  _vehicle = v;
-                  _ask = null;
-                }),
-                onPayment: (p) => setState(() => _payment = p),
-                onAsk: (v) => setState(() => _ask = v),
-                bargainingEnabled: featureEnabled(ref, 'rides.bargaining'),
-                onBook: selectedEstimate?.valueOrNull == null ||
-                        _booking ||
-                        selectedEstimate!.valueOrNull!.nearbyDrivers == 0 ||
-                        !featureEnabled(ref, 'rides.new_requests')
-                    ? null
-                    : () => _book(selectedEstimate.valueOrNull!.finalFare),
-                ridesPaused: !featureEnabled(ref, 'rides.new_requests'),
-                onSave: _dest == null ? null : _saveDest,
-                onClearDest: _dest == null
-                    ? null
-                    : () => setState(() {
-                          _dest = null;
-                          _destLabel.clear();
-                          _ask = null;
-                        }),
-                deliveryEstimate: deliveryEstimate,
-                parcelSize: _parcelSize,
-                onParcelSize: (s) => setState(() => _parcelSize = s),
-                fragile: _fragile,
-                onFragile: (v) => setState(() => _fragile = v),
-                recipientName: _recipientName,
-                recipientPhone: _recipientPhone,
-                codAmount: _codAmount,
-                pickupNote: _pickupNote,
-                canBookDelivery: _canBookDelivery,
-                onBookDelivery: _bookDelivery,
-                onFieldChanged: () => setState(() {}),
-                onPreferredDriverPhone: (phone) =>
-                    setState(() => _preferredDriverPhone = phone),
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: _SavedPlacesBar(onPick: _pickSaved),
               ),
             ),
-          ),
-        ],
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12, bottom: 8),
+                      child: MapCircleButton(
+                        icon: Icons.arrow_back_rounded,
+                        onTap: () => _goBack(context),
+                      ),
+                    ),
+                    _Sheet(
+                      mode: _mode,
+                      onMode: (m) => setState(() {
+                        _mode = m;
+                        _ask = null;
+                      }),
+                      pickupText: _pickupLabel ?? l.useCurrentLocation,
+                      resolvingPickup: _resolvingPickup,
+                      destText: _dest == null ? null : _destLabel.text,
+                      resolvingDest: _resolvingDest,
+                      stops: [for (final s in _stops) s.label],
+                      vehicle: _vehicle,
+                      estimates: estimates,
+                      payment: _payment,
+                      ask: _ask,
+                      booking: _booking,
+                      onPickupTap: () => _openSearch(forPickup: true),
+                      onDestTap: () => _openSearch(forPickup: false),
+                      onAddStop: _stops.length >= 3 ? null : _addStop,
+                      onRemoveStop: _removeStop,
+                      onVehicle: (v) => setState(() {
+                        _vehicle = v;
+                        _ask = null;
+                      }),
+                      onPayment: (p) => setState(() => _payment = p),
+                      onAsk: (v) => setState(() => _ask = v),
+                      bargainingEnabled:
+                          featureEnabled(ref, 'rides.bargaining'),
+                      onBook: selectedEstimate?.valueOrNull == null ||
+                              _booking ||
+                              selectedEstimate!.valueOrNull!.nearbyDrivers ==
+                                  0 ||
+                              !featureEnabled(ref, 'rides.new_requests')
+                          ? null
+                          : () =>
+                              _book(selectedEstimate.valueOrNull!.finalFare),
+                      ridesPaused: !featureEnabled(ref, 'rides.new_requests'),
+                      onSave: _dest == null ? null : _saveDest,
+                      onClearDest: _dest == null
+                          ? null
+                          : () => setState(() {
+                                _dest = null;
+                                _destLabel.clear();
+                                _ask = null;
+                              }),
+                      deliveryEstimate: deliveryEstimate,
+                      parcelSize: _parcelSize,
+                      onParcelSize: (s) => setState(() => _parcelSize = s),
+                      fragile: _fragile,
+                      onFragile: (v) => setState(() => _fragile = v),
+                      recipientName: _recipientName,
+                      recipientPhone: _recipientPhone,
+                      codAmount: _codAmount,
+                      pickupNote: _pickupNote,
+                      canBookDelivery: _canBookDelivery,
+                      onBookDelivery: _bookDelivery,
+                      onFieldChanged: () => setState(() {}),
+                      onPreferredDriverPhone: (phone) =>
+                          setState(() => _preferredDriverPhone = phone),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

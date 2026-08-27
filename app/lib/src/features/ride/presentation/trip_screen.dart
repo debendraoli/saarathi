@@ -16,6 +16,7 @@ import '../../../core/router/app_router.dart';
 import '../../../shared/haptics.dart';
 import '../../../shared/image_url.dart';
 import '../../../shared/widgets/common.dart';
+import '../../../shared/widgets/map_circle_button.dart';
 import '../../../shared/widgets/swipe_to_confirm.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../comms/application/call_controller.dart';
@@ -216,15 +217,15 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                   // expanded (or knowing to look for it there at all).
                   final routingToPickup = trip.status == TripStatus.accepted ||
                       trip.status == TripStatus.arriving;
-                  final etaMins =
-                      (routingToPickup || trip.status == TripStatus.inProgress) &&
-                              driverLoc != null
-                          ? ref
-                              .watch(
-                                  tripEtaProvider(EtaQuery(driverLoc, routeTarget)))
-                              .valueOrNull
-                              ?.durationMins
-                          : null;
+                  final etaMins = (routingToPickup ||
+                              trip.status == TripStatus.inProgress) &&
+                          driverLoc != null
+                      ? ref
+                          .watch(
+                              tripEtaProvider(EtaQuery(driverLoc, routeTarget)))
+                          .valueOrNull
+                          ?.durationMins
+                      : null;
                   final mapCallouts = <MapCallout>[
                     if (etaMins != null)
                       MapCallout(
@@ -1403,7 +1404,9 @@ class _ShareLocationToggle extends ConsumerWidget {
         child: Row(
           children: [
             Icon(
-              sharing ? Icons.share_location_rounded : Icons.location_off_rounded,
+              sharing
+                  ? Icons.share_location_rounded
+                  : Icons.location_off_rounded,
               color: sharing ? scheme.primary : scheme.onSurfaceVariant,
             ),
             const SizedBox(width: 12),
@@ -1607,38 +1610,6 @@ class _DetailRow extends StatelessWidget {
 }
 
 /// A round, elevated map overlay button (back, etc.).
-class MapCircleButton extends StatelessWidget {
-  const MapCircleButton({
-    super.key,
-    required this.icon,
-    required this.onTap,
-    this.tooltip,
-    this.iconColor,
-  });
-  final IconData icon;
-  final VoidCallback onTap;
-  final String? tooltip;
-
-  /// Overrides the icon's default color — e.g. Google's own blue for the
-  /// external-navigation handoff button, so it reads at a glance as "leaves
-  /// the app" rather than blending in with every other map control.
-  final Color? iconColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Theme.of(context).colorScheme.surface,
-      shape: const CircleBorder(),
-      elevation: 2,
-      child: IconButton(
-        icon: Icon(icon, color: iconColor),
-        tooltip: tooltip,
-        onPressed: onTap,
-      ),
-    );
-  }
-}
-
 /// Lets the caller pick between the masked in-app call and their phone's own
 /// dialer — skips straight to the in-app call when there's no real number to
 /// offer yet (not shared until the trip is actively underway). Used from
@@ -1844,7 +1815,8 @@ class _DriverLocationPublisherState
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
       ),
-    ).listen(_onPosition, onError: (_) => _restartStream(), onDone: _restartStream);
+    ).listen(_onPosition,
+        onError: (_) => _restartStream(), onDone: _restartStream);
     _compassSub = ref.listenManual(compassHeadingProvider, (prev, next) {
       // `compassHeadingProvider` is a keep-alive, app-lifetime provider — an
       // event can still be in flight the instant this widget's dispose()
@@ -2028,7 +2000,8 @@ class _RiderLocationPublisherState
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
       ),
-    ).listen(_onPosition, onError: (_) => _restartStream(), onDone: _restartStream);
+    ).listen(_onPosition,
+        onError: (_) => _restartStream(), onDone: _restartStream);
   }
 
   void _onPosition(Position pos) {
@@ -2131,7 +2104,8 @@ class _SelfLocationWatcherState extends ConsumerState<_SelfLocationWatcher> {
         accuracy: LocationAccuracy.high,
         distanceFilter: 5,
       ),
-    ).listen(_onPosition, onError: (_) => _restartStream(), onDone: _restartStream);
+    ).listen(_onPosition,
+        onError: (_) => _restartStream(), onDone: _restartStream);
     _compassSub = ref.listenManual(compassHeadingProvider, (prev, next) {
       // Same in-flight-event-vs-dispose race noted on
       // `_DriverLocationPublisherState`'s own compass listener.
