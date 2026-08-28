@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../shared/provider_retry.dart';
 import '../../ride/domain/models.dart';
 import '../domain/models.dart';
 
@@ -76,4 +77,4 @@ final driverKycRepositoryProvider = Provider<DriverKycRepository>((ref) {
 /// Current driver verification snapshot (refresh after each upload).
 final driverKycProvider = FutureProvider.autoDispose<DriverKyc>((ref) {
   return ref.watch(driverKycRepositoryProvider).status();
-});
+}, retry: shortNetworkRetry);

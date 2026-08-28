@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/foreground/driver_foreground_service.dart';
@@ -82,8 +83,8 @@ class DriverController extends Notifier<DriverStatus> {
     // we were already online going into the drop) means they never have to
     // notice at all.
     ref.listen(connectivityProvider, (prev, next) {
-      final wasOffline = prev?.valueOrNull == false;
-      final backOnline = next.valueOrNull ?? false;
+      final wasOffline = prev?.value == false;
+      final backOnline = next.value ?? false;
       if (wasOffline && backOnline && state.online) {
         _resumeAttempt = 0;
         _attemptResumePresence();

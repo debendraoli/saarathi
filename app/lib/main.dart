@@ -28,6 +28,13 @@ Future<void> main() async {
 
   runApp(
     ProviderScope(
+      // Riverpod 3 retries failing providers automatically by default. This
+      // app already has its own retry/backoff for the cases that need it —
+      // resilient_poll.dart's stale-while-retrying polling and the
+      // refresh-then-retry-once flow in api_client.dart — so the framework
+      // default is turned off here to avoid a second, uncoordinated retry
+      // layer stacking under those.
+      retry: (retryCount, error) => null,
       overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
       child: const SaarathiApp(),
     ),

@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:dio/dio.dart' show CancelToken;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/offline/connectivity.dart';
 import '../../../shared/geocode_cache.dart';
 import '../../../shared/paged_notifier.dart';
+import '../../../shared/provider_retry.dart';
 import '../../../shared/resilient_poll.dart';
 import '../../places/data/places_repository.dart';
 import '../data/ride_repository.dart';
@@ -25,7 +27,7 @@ final fareEstimateProvider =
   return ref
       .watch(rideRepositoryProvider)
       .estimate(draft, cancelToken: cancelToken);
-});
+}, retry: shortNetworkRetry);
 
 /// An ordered path (pickup → stops → destination) + profile for a route lookup.
 /// Value equality over the point list so identical paths share one request and
@@ -59,7 +61,7 @@ final routeGeometryProvider =
   return ref
       .watch(rideRepositoryProvider)
       .routeGeometry(q.points, vehicleClass: q.vehicleClass);
-});
+}, retry: shortNetworkRetry);
 
 /// The full road route (geometry + turn-by-turn steps) for the fullscreen
 /// navigation view — same query shape as [routeGeometryProvider], separate
@@ -69,7 +71,7 @@ final roadRouteProvider =
   return ref
       .watch(rideRepositoryProvider)
       .roadRoute(q.points, vehicleClass: q.vehicleClass);
-});
+}, retry: shortNetworkRetry);
 
 /// Two points to route between for a live ETA. Value equality (same shape as
 /// [RouteQuery]) means an unchanged driver position reuses the cached
@@ -93,7 +95,7 @@ class EtaQuery {
 final tripEtaProvider =
     FutureProvider.autoDispose.family<RouteEta, EtaQuery>((ref, q) {
   return ref.watch(rideRepositoryProvider).routeEta(q.from, q.to);
-});
+}, retry: shortNetworkRetry);
 
 /// One-shot fetch for a finished trip's details page — a completed,
 /// cancelled, or no-driver trip's status/fare never changes again, so
@@ -104,7 +106,7 @@ final tripEtaProvider =
 final tripDetailsProvider =
     FutureProvider.autoDispose.family<Trip, String>((ref, id) {
   return ref.watch(rideRepositoryProvider).trip(id);
-});
+}, retry: shortNetworkRetry);
 
 /// Single underlying poll loop for a trip — [tripStreamProvider] and
 /// [tripStaleProvider] both derive from this one fetch cycle rather than
@@ -131,7 +133,7 @@ final tripStreamProvider =
 /// True while the trip screen is showing a stale (last-known) value because
 /// the most recent poll failed.
 final tripStaleProvider = Provider.autoDispose.family<bool, String>((ref, id) {
-  return ref.watch(_tripPollProvider(id)).valueOrNull?.stale ?? false;
+  return ref.watch(_tripPollProvider(id)).value?.stale ?? false;
 });
 
 /// A driver-side status transition (arriving → in_progress → completed)
@@ -157,7 +159,7 @@ final effectiveTripProvider =
   // the *next* optimistic swipe overwrites it) keeps this provider a pure
   // function of "what's true right now", not "what was ever asserted".
   ref.listen(tripStreamProvider(tripId), (prev, next) {
-    if (optimistic != null && next.valueOrNull?.status == optimistic) {
+    if (optimistic != null && next.value?.status == optimistic) {
       ref.read(optimisticTripStatusProvider(tripId).notifier).state = null;
     }
   });
@@ -215,7 +217,7 @@ class TripStatusUpdater {
     _pending = status;
     _pendingReason = reason;
     _connSub ??= _ref.listen(connectivityProvider, (prev, next) {
-      if ((next.valueOrNull ?? false) && _pending != null) {
+      if ((next.value ?? false) && _pending != null) {
         _retryTimer?.cancel();
         _attempt = 0;
         _attemptRun();
@@ -270,9 +272,9 @@ void retryTripPoll(WidgetRef ref, String id) =>
 /// ends) rather than on every 3s poll tick.
 final tripParticipantsProvider =
     FutureProvider.autoDispose.family<TripParticipants, String>((ref, id) {
-  ref.watch(tripStreamProvider(id).select((v) => v.valueOrNull?.status));
+  ref.watch(tripStreamProvider(id).select((v) => v.value?.status));
   return ref.read(rideRepositoryProvider).participants(id);
-});
+}, retry: shortNetworkRetry);
 
 /// Human label for a trip's destination, for the in-trip status body
 /// ("arriving at …" / "on the way to …"). The dest point never changes
@@ -281,10 +283,10 @@ final tripParticipantsProvider =
 final tripDestLabelProvider =
     FutureProvider.autoDispose.family<String?, String>((ref, tripId) {
   final dest =
-      ref.watch(tripStreamProvider(tripId).select((v) => v.valueOrNull?.dest));
+      ref.watch(tripStreamProvider(tripId).select((v) => v.value?.dest));
   if (dest == null) return Future.value(null);
   return reverseGeocodeCached(ref.watch(placesRepositoryProvider), dest);
-});
+}, retry: shortNetworkRetry);
 
 /// Same as [tripDestLabelProvider] but for the pickup point — used on the
 /// post-trip rating sheet, which wants both ends of the trip, not just
@@ -292,15 +294,15 @@ final tripDestLabelProvider =
 final tripOriginLabelProvider =
     FutureProvider.autoDispose.family<String?, String>((ref, tripId) {
   final origin = ref
-      .watch(tripStreamProvider(tripId).select((v) => v.valueOrNull?.origin));
+      .watch(tripStreamProvider(tripId).select((v) => v.value?.origin));
   if (origin == null) return Future.value(null);
   return reverseGeocodeCached(ref.watch(placesRepositoryProvider), origin);
-});
+}, retry: shortNetworkRetry);
 
 /// The signed-in user's own trips, newest first (Activity tab).
 final myTripsProvider = FutureProvider.autoDispose<List<Trip>>((ref) {
   return ref.watch(rideRepositoryProvider).myTrips();
-});
+}, retry: shortNetworkRetry);
 
 /// Infinite-scroll version of [myTripsProvider] for the Activity tab's
 /// actual list rendering — [myTripsProvider] above stays as the small
@@ -319,12 +321,12 @@ final myTripsPagedProvider =
 /// The signed-in rider's lifetime ride stats (My Stats screen).
 final riderStatsProvider = FutureProvider.autoDispose<RiderStats>((ref) {
   return ref.watch(rideRepositoryProvider).myStats();
-});
+}, retry: shortNetworkRetry);
 
 /// The signed-in driver's progress toward any live daily ride goal.
 final driverTodayGoalsProvider = FutureProvider.autoDispose<DriverGoals>((ref) {
   return ref.watch(rideRepositoryProvider).todayGoals();
-});
+}, retry: shortNetworkRetry);
 
 /// The signed-in driver's own earnings, bucketed by day/week/month (My
 /// Stats, driver mode). Keyed by period string so switching the segmented
@@ -333,7 +335,7 @@ final driverTodayGoalsProvider = FutureProvider.autoDispose<DriverGoals>((ref) {
 final driverEarningsProvider =
     FutureProvider.autoDispose.family<DriverEarnings, String>((ref, period) {
   return ref.watch(rideRepositoryProvider).driverEarnings(period);
-});
+}, retry: shortNetworkRetry);
 
 /// Polls live bids for a bid-mode trip. Stops on its own once the trip
 /// leaves 'requested' (accepted/cancelled) — no point polling a resolved
@@ -342,7 +344,7 @@ final tripBidsProvider =
     StreamProvider.autoDispose.family<List<Bid>, String>((ref, tripId) async* {
   final repo = ref.watch(rideRepositoryProvider);
   while (true) {
-    final trip = ref.read(tripStreamProvider(tripId)).valueOrNull;
+    final trip = ref.read(tripStreamProvider(tripId)).value;
     if (trip != null && trip.status != TripStatus.requested) {
       yield const [];
       return;

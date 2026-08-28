@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../shared/provider_retry.dart';
 import '../domain/models.dart';
 
 class CampaignsRepository {
@@ -21,4 +22,4 @@ final campaignsRepositoryProvider = Provider<CampaignsRepository>((ref) {
 
 final activeOffersProvider = FutureProvider.autoDispose<List<Offer>>((ref) {
   return ref.watch(campaignsRepositoryProvider).activeOffers();
-});
+}, retry: shortNetworkRetry);

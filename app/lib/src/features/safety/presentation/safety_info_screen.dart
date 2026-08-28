@@ -17,7 +17,7 @@ class SafetyInfoScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final index = ref.watch(rideIndexProvider).valueOrNull;
+    final index = ref.watch(rideIndexProvider).value;
 
     return Scaffold(
       appBar: AppBar(title: Text(l.safetyTitle)),

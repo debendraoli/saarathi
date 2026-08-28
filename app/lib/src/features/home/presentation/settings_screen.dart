@@ -25,7 +25,7 @@ class SettingsScreen extends ConsumerWidget {
     final locale = ref.watch(localeControllerProvider);
     final merchants = ref.watch(myMerchantsProvider);
     final showBackgroundCard = (user?.isDriver ?? false) ||
-        (merchants.valueOrNull?.isNotEmpty ?? false);
+        (merchants.value?.isNotEmpty ?? false);
     // The permission card hides itself once granted, so without this check a
     // rider with notifications already on and no background-running card
     // would see an empty "Notifications & device" section — just a label

@@ -80,7 +80,7 @@ class _MarketplaceScreenState extends ConsumerState<MarketplaceScreen> {
           onRetry: () => ref.invalidate(merchantsProvider(merchantsKey)),
         ),
         data: (list) {
-          final offerList = offers.valueOrNull ?? const <NearbyOffer>[];
+          final offerList = offers.value ?? const <NearbyOffer>[];
           final offerByMerchant = {
             for (final o in offerList) o.merchantId: o,
           };

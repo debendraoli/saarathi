@@ -73,7 +73,7 @@ class _ActivityTabState extends ConsumerState<ActivityTab> {
           ],
         ),
         data: (tripsPage) {
-          final orders = ordersState.valueOrNull?.items ?? const [];
+          final orders = ordersState.value?.items ?? const [];
           final trips = tripsPage.items;
           if (orders.isEmpty && trips.isEmpty) {
             return ListView(
@@ -84,7 +84,7 @@ class _ActivityTabState extends ConsumerState<ActivityTab> {
             );
           }
           final loadingMore = tripsPage.loading ||
-              (ordersState.valueOrNull?.loading ?? false);
+              (ordersState.value?.loading ?? false);
           return ListView(
             controller: _scroll,
             padding: const EdgeInsets.symmetric(vertical: 8),

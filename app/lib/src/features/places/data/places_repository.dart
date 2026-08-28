@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/offline/json_cache.dart';
 import '../../../core/prefs.dart';
+import '../../../shared/provider_retry.dart';
 
 class SavedPlace {
   const SavedPlace({
@@ -139,9 +140,9 @@ final placesRepositoryProvider = Provider<PlacesRepository>((ref) {
 
 final savedPlacesProvider = FutureProvider.autoDispose<List<SavedPlace>>((ref) {
   return ref.watch(placesRepositoryProvider).list();
-});
+}, retry: shortNetworkRetry);
 
 final recentSearchesProvider =
     FutureProvider.autoDispose<List<PlaceHit>>((ref) {
   return ref.watch(placesRepositoryProvider).recentSearches();
-});
+}, retry: shortNetworkRetry);

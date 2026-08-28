@@ -291,8 +291,8 @@ class _Suggestions extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
-    final saved = ref.watch(savedPlacesProvider).valueOrNull ?? const [];
-    final recent = ref.watch(recentSearchesProvider).valueOrNull ?? const [];
+    final saved = ref.watch(savedPlacesProvider).value ?? const [];
+    final recent = ref.watch(recentSearchesProvider).value ?? const [];
 
     return ListView(
       children: [

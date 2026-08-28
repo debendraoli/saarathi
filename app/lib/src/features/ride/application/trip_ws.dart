@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../domain/models.dart';
@@ -16,7 +17,7 @@ import 'trip_channel.dart';
 final tripLocationProvider =
     StreamProvider.autoDispose.family<LatLng, String>((ref, tripId) {
   final channel = ref.watch(tripChannelProvider(tripId));
-  final driverId = ref.watch(tripStreamProvider(tripId)).valueOrNull?.driverId;
+  final driverId = ref.watch(tripStreamProvider(tripId)).value?.driverId;
   return channel
       .ofType('location')
       .where((m) => driverId != null && m['by'] == driverId)
@@ -74,7 +75,7 @@ final localSelfPositionProvider = StateProvider<DriverPosition?>((ref) => null);
 final tripDriverPositionProvider =
     StreamProvider.autoDispose.family<DriverPosition, String>((ref, tripId) {
   final channel = ref.watch(tripChannelProvider(tripId));
-  final driverId = ref.watch(tripStreamProvider(tripId)).valueOrNull?.driverId;
+  final driverId = ref.watch(tripStreamProvider(tripId)).value?.driverId;
   double? lastHeading;
   return channel
       .ofType('location')
@@ -102,7 +103,7 @@ final tripDriverPositionProvider =
 final tripRiderPositionProvider =
     StreamProvider.autoDispose.family<DriverPosition, String>((ref, tripId) {
   final channel = ref.watch(tripChannelProvider(tripId));
-  final riderId = ref.watch(tripStreamProvider(tripId)).valueOrNull?.riderId;
+  final riderId = ref.watch(tripStreamProvider(tripId)).value?.riderId;
   double? lastHeading;
   return channel
       .ofType('location')

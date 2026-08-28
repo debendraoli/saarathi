@@ -107,7 +107,7 @@ class _ContributeHubScreenState extends ConsumerState<ContributeHubScreen> {
         ),
         data: (summary) {
           final canRedeem = summary.balance >= summary.minRedeemPoints;
-          final recent = contributionsAsync.valueOrNull?.take(3).toList() ??
+          final recent = contributionsAsync.value?.take(3).toList() ??
               const <PlaceContribution>[];
 
           return RefreshIndicator(

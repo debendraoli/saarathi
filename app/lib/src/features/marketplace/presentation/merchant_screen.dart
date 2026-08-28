@@ -44,7 +44,7 @@ class MerchantScreen extends ConsumerWidget {
                 .add(it);
           }
           // Flatten header + category sections + items into one bounded list.
-          final offers = ref.watch(storeOffersProvider(merchant.id)).valueOrNull ??
+          final offers = ref.watch(storeOffersProvider(merchant.id)).value ??
               const [];
           final rows = <Widget>[
             _Header(merchant: loaded),

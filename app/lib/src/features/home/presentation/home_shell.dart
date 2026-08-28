@@ -68,10 +68,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final driverKycAsync =
         isDriverAccount ? ref.watch(driverKycProvider) : null;
     final driverKycApproved =
-        driverKycAsync?.valueOrNull?.status == KycStatus.approved;
+        driverKycAsync?.value?.status == KycStatus.approved;
     final merchantsAsync = ref.watch(myMerchantsProvider);
     final hasApprovedMerchant =
-        merchantsAsync.valueOrNull?.any((m) => m.isApproved) ?? false;
+        merchantsAsync.value?.any((m) => m.isApproved) ?? false;
 
     // Reconcile cached data when connectivity is restored — `driverKycProvider`/
     // `myMerchantsProvider` matter most here: a one-shot `FutureProvider` that
@@ -81,7 +81,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // rider/driver switch spuriously reappear for an already-approved
     // driver, since an error was being read the same as "not yet approved".
     ref.listen(connectivityProvider, (prev, next) {
-      if (prev?.valueOrNull != false || next.valueOrNull != true) return;
+      if (prev?.value != false || next.value != true) return;
       // Deferred, not just `if (!mounted) return` right here — confirmed
       // live elsewhere this session that `mounted` alone doesn't catch this:
       // it stays true through Flutter's `deactivate()`, but touching
@@ -97,8 +97,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         ref.invalidate(myMerchantsProvider);
       });
     });
-    final online = ref.watch(connectivityProvider).valueOrNull ?? true;
-    final gpsOff = ref.watch(locationServiceProvider).valueOrNull == false;
+    final online = ref.watch(connectivityProvider).value ?? true;
+    final gpsOff = ref.watch(locationServiceProvider).value == false;
 
     // Avoid flashing the rider/driver toggle home (with its "become a
     // merchant"/"become a driver" nudges) for the split second before we
@@ -409,7 +409,7 @@ class _NotificationBell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final unread = ref.watch(inboxProvider).valueOrNull?.unread ?? 0;
+    final unread = ref.watch(inboxProvider).value?.unread ?? 0;
     return IconButton(
       onPressed: () => context.push(Routes.notifications),
       icon: Badge(

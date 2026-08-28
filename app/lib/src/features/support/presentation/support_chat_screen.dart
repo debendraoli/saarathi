@@ -198,7 +198,7 @@ class _TripContextCard extends ConsumerWidget {
     // from "this reference is actually gone", which matters here since the
     // whole point of the card is confirming what the thread is about.
     if (async.isLoading) return const SizedBox.shrink();
-    final trip = async.valueOrNull;
+    final trip = async.value;
     if (trip == null) {
       return _ContextCard(
         icon: Icons.two_wheeler_rounded,
@@ -225,7 +225,7 @@ class _OrderContextCard extends ConsumerWidget {
     final l = AppL10n.of(context);
     final async = ref.watch(orderProvider(orderId));
     if (async.isLoading) return const SizedBox.shrink();
-    final order = async.valueOrNull;
+    final order = async.value;
     if (order == null) {
       return _ContextCard(
         icon: Icons.inventory_2_rounded,

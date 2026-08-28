@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/prefs.dart';
 import '../../../shared/paged_notifier.dart';
+import '../../../shared/provider_retry.dart';
 
 class AppNotification {
   const AppNotification({
@@ -97,7 +98,7 @@ final notificationsRepositoryProvider =
 
 final inboxProvider = FutureProvider.autoDispose<Inbox>((ref) {
   return ref.watch(notificationsRepositoryProvider).inbox();
-});
+}, retry: shortNetworkRetry);
 
 /// Infinite-scroll version of [inboxProvider] for the notifications screen's
 /// actual list rendering — [inboxProvider] above stays for the unread badge

@@ -10,6 +10,7 @@ import '../../../core/notifications/notification_service.dart';
 import '../../../core/offline/json_cache.dart';
 import '../../../core/prefs.dart';
 import '../../../shared/paged_notifier.dart';
+import '../../../shared/provider_retry.dart';
 import '../../../shared/resilient_poll.dart';
 import '../../merchant/domain/models.dart' show MerchantOffer;
 import '../domain/models.dart';
@@ -208,16 +209,16 @@ final marketplaceRepositoryProvider = Provider<MarketplaceRepository>((ref) {
 final merchantsProvider = FutureProvider.autoDispose
     .family<List<Merchant>, (String, LatLng?)>((ref, args) {
   return ref.watch(marketplaceRepositoryProvider).merchants(args.$1, args.$2);
-});
+}, retry: shortNetworkRetry);
 
 final nearbyOffersProvider = FutureProvider.autoDispose
     .family<List<NearbyOffer>, (String, LatLng?)>((ref, args) {
   return ref.watch(marketplaceRepositoryProvider).nearbyOffers(args.$1, args.$2);
-});
+}, retry: shortNetworkRetry);
 
 final myOrdersProvider = FutureProvider.autoDispose<List<CustomerOrder>>((ref) {
   return ref.watch(marketplaceRepositoryProvider).myOrders();
-});
+}, retry: shortNetworkRetry);
 
 /// Infinite-scroll version of [myOrdersProvider] for the Activity tab's
 /// actual list rendering — see `TripsPaged`'s doc comment for the same
@@ -236,19 +237,19 @@ final myOrdersPagedProvider =
 
 final orderStatsProvider = FutureProvider.autoDispose<OrderStats>((ref) {
   return ref.watch(marketplaceRepositoryProvider).myOrderStats();
-});
+}, retry: shortNetworkRetry);
 
 final merchantDetailProvider = FutureProvider.autoDispose
     .family<(Merchant, List<MenuItem>), String>((ref, id) {
   return ref.watch(marketplaceRepositoryProvider).detail(id);
-});
+}, retry: shortNetworkRetry);
 
 /// Active store offers for one merchant — the customer-facing banner on
 /// the store's menu screen and at checkout.
 final storeOffersProvider = FutureProvider.autoDispose
     .family<List<MerchantOffer>, String>((ref, merchantId) {
   return ref.watch(marketplaceRepositoryProvider).activeOffers(merchantId);
-});
+}, retry: shortNetworkRetry);
 
 /// Single underlying poll loop — [orderProvider] and [orderStaleProvider]
 /// both derive from this one fetch cycle.
@@ -282,7 +283,7 @@ final orderProvider =
 /// True while showing a stale (last-known) order because the most recent
 /// poll failed — drives a small "reconnecting" banner instead of an error.
 final orderStaleProvider = Provider.autoDispose.family<bool, String>((ref, id) {
-  return ref.watch(_orderPollProvider(id)).valueOrNull?.stale ?? false;
+  return ref.watch(_orderPollProvider(id)).value?.stale ?? false;
 });
 
 /// Restarts the poll loop after it's given up entirely (never got a first

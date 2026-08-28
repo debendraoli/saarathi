@@ -135,8 +135,8 @@ class _OnlineBoard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
     final status = ref.watch(driverControllerProvider);
-    final offers = ref.watch(driverOffersProvider).valueOrNull ?? const [];
-    final activeTrip = ref.watch(driverActiveTripProvider).valueOrNull;
+    final offers = ref.watch(driverOffersProvider).value ?? const [];
+    final activeTrip = ref.watch(driverActiveTripProvider).value;
 
     // A trip won by bid has no local "I just tapped accept" moment to
     // navigate on (the rider accepted the driver's bid, not the other way
@@ -146,7 +146,7 @@ class _OnlineBoard extends ConsumerWidget {
     // navigates itself (see `_OfferCard`), so this only ever fires for the
     // bid case in practice, but it's a harmless no-op either way.
     ref.listen(driverActiveTripProvider, (prev, next) {
-      final trip = next.valueOrNull;
+      final trip = next.value;
       if (trip == null) return;
       // Deferred to the next frame in full, not called straight from this
       // listener — `ref.listen` can fire mid-build (e.g. right as
@@ -233,8 +233,8 @@ class _DriverActiveTripCard extends ConsumerWidget {
     final routingToPickup = trip.status == TripStatus.accepted ||
         trip.status == TripStatus.arriving;
     final label = routingToPickup
-        ? (ref.watch(tripOriginLabelProvider(trip.id)).valueOrNull)
-        : (ref.watch(tripDestLabelProvider(trip.id)).valueOrNull);
+        ? (ref.watch(tripOriginLabelProvider(trip.id)).value)
+        : (ref.watch(tripDestLabelProvider(trip.id)).value);
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Card(
@@ -415,7 +415,7 @@ class _TodayGoalCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final goals = ref.watch(driverTodayGoalsProvider).valueOrNull;
+    final goals = ref.watch(driverTodayGoalsProvider).value;
     if (goals == null || goals.goals.isEmpty) return const SizedBox.shrink();
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
@@ -714,7 +714,7 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
     final driverLoc = ref.watch(driverControllerProvider).lastLocation;
     final pickupEta = driverLoc == null
         ? null
-        : ref.watch(tripEtaProvider(EtaQuery(driverLoc, offer.origin))).valueOrNull;
+        : ref.watch(tripEtaProvider(EtaQuery(driverLoc, offer.origin))).value;
     final pickupEtaMins = pickupEta?.durationMins;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),

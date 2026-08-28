@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../shared/provider_retry.dart';
 import '../domain/models.dart';
 
 class SafetyRepository {
@@ -36,8 +37,8 @@ final safetyRepositoryProvider = Provider<SafetyRepository>((ref) {
 final trustedContactsProvider =
     FutureProvider.autoDispose<List<TrustedContact>>((ref) {
   return ref.watch(safetyRepositoryProvider).trustedContacts();
-});
+}, retry: shortNetworkRetry);
 
 final rideIndexProvider = FutureProvider.autoDispose<RideIndex>((ref) {
   return ref.watch(safetyRepositoryProvider).rideIndex();
-});
+}, retry: shortNetworkRetry);

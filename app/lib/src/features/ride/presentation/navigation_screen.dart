@@ -57,7 +57,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> {
   // live GPS point, and `LatLng` compares by exact double equality — so
   // practically every ~5s ping is a brand-new `.autoDispose.family` instance
   // with no cached "previous value" to fall back on while it refetches.
-  // Reading `.valueOrNull` straight off the provider makes the route line
+  // Reading `.value` straight off the provider makes the route line
   // (and the instruction banner, which needs `route.steps`) blink out for
   // that loading window on every single ping. Stashing the last
   // successfully-loaded route here and only overwriting it on a real
@@ -118,7 +118,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> {
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final theme = Theme.of(context);
-    final online = ref.watch(connectivityProvider).valueOrNull ?? true;
+    final online = ref.watch(connectivityProvider).value ?? true;
     // This screen is only ever reached by the driver navigating their own
     // trip (see `trip_screen.dart`'s fullscreen button, gated on
     // `iAmDriver`), so it can unconditionally prefer local GPS over the
@@ -126,7 +126,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> {
     // identical merge, and exactly what keeps this screen's own turn-by-turn
     // moving forward while offline instead of freezing.
     final remoteDriverPos =
-        ref.watch(tripDriverPositionProvider(widget.tripId)).valueOrNull;
+        ref.watch(tripDriverPositionProvider(widget.tripId)).value;
     final localDriverPos = ref.watch(localDriverPositionProvider);
     final driverPos = localDriverPos ?? remoteDriverPos;
     final driverLoc = driverPos?.point;
@@ -137,7 +137,7 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> {
             .watch(roadRouteProvider(RouteQuery(
                 [_throttledRoutePoint(driverLoc), widget.target],
                 widget.vehicleClass)))
-            .valueOrNull;
+            .value;
     if (freshRoute != null) _lastRoute = freshRoute;
     final route = _lastRoute;
     final currentStep =

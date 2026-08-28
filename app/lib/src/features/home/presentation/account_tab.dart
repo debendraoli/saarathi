@@ -24,9 +24,9 @@ class AccountTab extends ConsumerWidget {
     final mode = ref.watch(authControllerProvider).mode;
     final merchants = ref.watch(myMerchantsProvider);
     final driverKyc = user?.isDriver ?? false
-        ? ref.watch(driverKycProvider).valueOrNull
+        ? ref.watch(driverKycProvider).value
         : null;
-    final points = ref.watch(pointsSummaryProvider).valueOrNull;
+    final points = ref.watch(pointsSummaryProvider).value;
 
     return ListView(
       // This route's Scaffold has no SafeArea, so without the extra bottom

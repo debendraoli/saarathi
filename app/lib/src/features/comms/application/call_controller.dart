@@ -246,7 +246,7 @@ final callControllerProvider =
   // could keep talking on a ride that no longer exists. Force a hangup the
   // moment the trip goes terminal.
   ref.listen(tripStreamProvider(tripId), (prev, next) {
-    final status = next.valueOrNull?.status;
+    final status = next.value?.status;
     if ((status == TripStatus.cancelled || status == TripStatus.completed) &&
         controller.inCall) {
       controller.hangup();

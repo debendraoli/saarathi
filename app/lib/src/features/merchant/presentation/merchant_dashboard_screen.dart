@@ -189,7 +189,7 @@ class _StoreCardState extends ConsumerState<_StoreCard> {
     setState(() => _open = value);
     _pendingOpen = value;
     _connSub ??= ref.listenManual(connectivityProvider, (prev, next) {
-      if ((next.valueOrNull ?? false) && _pendingOpen != null) {
+      if ((next.value ?? false) && _pendingOpen != null) {
         _retryTimer?.cancel();
         _attempt = 0;
         _attemptRun();
@@ -246,7 +246,7 @@ class _StoreCardState extends ConsumerState<_StoreCard> {
     // new order is visible — and rings/vibrates — right on the home screen,
     // same provider merchant_orders_screen.dart uses.
     final orders = m.isApproved
-        ? ref.watch(merchantOrdersProvider(m.id)).valueOrNull ?? const []
+        ? ref.watch(merchantOrdersProvider(m.id)).value ?? const []
         : const <CustomerOrder>[];
     final incoming =
         orders.where((o) => _activeStatuses.contains(o.status)).toList();

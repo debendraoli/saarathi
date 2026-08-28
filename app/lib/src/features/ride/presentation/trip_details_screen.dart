@@ -77,7 +77,7 @@ class _BodyState extends ConsumerState<_Body> {
     final scheme = Theme.of(context).colorScheme;
     final participants = trip.driverId == null
         ? null
-        : ref.watch(tripParticipantsProvider(trip.id)).valueOrNull;
+        : ref.watch(tripParticipantsProvider(trip.id)).value;
     final driver = participants?.driver;
 
     return ListView(

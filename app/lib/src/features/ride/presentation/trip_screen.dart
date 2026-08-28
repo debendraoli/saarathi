@@ -64,7 +64,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
   // `routeGeometryProvider` is keyed by a `RouteQuery` embedding the live
   // driver `LatLng` while `liveRouting` is on, so practically every ~5s GPS
   // ping is a fresh `.autoDispose.family` instance with nothing cached from
-  // the last one — `route.valueOrNull` goes null for that loading window on
+  // the last one — `route.value` goes null for that loading window on
   // every ping. Without this, the fallback below silently swaps to the
   // static straight pickup→destination line each time, which reads as the
   // live route "disappearing" (see `NavigationScreen`'s identical fix, same
@@ -97,7 +97,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
     final l = AppL10n.of(context);
     final tripAsync = ref.watch(effectiveTripProvider(tripId));
     final stale = ref.watch(tripStaleProvider(tripId));
-    final online = ref.watch(connectivityProvider).valueOrNull ?? true;
+    final online = ref.watch(connectivityProvider).value ?? true;
 
     // A rider whose driver cancels on them (after having been accepted)
     // otherwise just sits on a "Trip cancelled" status line with no clear
@@ -108,8 +108,8 @@ class _TripScreenState extends ConsumerState<TripScreen> {
     // itself (see `_leaveTrip`/`showCancelReasonSheet`), and re-triggering
     // here too would just double-navigate.
     ref.listen(effectiveTripProvider(tripId), (prev, next) {
-      final trip = next.valueOrNull;
-      final prevTrip = prev?.valueOrNull;
+      final trip = next.value;
+      final prevTrip = prev?.value;
       if (trip == null || prevTrip == null) return;
       final justCancelled = trip.status == TripStatus.cancelled &&
           prevTrip.status != TripStatus.cancelled;
@@ -170,7 +170,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                   // connection. A rider has no local GPS of the *driver* and
                   // always falls back to the WS-fed position.
                   final remoteDriverPos =
-                      ref.watch(tripDriverPositionProvider(tripId)).valueOrNull;
+                      ref.watch(tripDriverPositionProvider(tripId)).value;
                   final localDriverPos = ref.watch(localDriverPositionProvider);
                   final driverPos = iAmDriver
                       ? (localDriverPos ?? remoteDriverPos)
@@ -187,7 +187,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                   final riderLivePos = iAmDriver &&
                           trip.status != TripStatus.inProgress &&
                           trip.status != TripStatus.completed
-                      ? ref.watch(tripRiderPositionProvider(tripId)).valueOrNull
+                      ? ref.watch(tripRiderPositionProvider(tripId)).value
                       : null;
                   // While the driver's en route (either leg), the polyline
                   // should be the live remaining path from their current
@@ -207,7 +207,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                           trip.vehicleClass ?? 'two_wheeler',
                         ),
                       ))
-                      .valueOrNull;
+                      .value;
                   if (freshRoute != null) _lastRouteGeometry = freshRoute;
                   final routeGeometry =
                       _lastRouteGeometry ?? [trip.origin, trip.dest];
@@ -223,7 +223,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                       ? ref
                           .watch(
                               tripEtaProvider(EtaQuery(driverLoc, routeTarget)))
-                          .valueOrNull
+                          .value
                           ?.durationMins
                       : null;
                   final mapCallouts = <MapCallout>[
@@ -503,7 +503,7 @@ Future<void> _launchExternalNavigation(LatLng target) async {
 /// assigned, back just navigates (the active trip still shows on Home).
 Future<void> _leaveTrip(
     BuildContext context, WidgetRef ref, String tripId) async {
-  final trip = ref.read(tripStreamProvider(tripId)).valueOrNull;
+  final trip = ref.read(tripStreamProvider(tripId)).value;
   final cancelling = trip != null &&
       (trip.status == TripStatus.searching ||
           trip.status == TripStatus.requested);
@@ -676,8 +676,8 @@ class _StatusSheet extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final destLabelAsync = ref.watch(tripDestLabelProvider(trip.id));
     final originLabelAsync = ref.watch(tripOriginLabelProvider(trip.id));
-    final destLabel = destLabelAsync.valueOrNull;
-    final originLabel = originLabelAsync.valueOrNull;
+    final destLabel = destLabelAsync.value;
+    final originLabel = originLabelAsync.value;
     final (icon, title, body) = _display(l);
     final searching = trip.status == TripStatus.searching ||
         trip.status == TripStatus.requested;
@@ -697,13 +697,13 @@ class _StatusSheet extends ConsumerWidget {
     // the recipient that matters, same as it always has been.
     final onPickupLeg =
         trip.status == TripStatus.accepted || trip.status == TripStatus.arriving;
-    final merchant = participants.valueOrNull?.merchant;
+    final merchant = participants.value?.merchant;
     final TripPerson? counterpart = iAmDriver
         ? (trip.tripType == 'delivery' && onPickupLeg && merchant != null
             ? merchant.asTripPerson()
-            : participants.valueOrNull?.rider)
-        : participants.valueOrNull?.driver;
-    final driverDetail = !iAmDriver ? participants.valueOrNull?.driver : null;
+            : participants.value?.rider)
+        : participants.value?.driver;
+    final driverDetail = !iAmDriver ? participants.value?.driver : null;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.32,
@@ -952,7 +952,7 @@ class _RoutePoint extends StatelessWidget {
     // A genuinely-still-loading fetch (no value yet) gets the progress bar;
     // once it resolves — even to null, i.e. no address found for that point
     // — show text instead, or that bar would look stuck forever. `.value`
-    // (not `.valueOrNull`) is deliberate: it also surfaces the last-known
+    // (not `.value`) is deliberate: it also surfaces the last-known
     // value during a rebuild-triggered refetch, avoiding a flicker back to
     // "loading" for a point already resolved once.
     final loading = value.isLoading && !value.hasValue;
@@ -972,7 +972,7 @@ class _RoutePoint extends StatelessWidget {
                   ),
                 )
               : Text(
-                  value.valueOrNull ?? AppL10n.of(context).addressUnavailable,
+                  value.value ?? AppL10n.of(context).addressUnavailable,
                   style: theme.textTheme.bodyMedium,
                 ),
         ),
@@ -1014,7 +1014,7 @@ class EtaFareRow extends ConsumerWidget {
     if ((routingToPickup || routingToDest) && driverLoc != null) {
       final target = routingToPickup ? trip.origin : trip.dest;
       final eta =
-          ref.watch(tripEtaProvider(EtaQuery(driverLoc!, target))).valueOrNull;
+          ref.watch(tripEtaProvider(EtaQuery(driverLoc!, target))).value;
       if (eta != null) {
         etaText = routingToPickup
             ? l.etaArriving(eta.durationMins)
@@ -1809,7 +1809,7 @@ class _DriverLocationPublisherState
     _connSub = ref.listenManual(connectivityProvider, (prev, next) {
       // Same in-flight-event-vs-dispose race as the compass listener below.
       if (!mounted) return;
-      final backOnline = next.valueOrNull ?? false;
+      final backOnline = next.value ?? false;
       final pending = _pendingRetry;
       if (backOnline && pending != null) {
         _retryTimer?.cancel();
@@ -1848,7 +1848,7 @@ class _DriverLocationPublisherState
       // safe to use ("Looking up a deactivated widget's ancestor is
       // unsafe"). `close()` stops *future* events, not one already queued.
       if (!mounted) return;
-      final heading = next.valueOrNull;
+      final heading = next.value;
       if (heading == null) return;
       _compassHeading = heading;
       // `Geolocator.getPositionStream`'s `distanceFilter: 5` above means
@@ -2134,7 +2134,7 @@ class _SelfLocationWatcherState extends ConsumerState<_SelfLocationWatcher> {
       // Same in-flight-event-vs-dispose race noted on
       // `_DriverLocationPublisherState`'s own compass listener.
       if (!mounted) return;
-      final heading = next.valueOrNull;
+      final heading = next.value;
       if (heading == null) return;
       _compassHeading = heading;
       final pos = _latest;

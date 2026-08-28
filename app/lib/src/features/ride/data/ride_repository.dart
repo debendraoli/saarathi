@@ -11,6 +11,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/notifications/notification_service.dart';
 import '../../../core/offline/json_cache.dart';
 import '../../../core/prefs.dart';
+import '../../../shared/provider_retry.dart';
 import '../domain/models.dart';
 
 class RideRepository {
@@ -335,12 +336,12 @@ final rideRepositoryProvider = Provider<RideRepository>((ref) {
 /// own fail-open default so a network hiccup never blocks booking.
 final featureFlagsProvider = FutureProvider<Map<String, bool>>((ref) async {
   return ref.watch(rideRepositoryProvider).flags();
-});
+}, retry: shortNetworkRetry);
 
 /// `true` unless the flag is fetched and explicitly `false` — mirrors the
 /// backend's `flags::is_enabled` fail-open default (unknown key, or the
 /// flags fetch itself still loading/failed, both mean "enabled").
 bool featureEnabled(WidgetRef ref, String key) {
-  final flags = ref.watch(featureFlagsProvider).valueOrNull;
+  final flags = ref.watch(featureFlagsProvider).value;
   return flags?[key] ?? true;
 }

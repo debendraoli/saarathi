@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../shared/provider_retry.dart';
 import '../../auth/application/auth_controller.dart';
 import '../../auth/domain/models.dart';
 import '../domain/models.dart';
@@ -65,4 +66,4 @@ final currentWalletRepositoryProvider = Provider<WalletRepository>((ref) {
 
 final walletBalanceProvider = FutureProvider.autoDispose<WalletBalance>((ref) {
   return ref.watch(currentWalletRepositoryProvider).balance();
-});
+}, retry: shortNetworkRetry);

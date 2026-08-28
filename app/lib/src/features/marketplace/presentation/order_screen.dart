@@ -350,7 +350,7 @@ class _CourierRouteMap extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final trip = ref.watch(tripDetailsProvider(tripId)).valueOrNull;
+    final trip = ref.watch(tripDetailsProvider(tripId)).value;
     if (trip == null) return const SizedBox.shrink();
     return MiniRouteMap(origin: trip.origin, dest: trip.dest);
   }

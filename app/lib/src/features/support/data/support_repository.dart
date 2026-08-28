@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../shared/provider_retry.dart';
 import '../domain/models.dart';
 
 class SupportRepository {
@@ -32,4 +33,4 @@ final supportRepositoryProvider = Provider<SupportRepository>((ref) {
 final supportThreadProvider =
     FutureProvider.autoDispose<List<SupportMessage>>((ref) {
   return ref.watch(supportRepositoryProvider).myThread();
-});
+}, retry: shortNetworkRetry);

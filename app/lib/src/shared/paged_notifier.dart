@@ -37,7 +37,7 @@ class PagedState<T> {
 /// initial load, appending subsequent pages, in-flight/duplicate-call
 /// guarding, and the "hasMore" heuristic (a page shorter than [pageSize]
 /// means there's nothing left).
-abstract class PagedNotifier<T> extends AutoDisposeAsyncNotifier<PagedState<T>> {
+abstract class PagedNotifier<T> extends AsyncNotifier<PagedState<T>> {
   int get pageSize => 20;
 
   /// Fetch one page. `offset` is the number of items already loaded.
@@ -52,7 +52,7 @@ abstract class PagedNotifier<T> extends AutoDisposeAsyncNotifier<PagedState<T>> 
   /// Fetches the next page and appends it — a no-op if a fetch is already
   /// in flight or the last page came back short (nothing more to load).
   Future<void> loadMore() async {
-    final current = state.valueOrNull;
+    final current = state.value;
     if (current == null || current.loading || !current.hasMore) return;
     state = AsyncData(current.copyWith(loading: true, clearError: true));
     try {

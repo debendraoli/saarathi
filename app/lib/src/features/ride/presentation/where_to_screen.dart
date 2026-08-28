@@ -490,7 +490,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
       ref.listen<AsyncValue<FareEstimate>>(
         fareEstimateProvider(baseDraft),
         (_, next) {
-          final surge = next.valueOrNull?.surgeMultiplier;
+          final surge = next.value?.surgeMultiplier;
           if (surge == null) return;
           if (_lastSurge != null && surge > _lastSurge!) {
             // A fare estimate resolving right as this screen is being
@@ -533,7 +533,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
             MapView(
               controller: _mapController,
               center: center,
-              route: route?.valueOrNull ?? (path.length >= 2 ? path : const []),
+              route: route?.value ?? (path.length >= 2 ? path : const []),
               onTap: (p) => setState(() => _dest = p),
               autoFitPins: true,
               // Always on: acts as a plain "my location" button before a
@@ -569,11 +569,11 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                   ),
               ],
               callouts: [
-                if (_dest != null && selectedEstimate?.valueOrNull != null)
+                if (_dest != null && selectedEstimate?.value != null)
                   MapCallout(
                     point: _dest!,
                     text: l.arriveAt(_arrivalTime(
-                        selectedEstimate!.valueOrNull!.durationMins)),
+                        selectedEstimate!.value!.durationMins)),
                   ),
               ],
             ),
@@ -626,14 +626,14 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                       onAsk: (v) => setState(() => _ask = v),
                       bargainingEnabled:
                           featureEnabled(ref, 'rides.bargaining'),
-                      onBook: selectedEstimate?.valueOrNull == null ||
+                      onBook: selectedEstimate?.value == null ||
                               _booking ||
-                              selectedEstimate!.valueOrNull!.nearbyDrivers ==
+                              selectedEstimate!.value!.nearbyDrivers ==
                                   0 ||
                               !featureEnabled(ref, 'rides.new_requests')
                           ? null
                           : () =>
-                              _book(selectedEstimate.valueOrNull!.finalFare),
+                              _book(selectedEstimate.value!.finalFare),
                       ridesPaused: !featureEnabled(ref, 'rides.new_requests'),
                       onSave: _dest == null ? null : _saveDest,
                       onClearDest: _dest == null
@@ -958,14 +958,14 @@ class _Sheet extends StatelessWidget {
                                 mode == RideMode.ride && ridesPaused
                                     ? l.ridesPaused
                                     : mode == RideMode.ride &&
-                                            selected?.valueOrNull
+                                            selected?.value
                                                     ?.nearbyDrivers ==
                                                 0
                                         ? l.noDriversNearby
                                         : estimates.isEmpty
                                             ? l.actionContinue
                                             : '${l.confirmRide} · $currencySymbol '
-                                                '${(ask ?? selected?.valueOrNull?.finalFare)?.toStringAsFixed(0) ?? ''}',
+                                                '${(ask ?? selected?.value?.finalFare)?.toStringAsFixed(0) ?? ''}',
                               ),
                       ),
                     ),
@@ -1797,7 +1797,7 @@ class _SavedPlacesBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final places = ref.watch(savedPlacesProvider).valueOrNull ?? const [];
+    final places = ref.watch(savedPlacesProvider).value ?? const [];
     if (places.isEmpty) return const SizedBox.shrink();
     return SizedBox(
       height: 44,

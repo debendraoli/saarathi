@@ -43,7 +43,7 @@ class RiderHome extends ConsumerWidget {
     // deliveries are a separate concern and aren't gated) — lock the ride-
     // booking entry points here too instead of letting the request round-trip
     // just to bounce off that guard with a confusing error.
-    final trips = ref.watch(myTripsProvider).valueOrNull ?? const [];
+    final trips = ref.watch(myTripsProvider).value ?? const [];
     final hasActiveRide =
         trips.any((t) => t.isActive && t.tripType != 'delivery');
 
@@ -172,7 +172,7 @@ class _RecentDropoffs extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final recent = ref.watch(recentSearchesProvider).valueOrNull ?? const [];
+    final recent = ref.watch(recentSearchesProvider).value ?? const [];
     if (recent.isEmpty) return const SizedBox.shrink();
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
@@ -252,7 +252,7 @@ class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final offer = ref.watch(activeOffersProvider).valueOrNull?.firstOrNull;
+    final offer = ref.watch(activeOffersProvider).value?.firstOrNull;
     final cards = <_InfoData>[
       _InfoData(
         Icons.local_offer_rounded,
@@ -391,7 +391,7 @@ class _ActiveTripCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l = AppL10n.of(context);
-    final trips = ref.watch(myTripsProvider).valueOrNull ?? const [];
+    final trips = ref.watch(myTripsProvider).value ?? const [];
     // Must match the tripType != 'delivery' filter used for the booking
     // lock above — trips also holds delivery/courier legs created for this
     // rider's own marketplace orders, and without this a newer delivery
@@ -404,8 +404,8 @@ class _ActiveTripCard extends ConsumerWidget {
 
     // Same live-preview data the full trip screen shows, so the resume card
     // is actually useful at a glance instead of a bare "tap to resume" line.
-    final destLabel = ref.watch(tripDestLabelProvider(active.id)).valueOrNull;
-    final driverLoc = ref.watch(tripLocationProvider(active.id)).valueOrNull;
+    final destLabel = ref.watch(tripDestLabelProvider(active.id)).value;
+    final driverLoc = ref.watch(tripLocationProvider(active.id)).value;
     final routingToPickup = active.status == TripStatus.accepted ||
         active.status == TripStatus.arriving;
     String? etaText;
@@ -413,7 +413,7 @@ class _ActiveTripCard extends ConsumerWidget {
         (routingToPickup || active.status == TripStatus.inProgress)) {
       final target = routingToPickup ? active.origin : active.dest;
       final eta =
-          ref.watch(tripEtaProvider(EtaQuery(driverLoc, target))).valueOrNull;
+          ref.watch(tripEtaProvider(EtaQuery(driverLoc, target))).value;
       if (eta != null) {
         etaText = routingToPickup
             ? l.etaArriving(eta.durationMins)
@@ -638,7 +638,7 @@ class _EarnNudgeRow extends ConsumerWidget {
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
     final isDriver = ref.watch(authControllerProvider).user?.isDriver ?? false;
-    final myMerchants = ref.watch(myMerchantsProvider).valueOrNull;
+    final myMerchants = ref.watch(myMerchantsProvider).value;
     final hasMerchant =
         myMerchants != null && myMerchants.any((m) => !m.isRejected);
     final showDriver = !isDriver;

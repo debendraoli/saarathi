@@ -115,7 +115,7 @@ class _BiddingSheetState extends ConsumerState<BiddingSheet> {
     final rawAsk = widget.trip.askFare ?? 0;
     final ask = rawAsk > 0 ? rawAsk : 100.0;
     final bids =
-        ref.watch(tripBidsProvider(widget.trip.id)).valueOrNull ?? const [];
+        ref.watch(tripBidsProvider(widget.trip.id)).value ?? const [];
     final originLabelAsync = ref.watch(tripOriginLabelProvider(widget.trip.id));
     final destLabelAsync = ref.watch(tripDestLabelProvider(widget.trip.id));
     // Any live bid quiets the nudge — it's only for a genuinely dead auction.

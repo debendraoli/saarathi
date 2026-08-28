@@ -95,7 +95,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget build(BuildContext context) {
     final l = AppL10n.of(context);
     final myId = ref.watch(authControllerProvider).user?.id;
-    final trip = ref.watch(tripStreamProvider(widget.tripId)).valueOrNull;
+    final trip = ref.watch(tripStreamProvider(widget.tripId)).value;
     final iAmDriver = myId != null && myId == trip?.driverId;
     // Neither side had anything watching trip status before — a cancelled
     // or completed trip left the chat fully open with no indication the

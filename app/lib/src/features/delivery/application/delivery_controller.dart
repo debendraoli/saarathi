@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../shared/provider_retry.dart';
 import '../data/delivery_repository.dart';
 import '../domain/models.dart';
 
@@ -43,4 +44,4 @@ final deliveryEstimateProvider = FutureProvider.autoDispose
         size: q.size,
         fragile: q.fragile,
       );
-});
+}, retry: shortNetworkRetry);

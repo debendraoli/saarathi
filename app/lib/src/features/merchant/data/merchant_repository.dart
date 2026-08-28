@@ -9,6 +9,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/notifications/notification_service.dart';
 import '../../../core/offline/json_cache.dart';
 import '../../../core/prefs.dart';
+import '../../../shared/provider_retry.dart';
 import '../../../shared/request_ring.dart';
 import '../../../shared/resilient_poll.dart';
 import '../../marketplace/domain/models.dart';
@@ -198,23 +199,23 @@ final merchantRepositoryProvider = Provider<MerchantRepository>((ref) {
 final myMerchantsProvider =
     FutureProvider.autoDispose<List<Merchant>>((ref) async {
   return ref.watch(merchantRepositoryProvider).myMerchants();
-});
+}, retry: shortNetworkRetry);
 
 final merchantMenuProvider = FutureProvider.autoDispose
     .family<List<MenuItem>, String>((ref, merchantId) async {
   return ref.watch(merchantRepositoryProvider).menu(merchantId);
-});
+}, retry: shortNetworkRetry);
 
 final merchantAnalyticsProvider = FutureProvider.autoDispose
     .family<MerchantAnalytics, String>((ref, merchantId) async {
   return ref.watch(merchantRepositoryProvider).analytics(merchantId);
-});
+}, retry: shortNetworkRetry);
 
 /// All offers (active + inactive) for the owner's management screen.
 final merchantOffersProvider = FutureProvider.autoDispose
     .family<List<MerchantOffer>, String>((ref, merchantId) async {
   return ref.watch(merchantRepositoryProvider).offers(merchantId);
-});
+}, retry: shortNetworkRetry);
 
 /// Single underlying poll loop for a merchant's order queue, polled every
 /// 6s. Rings once per genuinely new order id (not every poll tick), same
@@ -281,7 +282,7 @@ final merchantOrdersStaleProvider =
     Provider.autoDispose.family<bool, String>((ref, merchantId) {
   return ref
           .watch(_merchantOrdersPollProvider(merchantId))
-          .valueOrNull
+          .value
           ?.stale ??
       false;
 });

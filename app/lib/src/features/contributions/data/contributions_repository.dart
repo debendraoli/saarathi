@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../shared/provider_retry.dart';
 import '../domain/models.dart';
 
 class ContributionSubmission {
@@ -71,8 +72,8 @@ final contributionsRepositoryProvider = Provider<ContributionsRepository>((ref) 
 final myContributionsProvider =
     FutureProvider.autoDispose<List<PlaceContribution>>((ref) {
   return ref.watch(contributionsRepositoryProvider).mine();
-});
+}, retry: shortNetworkRetry);
 
 final pointsSummaryProvider = FutureProvider.autoDispose<PointsSummary>((ref) {
   return ref.watch(contributionsRepositoryProvider).points();
-});
+}, retry: shortNetworkRetry);
