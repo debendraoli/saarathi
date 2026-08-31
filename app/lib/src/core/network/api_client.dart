@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/app_config.dart';
+import '../scaffold_messenger.dart';
 import '../storage/token_store.dart';
 
 /// A fresh key for `X-Idempotency-Key` — generate once per user action (e.g.
@@ -178,9 +179,25 @@ class ApiClient {
         );
         completer.complete(true);
       }
+    } on DioException catch (e) {
+      // Only a genuine rejection of the refresh token itself (401/403 from
+      // the refresh endpoint) means the session is actually over. Anything
+      // else — no connectivity, a timeout, a 5xx blip on our own backend —
+      // is transient: keep the stored tokens so the next attempt (the next
+      // request, or the next proactive refresh) can succeed once the
+      // network/backend recovers, instead of forcing a full re-login on a
+      // flaky connection.
+      final status = e.response?.statusCode;
+      if (status == 401 || status == 403) {
+        await _tokens.clear();
+        onSessionExpired?.call();
+      } else {
+        showOfflineToast();
+      }
+      completer.complete(false);
     } catch (_) {
-      await _tokens.clear();
-      onSessionExpired?.call();
+      // Unexpected (non-Dio) failure — same "don't nuke the session over a
+      // transient error" treatment as above.
       completer.complete(false);
     } finally {
       _refreshing = null;

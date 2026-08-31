@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/foreground/driver_foreground_service.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/notifications/push_service.dart';
 import '../../../core/offline/json_cache.dart';
 import '../../../core/prefs.dart';
+import '../../../core/scaffold_messenger.dart';
 import '../../../core/storage/token_store.dart';
 import '../../driver/data/driver_kyc_repository.dart';
 import '../../merchant/data/merchant_repository.dart';
@@ -65,6 +69,22 @@ class AuthController extends Notifier<AuthState> {
         mode: user.isDriver ? AppMode.driver : AppMode.rider,
       );
       _registerPush();
+    } on ApiException catch (e) {
+      // A stored token that the backend genuinely rejects (expired/revoked)
+      // means the session really is over. A network blip or a 5xx from our
+      // own backend doesn't — clearing tokens over a flaky connection would
+      // force a real logout for a problem that resolves itself on retry, so
+      // keep the stored session and just retry once the reconnect settles
+      // rather than booting the user to the login screen.
+      if (e.isNetwork || (e.statusCode ?? 0) >= 500) {
+        await settle();
+        showOfflineToast();
+        Future.delayed(const Duration(seconds: 5), _bootstrap);
+      } else {
+        await _tokens.clear();
+        await settle();
+        state = state.copyWith(status: AuthStatus.unauthenticated);
+      }
     } catch (_) {
       await _tokens.clear();
       await settle();
@@ -123,6 +143,13 @@ class AuthController extends Notifier<AuthState> {
     // Must happen before clearing tokens — unregister needs the still-valid
     // session to prove which device/user pairing to drop.
     await PushService.instance.unregister(ref.read(apiClientProvider));
+    // A driver signing out while still "online" previously left the sticky
+    // foreground notification (and its background isolate) running after
+    // logout — nothing but `goOffline()` ever stopped it, and logout isn't
+    // required to go offline first. Harmless no-op for a rider/merchant
+    // account or an already-offline driver (`stop()` checks
+    // `isRunningService` itself).
+    await DriverForegroundService.stop();
     await _tokens.clear();
     // These `cacheThroughList` caches are device-local, keyed by endpoint
     // rather than by account — without this, the next account to log in on
@@ -136,6 +163,12 @@ class AuthController extends Notifier<AuthState> {
   }
 
   void _onExpired() {
+    // Same reasoning as signOut()'s call: this is also a real logout (the
+    // session is gone, tokens already cleared by `ApiClient._refresh()`),
+    // just not one the user initiated — a driver forced out here while
+    // still online would otherwise keep the sticky foreground notification
+    // running with no valid session behind it.
+    unawaited(DriverForegroundService.stop());
     state = const AuthState(status: AuthStatus.unauthenticated);
   }
 }
