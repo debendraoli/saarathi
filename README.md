@@ -25,8 +25,8 @@ cargo run -p saarathi-rides # rides service on :8082 (fares, trips, dispatch, ca
 ```bash
 cd dashboard
 cp .env.local.example .env.local
-npm install
-npm run dev                 # http://localhost:3000
+pnpm install
+pnpm run dev                 # http://localhost:3000
 ```
 
 Sign in with the dev super-admin phone `+9779800000000`. With `OTP_DEV_MODE=true` the
