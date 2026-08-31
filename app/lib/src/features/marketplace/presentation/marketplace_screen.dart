@@ -1028,16 +1028,16 @@ class _MerchantCardSkeleton extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            Expanded(
+            const Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SkeletonBox(width: double.infinity, height: 15),
-                  const SizedBox(height: 8),
-                  const SkeletonBox(width: 100, height: 12),
-                  const Spacer(),
+                  SkeletonBox(width: double.infinity, height: 15),
+                  SizedBox(height: 8),
+                  SkeletonBox(width: 100, height: 12),
+                  Spacer(),
                   Row(
-                    children: const [
+                    children: [
                       SkeletonBox(width: 40, height: 11),
                       SizedBox(width: 10),
                       SkeletonBox(width: 50, height: 11),
