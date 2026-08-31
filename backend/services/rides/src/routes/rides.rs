@@ -156,6 +156,12 @@ struct RouteResp {
     /// Turn-by-turn maneuvers, in order — empty when the routing engine
     /// couldn't supply them (offline fallback).
     steps: Vec<RouteStep>,
+    /// Optimized visiting order for `stops` (pickup/destination always stay
+    /// fixed first/last) — index `k` is the original `stops` position that
+    /// should be visited `k`-th. Empty means "use the order sent": either
+    /// there were fewer than 2 stops, or the routing engine that answered
+    /// doesn't support reordering (offline/OSRM fallback).
+    stop_order: Vec<usize>,
 }
 
 /// Road-following route geometry for the map (pickup → stops → destination).
@@ -179,6 +185,7 @@ async fn route_geometry(
         duration_secs: route.duration_secs,
         geometry: route.geometry,
         steps: route.steps,
+        stop_order: route.stop_order,
     }))
 }
 
@@ -358,8 +365,8 @@ async fn create(
         crate::partner_ledger::corporate_precheck(&st.db, claims.sub, final_fare).await?;
     }
 
-    if let Some(code) = &est.discount_code {
-        if let Some((cid,)) = sqlx::query_as::<_, (Uuid,)>(
+    if let Some(code) = &est.discount_code
+        && let Some((cid,)) = sqlx::query_as::<_, (Uuid,)>(
             "SELECT id FROM campaigns WHERE code = $1 AND audience = 'rider' AND active = true",
         )
         .bind(code)
@@ -379,7 +386,6 @@ async fn create(
             .execute(&mut *tx)
             .await?;
         }
-    }
 
     let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO trips (rider_id, vehicle_class, origin_lat, origin_lng, dest_lat, dest_lng, \
@@ -418,8 +424,8 @@ async fn create(
     tx.commit().await?;
 
     // Record the bargaining outcome (anchor + bounded agreed fare).
-    if let Some(agreed) = agreed {
-        if let Err(e) = sqlx::query(
+    if let Some(agreed) = agreed
+        && let Err(e) = sqlx::query(
             "INSERT INTO fare_negotiations (trip_id, algo_fare, floor, ceiling, offered_fare, agreed_fare) \
              VALUES ($1, $2, $3, $4, $5, $6)",
         )
@@ -434,7 +440,6 @@ async fn create(
         {
             tracing::warn!(trip = %trip.id, error = %e, "fare_negotiations audit insert failed");
         }
-    }
 
     // Kick dispatch immediately (the background loop is the safety net).
     tokio::spawn({
@@ -871,11 +876,19 @@ async fn get_trip(
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Value>> {
-    let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1")))
+    let mut trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1")))
         .bind(id)
         .fetch_optional(&st.db)
         .await?
         .ok_or(AppError::NotFound)?;
+    if trip.pricing_mode == "bid"
+        && let Ok(vclass) = pricing::parse_vehicle_class(&trip.vehicle_class)
+    {
+        trip.ask_ceiling = Some(saarathi_core::pricing::legal_ceiling(
+            vclass,
+            trip.distance_km,
+        ));
+    }
     let authorized = trip.rider_id == claims.sub
         || trip.driver_id == Some(claims.sub)
         || claims.is_staff()
@@ -1031,8 +1044,9 @@ async fn get_participants(
         .fetch_one(&st.db)
         .await?;
 
-        let vehicle: Option<(String, Option<String>, Option<String>, String, Option<String>)> =
-            sqlx::query_as(
+        // `(class, make, model, plate_number, color)`, in `SELECT` order below.
+        type VehicleRow = (String, Option<String>, Option<String>, String, Option<String>);
+        let vehicle: Option<VehicleRow> = sqlx::query_as(
                 "SELECT v.class::text, v.make, v.model, v.plate_number, v.color \
                  FROM vehicles v JOIN drivers d ON d.id = v.driver_id \
                  WHERE d.user_id = $1",

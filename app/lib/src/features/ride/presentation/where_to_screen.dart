@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -64,7 +63,7 @@ class WhereToScreen extends ConsumerStatefulWidget {
 }
 
 class _WhereToScreenState extends ConsumerState<WhereToScreen> {
-  final _mapController = MapController();
+  final _mapController = MapViewController();
   final _destLabel = TextEditingController();
   LatLng? _pickup;
   String? _pickupLabel; // null → current location
@@ -473,6 +472,30 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
     final route = (_pickup != null && _dest != null)
         ? ref.watch(routeGeometryProvider(RouteQuery(path, _vehicle.wire)))
         : null;
+    // 2+ stops is where the backend actually has something to reorder
+    // (pickup/destination always stay fixed first/last) — see
+    // `RouteGeometry.stopOrder`'s doc comment. Applying the optimized order
+    // back onto `_stops` re-triggers this same query with the now-already-
+    // optimal point sequence, which comes back as the identity order, so
+    // this can't loop.
+    if (_pickup != null && _dest != null && _stops.length >= 2) {
+      ref.listen<AsyncValue<RouteGeometry>>(
+        routeGeometryProvider(RouteQuery(path, _vehicle.wire)),
+        (_, next) {
+          final order = next.value?.stopOrder;
+          if (order == null || order.length != _stops.length) return;
+          final isIdentity =
+              order.indexed.every((e) => e.$2 == e.$1);
+          if (isIdentity) return;
+          setState(() {
+            final reordered = [for (final idx in order) _stops[idx]];
+            _stops
+              ..clear()
+              ..addAll(reordered);
+          });
+        },
+      );
+    }
     final baseDraft = _mode == RideMode.ride ? _draft() : null;
     // Live per-class prices as soon as pickup + destination are both set —
     // shown directly on the vehicle cards, no separate "continue" step
@@ -533,7 +556,7 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
             MapView(
               controller: _mapController,
               center: center,
-              route: route?.value ?? (path.length >= 2 ? path : const []),
+              route: route?.value?.points ?? (path.length >= 2 ? path : const []),
               onTap: (p) => setState(() => _dest = p),
               autoFitPins: true,
               // Always on: acts as a plain "my location" button before a
@@ -572,8 +595,8 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                 if (_dest != null && selectedEstimate?.value != null)
                   MapCallout(
                     point: _dest!,
-                    text: l.arriveAt(_arrivalTime(
-                        selectedEstimate!.value!.durationMins)),
+                    text: l.arriveAt(
+                        _arrivalTime(selectedEstimate!.value!.durationMins)),
                   ),
               ],
             ),
@@ -628,12 +651,10 @@ class _WhereToScreenState extends ConsumerState<WhereToScreen> {
                           featureEnabled(ref, 'rides.bargaining'),
                       onBook: selectedEstimate?.value == null ||
                               _booking ||
-                              selectedEstimate!.value!.nearbyDrivers ==
-                                  0 ||
+                              selectedEstimate!.value!.nearbyDrivers == 0 ||
                               !featureEnabled(ref, 'rides.new_requests')
                           ? null
-                          : () =>
-                              _book(selectedEstimate.value!.finalFare),
+                          : () => _book(selectedEstimate.value!.finalFare),
                       ridesPaused: !featureEnabled(ref, 'rides.new_requests'),
                       onSave: _dest == null ? null : _saveDest,
                       onClearDest: _dest == null
@@ -958,9 +979,7 @@ class _Sheet extends StatelessWidget {
                                 mode == RideMode.ride && ridesPaused
                                     ? l.ridesPaused
                                     : mode == RideMode.ride &&
-                                            selected?.value
-                                                    ?.nearbyDrivers ==
-                                                0
+                                            selected?.value?.nearbyDrivers == 0
                                         ? l.noDriversNearby
                                         : estimates.isEmpty
                                             ? l.actionContinue

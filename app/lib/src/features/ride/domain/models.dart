@@ -237,6 +237,7 @@ class Trip {
     this.cancelledByRole,
     this.pricingMode = 'instant',
     this.askFare,
+    this.askCeiling,
     this.searchRadiusKm,
     this.paymentMethod = 'cash',
     this.durationSecs,
@@ -273,6 +274,15 @@ class Trip {
   /// The rider's current asking price, bid mode only.
   final double? askFare;
 
+  /// The most `askFare` may be raised to — the same legal-cap ceiling
+  /// `POST /v1/rides/{id}/ask` clamps against server-side (see
+  /// `saarathi-rides::routes::bidding::do_change_ask`). `null` outside bid
+  /// mode, or on a `Trip` fetched from an endpoint that doesn't compute it
+  /// (e.g. the trip list). UI must use this rather than guessing a ratio
+  /// locally — a client-side `ask * 3` guess previously let the ask-raising
+  /// slider offer values the server would silently clamp back down anyway.
+  final double? askCeiling;
+
   /// The starting dispatch radius (km) actually used for this trip, if it
   /// overrode the service default — set on a "search wider" re-request.
   final double? searchRadiusKm;
@@ -303,6 +313,7 @@ class Trip {
         cancelledByRole: cancelledByRole,
         pricingMode: pricingMode,
         askFare: askFare,
+        askCeiling: askCeiling,
         searchRadiusKm: searchRadiusKm,
         paymentMethod: paymentMethod,
         durationSecs: durationSecs,
@@ -338,6 +349,8 @@ class Trip {
         cancelledByRole: j['cancelled_by_role'] as String?,
         pricingMode: (j['pricing_mode'] as String?) ?? 'instant',
         askFare: j['ask_fare'] == null ? null : asDouble(j['ask_fare']),
+        askCeiling:
+            j['ask_ceiling'] == null ? null : asDouble(j['ask_ceiling']),
         searchRadiusKm: j['search_radius_km'] == null
             ? null
             : asDouble(j['search_radius_km']),
@@ -435,11 +448,13 @@ class RoadRoute {
     required this.steps,
     required this.distanceKm,
     required this.durationSecs,
+    this.stopOrder = const [],
   });
   final List<LatLng> geometry;
   final List<RouteStep> steps;
   final double distanceKm;
   final int durationSecs;
+  final List<int> stopOrder;
 
   factory RoadRoute.fromJson(Map<String, dynamic> j) => RoadRoute(
         geometry: [
@@ -452,7 +467,26 @@ class RoadRoute {
         ],
         distanceKm: asDouble(j['distance_km']),
         durationSecs: (j['duration_secs'] as num?)?.toInt() ?? 0,
+        stopOrder: [
+          for (final i in (j['stop_order'] as List? ?? const [])) (i as num).toInt(),
+        ],
       );
+}
+
+/// The plain polyline + optimized stop order — [routeGeometry]'s return
+/// type, the lighter-weight sibling of [RoadRoute] for callers that only
+/// draw the map line and don't need turn-by-turn.
+class RouteGeometry {
+  const RouteGeometry(this.points, this.stopOrder);
+
+  final List<LatLng> points;
+
+  /// Optimized visiting order for the stops passed in the request (pickup/
+  /// destination always stay fixed first/last) — index `k` is the original
+  /// stop-list position that should be visited `k`-th. Empty means "use the
+  /// order sent": fewer than 2 stops, or the routing engine that answered
+  /// doesn't support reordering.
+  final List<int> stopOrder;
 }
 
 /// Self-service lifetime ride stats — `GET /v1/rides/mine/stats`.

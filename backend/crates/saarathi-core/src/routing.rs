@@ -14,25 +14,37 @@ pub struct LatLng {
 }
 
 /// Vehicle profile → routing costing model. Two-wheelers can use lanes/paths
-/// cars can't, so motorbike distances differ from car distances.
+/// cars can't, so motorbike distances differ from car distances. `Auto` here
+/// means four-wheeler (car) specifically — `ThreeWheeler` (Nepali
+/// auto-rickshaw/tempo) is its own variant since it's meaningfully narrower
+/// than a car and can legally use some lanes a car can't; Valhalla has no
+/// dedicated auto-rickshaw costing model, so the routing service maps both
+/// to Valhalla's `auto` costing but with different `width`/`height`
+/// `costing_options` — see `saarathi-routing`'s `Inner::valhalla`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteProfile {
     Motorcycle,
+    ThreeWheeler,
     Auto,
 }
 
 impl RouteProfile {
-    /// Stable wire value (also the Valhalla costing name).
+    /// Stable wire value used for the request/cache-key — NOT necessarily
+    /// the literal Valhalla costing model name (`ThreeWheeler` still costs
+    /// as Valhalla's `auto` model, just with narrower vehicle dimensions;
+    /// see the routing service for that mapping).
     pub fn as_wire(self) -> &'static str {
         match self {
             RouteProfile::Motorcycle => "motorcycle",
+            RouteProfile::ThreeWheeler => "three_wheeler",
             RouteProfile::Auto => "auto",
         }
     }
 
     pub fn from_wire(s: &str) -> Self {
         match s {
-            "auto" | "car" | "four_wheeler" | "three_wheeler" => RouteProfile::Auto,
+            "auto" | "car" | "four_wheeler" => RouteProfile::Auto,
+            "three_wheeler" => RouteProfile::ThreeWheeler,
             _ => RouteProfile::Motorcycle,
         }
     }
@@ -62,6 +74,15 @@ pub struct RouteResult {
     /// for the haversine fallback — there's no real road path to narrate.
     #[serde(default)]
     pub steps: Vec<RouteStep>,
+    /// Optimized visiting order for the request's intermediate stops
+    /// (origin/dest always stay fixed first/last) — index `k` is the
+    /// original position (0-based into the request's *stops*, i.e.
+    /// excluding origin/dest) of whichever stop should be visited `k`-th.
+    /// Empty means "no reordering, use the order the caller sent" — either
+    /// there were fewer than 2 stops (nothing to optimize) or the engine
+    /// that answered doesn't support it (OSRM, haversine fallback).
+    #[serde(default)]
+    pub stop_order: Vec<usize>,
 }
 
 /// One leg of a turn-by-turn route — human-readable, ready to display as-is
@@ -111,6 +132,7 @@ pub fn haversine_path(points: &[LatLng], road_factor: f64, avg_speed_kmh: f64) -
             geometry: Vec::new(),
             source: "none".into(),
             steps: Vec::new(),
+            stop_order: Vec::new(),
         };
     }
     let mut road = 0.0;
@@ -130,6 +152,7 @@ pub fn haversine_path(points: &[LatLng], road_factor: f64, avg_speed_kmh: f64) -
         geometry: points.to_vec(),
         source: "haversine".into(),
         steps: Vec::new(),
+        stop_order: Vec::new(),
     }
 }
 
@@ -179,6 +202,7 @@ impl RoutingClient {
                 geometry: Vec::new(),
                 source: "none".into(),
                 steps: Vec::new(),
+                stop_order: Vec::new(),
             };
         }
         if !self.service_url.is_empty() {
@@ -289,11 +313,20 @@ mod tests {
     }
 
     #[test]
-    fn route_profile_from_wire_maps_four_and_three_wheeler_to_auto() {
+    fn route_profile_from_wire_maps_four_wheeler_and_car_to_auto() {
         assert_eq!(RouteProfile::from_wire("four_wheeler"), RouteProfile::Auto);
-        assert_eq!(RouteProfile::from_wire("three_wheeler"), RouteProfile::Auto);
         assert_eq!(RouteProfile::from_wire("car"), RouteProfile::Auto);
         assert_eq!(RouteProfile::from_wire("auto"), RouteProfile::Auto);
+    }
+
+    #[test]
+    fn route_profile_from_wire_maps_three_wheeler_to_its_own_profile() {
+        // Distinct from `Auto` (four-wheeler) — a Nepali auto-rickshaw is
+        // narrower than a car and can use some lanes a car legally can't.
+        assert_eq!(
+            RouteProfile::from_wire("three_wheeler"),
+            RouteProfile::ThreeWheeler
+        );
     }
 
     #[test]
@@ -306,6 +339,10 @@ mod tests {
     #[test]
     fn route_profile_wire_round_trips() {
         assert_eq!(RouteProfile::from_wire(RouteProfile::Auto.as_wire()), RouteProfile::Auto);
+        assert_eq!(
+            RouteProfile::from_wire(RouteProfile::ThreeWheeler.as_wire()),
+            RouteProfile::ThreeWheeler
+        );
         assert_eq!(RouteProfile::from_wire(RouteProfile::Motorcycle.as_wire()), RouteProfile::Motorcycle);
     }
 }

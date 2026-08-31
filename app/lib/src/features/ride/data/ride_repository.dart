@@ -104,11 +104,11 @@ class RideRepository {
   /// Road-following route geometry for the map polyline. [points] is the ordered
   /// path (pickup, stops…, destination). Returns a straight line when the routing
   /// engine is unreachable.
-  Future<List<LatLng>> routeGeometry(
+  Future<RouteGeometry> routeGeometry(
     List<LatLng> points, {
     String vehicleClass = 'two_wheeler',
   }) async {
-    if (points.length < 2) return points;
+    if (points.length < 2) return RouteGeometry(points, const []);
     final res = await _api.post(
       '/v1/rides/route',
       body: {
@@ -120,13 +120,12 @@ class RideRepository {
         ],
         'vehicle_class': vehicleClass,
       },
+    ) as Map<String, dynamic>;
+    final geom = (res['geometry'] as List?) ?? const [];
+    return RouteGeometry(
+      [for (final p in geom) LatLng(asDouble((p as Map)['lat']), asDouble(p['lng']))],
+      [for (final i in (res['stop_order'] as List? ?? const [])) (i as num).toInt()],
     );
-    final geom =
-        ((res as Map<String, dynamic>)['geometry'] as List?) ?? const [];
-    return [
-      for (final p in geom)
-        LatLng(asDouble((p as Map)['lat']), asDouble(p['lng'])),
-    ];
   }
 
   /// Full road route (geometry + turn-by-turn steps) for the fullscreen
@@ -200,12 +199,15 @@ class RideRepository {
   /// instead of accumulating. [myTrips] (the unpaginated, offline-cached
   /// whole-list fetch below) stays as-is for the banners/checks elsewhere
   /// that just need "the recent/active trips", not a scrollable list.
-  Future<List<Trip>> myTripsPage({required int limit, required int offset}) async {
+  Future<List<Trip>> myTripsPage(
+      {required int limit, required int offset}) async {
     final res = await _api.get('/v1/rides', query: {
       'limit': limit.toString(),
       'offset': offset.toString(),
     });
-    return (res as List).map((e) => Trip.fromJson(e as Map<String, dynamic>)).toList();
+    return (res as List)
+        .map((e) => Trip.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<List<Trip>> myTrips() async {

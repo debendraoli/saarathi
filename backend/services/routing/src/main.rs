@@ -129,6 +129,7 @@ async fn route(
             geometry: Vec::new(),
             source: "none".into(),
             steps: Vec::new(),
+            stop_order: Vec::new(),
         }));
     }
     let profile = RouteProfile::from_wire(&req.profile);
@@ -156,8 +157,8 @@ async fn route(
         };
         match engine_result {
             Ok(r) => {
-                if let Some(mut cm) = st.cache.clone() {
-                    if let Ok(json) = serde_json::to_string(&r) {
+                if let Some(mut cm) = st.cache.clone()
+                    && let Ok(json) = serde_json::to_string(&r) {
                         let _ = redis::cmd("SET")
                             .arg(&key)
                             .arg(json)
@@ -166,7 +167,6 @@ async fn route(
                             .query_async::<()>(&mut cm)
                             .await;
                     }
-                }
                 return Ok(Json(r));
             }
             Err(e) => {
@@ -242,6 +242,8 @@ struct ValhallaReq<'a> {
     locations: Vec<ValhallaLoc>,
     costing: &'a str,
     directions_options: ValhallaDirOpts,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    costing_options: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -261,6 +263,17 @@ struct ValhallaTrip {
     summary: ValhallaSummary,
     #[serde(default)]
     legs: Vec<ValhallaLeg>,
+    /// Only present on `/optimized_route` responses — each entry's
+    /// `original_index` says which of *our* request locations ended up at
+    /// this position in the optimized visiting order (Valhalla always keeps
+    /// the first/last location fixed and only reorders the middle ones).
+    #[serde(default)]
+    locations: Vec<ValhallaRespLocation>,
+}
+
+#[derive(Deserialize)]
+struct ValhallaRespLocation {
+    original_index: usize,
 }
 
 #[derive(Deserialize)]
@@ -299,8 +312,8 @@ struct ValhallaManeuver {
 /// a driving-only app.
 fn maneuver_kind(valhalla_type: i32) -> ManeuverKind {
     match valhalla_type {
-        1 | 2 | 3 => ManeuverKind::Depart,
-        4 | 5 | 6 => ManeuverKind::Arrive,
+        1..=3 => ManeuverKind::Depart,
+        4..=6 => ManeuverKind::Arrive,
         9 => ManeuverKind::SlightRight,
         16 => ManeuverKind::SlightLeft,
         10 | 18 | 20 | 23 => ManeuverKind::Right,
@@ -440,12 +453,36 @@ mod polyline_tests {
 }
 
 impl Inner {
-    /// One Valhalla `/route` call for the entire ordered path.
+    /// Valhalla costing model + `costing_options` for [profile]. `ThreeWheeler`
+    /// still costs as Valhalla's `auto` model (there's no dedicated
+    /// auto-rickshaw profile) but with a narrower/lighter vehicle than the
+    /// `auto` default (1.6m), matching a Nepali tempo/auto-rickshaw — this
+    /// lets it route through some `maxwidth`-restricted lanes a four-wheeler
+    /// legally can't use. Figures are a reasonable estimate, not a spec.
+    fn costing(profile: RouteProfile) -> (&'static str, Option<serde_json::Value>) {
+        match profile {
+            RouteProfile::Motorcycle => ("motorcycle", None),
+            RouteProfile::Auto => ("auto", None),
+            RouteProfile::ThreeWheeler => (
+                "auto",
+                Some(serde_json::json!({ "auto": { "width": 1.3, "height": 1.8 } })),
+            ),
+        }
+    }
+
+    /// One Valhalla call for the entire ordered path — `/optimized_route`
+    /// when there are 2+ intermediate stops (Valhalla always keeps the
+    /// first/last location fixed and only reorders the middle ones, exactly
+    /// matching "pickup and destination are fixed, only stop order is
+    /// free"), otherwise the plain `/route` (nothing to optimize with 0-1
+    /// stops, and `/optimized_route` wants at least 4 locations anyway).
     async fn valhalla(
         &self,
         points: &[LatLng],
         profile: RouteProfile,
     ) -> anyhow::Result<RouteResult> {
+        let optimize = points.len() >= 4;
+        let (costing, costing_options) = Self::costing(profile);
         let req = ValhallaReq {
             locations: points
                 .iter()
@@ -454,14 +491,16 @@ impl Inner {
                     lon: p.lng,
                 })
                 .collect(),
-            costing: profile.as_wire(),
+            costing,
             directions_options: ValhallaDirOpts {
                 units: "kilometers",
             },
+            costing_options,
         };
+        let action = if optimize { "optimized_route" } else { "route" };
         let resp: ValhallaResp = self
             .http
-            .post(format!("{}/route", self.url))
+            .post(format!("{}/{action}", self.url))
             .json(&req)
             .send()
             .await?
@@ -494,6 +533,25 @@ impl Inner {
                 });
             }
         }
+        // `locations[k].original_index` is which of *our* request points
+        // ended up at optimized position `k`; position 0 and the last are
+        // always the fixed origin/dest, so only the middle ones are a real
+        // reorder. Subtract 1 to convert from "index into the full
+        // origin+stops+dest request" to "index into just the stops" — what
+        // callers actually track (they don't send origin/dest as `stops`).
+        let mut stop_order = Vec::new();
+        if optimize && resp.trip.locations.len() == points.len() {
+            for loc in &resp.trip.locations[1..resp.trip.locations.len() - 1] {
+                if loc.original_index == 0 || loc.original_index + 1 == points.len() {
+                    // Malformed/unexpected: origin or dest reported as a
+                    // middle stop. Bail on the whole reorder rather than
+                    // hand back a corrupt mapping.
+                    stop_order.clear();
+                    break;
+                }
+                stop_order.push(loc.original_index - 1);
+            }
+        }
         Ok(RouteResult {
             distance_km: Decimal::from_f64(resp.trip.summary.length)
                 .unwrap_or_default()
@@ -502,6 +560,7 @@ impl Inner {
             geometry,
             source: "valhalla".into(),
             steps,
+            stop_order,
         })
     }
 
@@ -522,6 +581,7 @@ impl Inner {
             geometry,
             source: "osrm".into(),
             steps: Vec::new(),
+            stop_order: Vec::new(),
         })
     }
 
@@ -562,6 +622,7 @@ impl Inner {
             geometry,
             source: "osrm".into(),
             steps: Vec::new(),
+            stop_order: Vec::new(),
         })
     }
 }

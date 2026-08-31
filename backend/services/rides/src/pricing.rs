@@ -133,7 +133,7 @@ pub async fn estimate(
     path.push(dest);
     let profile = match vclass {
         VehicleClass::TwoWheeler => crate::routing::RouteProfile::Motorcycle,
-        VehicleClass::ThreeWheeler => crate::routing::RouteProfile::Auto,
+        VehicleClass::ThreeWheeler => crate::routing::RouteProfile::ThreeWheeler,
         VehicleClass::FourWheeler => crate::routing::RouteProfile::Auto,
     };
     let route = st.router.route_path(&path, profile).await;
@@ -246,21 +246,19 @@ async fn apply_rider_discount(
         return Err("invalid or expired code".into());
     };
 
-    if let Some(vc) = vclass_filter {
-        if vc != class_str(vclass) {
+    if let Some(vc) = vclass_filter
+        && vc != class_str(vclass) {
             return Err("code not valid for this vehicle type".into());
         }
-    }
     if gross < min_fare {
         return Err(format!(
             "minimum fare NPR {min_fare} required for this code"
         ));
     }
-    if let Some(limit) = usage_limit {
-        if used_count >= limit {
+    if let Some(limit) = usage_limit
+        && used_count >= limit {
             return Err("code fully redeemed".into());
         }
-    }
     // Dynamic rules (new customer, min rides, time window, per-user limit…).
     if !rules.0.is_empty() {
         let ctx = crate::rules::load_context(&st.db, user_id, "rider", id, gross, None).await;
@@ -273,11 +271,10 @@ async fn apply_rider_discount(
         "percent" => (gross * value / dec!(100)).round_dp(2),
         _ => value,
     };
-    if let Some(cap) = max_discount {
-        if discount > cap {
+    if let Some(cap) = max_discount
+        && discount > cap {
             discount = cap;
         }
-    }
     if discount > gross {
         discount = gross;
     }
@@ -322,19 +319,17 @@ async fn auto_pick_rider_discount(
 
     let mut best: Option<(String, Decimal)> = None;
     for row in rows {
-        if let Some(vc) = &row.vehicle_class {
-            if vc != class_str(vclass) {
+        if let Some(vc) = &row.vehicle_class
+            && vc != class_str(vclass) {
                 continue;
             }
-        }
         if gross < row.min_fare {
             continue;
         }
-        if let Some(limit) = row.usage_limit {
-            if row.used_count >= limit {
+        if let Some(limit) = row.usage_limit
+            && row.used_count >= limit {
                 continue;
             }
-        }
         if !row.rules.0.is_empty() {
             let ctx =
                 crate::rules::load_context(&st.db, user_id, "rider", row.id, gross, None).await;
@@ -346,11 +341,10 @@ async fn auto_pick_rider_discount(
             "percent" => (gross * row.value / dec!(100)).round_dp(2),
             _ => row.value,
         };
-        if let Some(cap) = row.max_discount {
-            if discount > cap {
+        if let Some(cap) = row.max_discount
+            && discount > cap {
                 discount = cap;
             }
-        }
         if discount > gross {
             discount = gross;
         }

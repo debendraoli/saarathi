@@ -57,7 +57,7 @@ class RouteQuery {
 
 /// Road-following polyline for a pickup → stops → destination path.
 final routeGeometryProvider =
-    FutureProvider.autoDispose.family<List<LatLng>, RouteQuery>((ref, q) {
+    FutureProvider.autoDispose.family<RouteGeometry, RouteQuery>((ref, q) {
   return ref
       .watch(rideRepositoryProvider)
       .routeGeometry(q.points, vehicleClass: q.vehicleClass);
@@ -293,8 +293,8 @@ final tripDestLabelProvider =
 /// "where it's headed" the way the in-progress status body does.
 final tripOriginLabelProvider =
     FutureProvider.autoDispose.family<String?, String>((ref, tripId) {
-  final origin = ref
-      .watch(tripStreamProvider(tripId).select((v) => v.value?.origin));
+  final origin =
+      ref.watch(tripStreamProvider(tripId).select((v) => v.value?.origin));
   if (origin == null) return Future.value(null);
   return reverseGeocodeCached(ref.watch(placesRepositoryProvider), origin);
 }, retry: shortNetworkRetry);
@@ -310,8 +310,9 @@ final myTripsProvider = FutureProvider.autoDispose<List<Trip>>((ref) {
 /// already depend on.
 class TripsPaged extends PagedNotifier<Trip> {
   @override
-  Future<List<Trip>> fetchPage(int offset, int limit) =>
-      ref.read(rideRepositoryProvider).myTripsPage(limit: limit, offset: offset);
+  Future<List<Trip>> fetchPage(int offset, int limit) => ref
+      .read(rideRepositoryProvider)
+      .myTripsPage(limit: limit, offset: offset);
 }
 
 final myTripsPagedProvider =

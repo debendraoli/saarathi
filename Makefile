@@ -8,11 +8,12 @@ BACKEND   := backend
 DASHBOARD := dashboard
 APP       := app
 COMPOSE   := docker compose
+API_BASE := http://localhost:8080
 
 .DEFAULT_GOAL := help
 
 .PHONY: help env up down restart stop ps logs clean infra \
-        valhalla valhalla-logs valhalla-rebuild \
+        routing routing-logs routing-rebuild \
         build test lint fmt check \
         dashboard dashboard-install dashboard-build \
         app app-create app-get app-l10n app-build app-clean \
@@ -54,15 +55,16 @@ clean: ## Stop the stack and REMOVE volumes (drops DB + KYC data!)
 
 # ── Valhalla routing ─────────────────────────────────────────────────────────
 
-valhalla: ## Start the Valhalla routing engine (routing profile)
-	cd $(BACKEND) && $(COMPOSE) --profile routing up -d valhalla
+routing: ## Start the Valhalla routing engine (routing profile)
+	cd $(BACKEND) && $(COMPOSE) --profile routing up -d
 
-valhalla-logs: ## Tail Valhalla logs (tile build progress on first boot)
-	cd $(BACKEND) && $(COMPOSE) --profile routing logs -f valhalla
+routing-logs: ## Tail Valhalla logs (tile build progress on first boot)
+	cd $(BACKEND) && $(COMPOSE) --profile routing logs -f
 
-valhalla-rebuild: ## Force-rebuild Valhalla tiles from OSM (clears the tile cache)
+routing-rebuild: ## Force-rebuild Valhalla tiles from OSM (clears the tile cache)
 	rm -rf $(BACKEND)/.data/valhalla
-	cd $(BACKEND) && $(COMPOSE) --profile routing up -d valhalla
+	cd $(BACKEND) && $(COMPOSE) --profile routing up -d
+
 
 # ── Rust (backend workspace) ─────────────────────────────────────────────────
 
@@ -98,7 +100,7 @@ dashboard-build: ## Production build of the dashboard
 # ── Mobile app (Flutter) ──────────────────────────────────────────────
 
 app-create: ## Generate native runner folders (first-time only)
-	cd $(APP) && flutter create --org com.saarathi --project-name saarathi --platforms=android,ios,web .
+	cd $(APP) && flutter create --org com.saarathi --project-name saarathi --platforms=android,ios .
 
 app-get: ## Fetch app packages
 	cd $(APP) && flutter pub get
@@ -107,10 +109,10 @@ app-l10n: ## Regenerate localization (en/ne) from ARB files
 	cd $(APP) && flutter gen-l10n
 
 app: ## Run the app (device/emulator); points at the gateway on the host
-	cd $(APP) && flutter run --dart-define=SAARATHI_API_BASE=http://localhost:8080
+	cd $(APP) && flutter run --dart-define=SAARATHI_API_BASE=$(API_BASE)
 
 app-build: ## Release Android APK
-	cd $(APP) && flutter build apk --release
+	cd $(APP) && flutter build apk --release --dart-define=SAARATHI_API_BASE=$(API_BASE)
 
 app-clean: ## Clean the app build
 	cd $(APP) && flutter clean
@@ -122,3 +124,7 @@ dev: up ## Start the backend stack, then run the dashboard in the foreground
 
 smoke: ## Run the end-to-end smoke test (stack must be up)
 	./scripts/smoke.sh
+
+# cloudflare tunneling for local development (dashboard + app) to access the backend stack on the host
+tunnel: ## Start a Cloudflare tunnel to the backend stack (http://localhost:8080) for dashboard and app development
+	cloudflared tunnel --url http://localhost:8080

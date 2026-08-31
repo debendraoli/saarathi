@@ -426,7 +426,15 @@ services:
   #     load balancer off the same prebuilt tar (routes are read-only + cached in
   #     Redis by the rides service, so this scales cleanly).
   valhalla:
-    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    # NOT the plain `ghcr.io/valhalla/valhalla` base image — that ships "the
+    # whole library & all executables, but no docker-entrypoint script" (per
+    # the official docker/README.md), so none of the `tile_urls`/`build_*`
+    # env vars below would actually be read. This env-var-driven auto-config
+    # interface was originally a separate community project,
+    # github.com/nilsnolde/docker-valhalla (now archived) — its functionality
+    # was folded into the official repo as this dedicated image, built from
+    # docker/Dockerfile-scripted on top of the base image.
+    image: ghcr.io/valhalla/valhalla-scripted:latest
     profiles: ["routing"]
     # Unlike the Rust services (restart: unless-stopped via svc-base), this
     # was previously unrestarted — a crash or OOM left it dead until someone
