@@ -68,8 +68,10 @@ class MerchantAnalytics {
   final List<TopMenuItem> topItems;
   final List<RatingBucket> ratingBreakdown;
 
-  factory MerchantAnalytics.fromJson(Map<String, dynamic> j) => MerchantAnalytics(
-        overview: MerchantOverview.fromJson(j['overview'] as Map<String, dynamic>),
+  factory MerchantAnalytics.fromJson(Map<String, dynamic> j) =>
+      MerchantAnalytics(
+        overview:
+            MerchantOverview.fromJson(j['overview'] as Map<String, dynamic>),
         today: MerchantOverview.fromJson(j['today'] as Map<String, dynamic>),
         topItems: ((j['top_items'] as List?) ?? const [])
             .cast<Map<String, dynamic>>()

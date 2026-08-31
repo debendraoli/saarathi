@@ -10,10 +10,14 @@ class SupportRepository {
 
   Future<List<SupportMessage>> myThread() async {
     final res = await _api.get('/v1/support/messages') as List;
-    return res.cast<Map<String, dynamic>>().map(SupportMessage.fromJson).toList();
+    return res
+        .cast<Map<String, dynamic>>()
+        .map(SupportMessage.fromJson)
+        .toList();
   }
 
-  Future<SupportMessage> send(String body, {String? tripId, String? orderId}) async {
+  Future<SupportMessage> send(String body,
+      {String? tripId, String? orderId}) async {
     final res = await _api.post(
       '/v1/support/messages',
       body: {

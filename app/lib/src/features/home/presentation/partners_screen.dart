@@ -33,7 +33,8 @@ class PartnersScreen extends ConsumerWidget {
           if (page.items.isEmpty) {
             return Center(
               child: Text(l.partnersEmpty,
-                  style: TextStyle(color: Theme.of(context).colorScheme.outline)),
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.outline)),
             );
           }
           return RefreshIndicator(
@@ -45,7 +46,8 @@ class PartnersScreen extends ConsumerWidget {
               onLoadMore: () =>
                   ref.read(partnersPagedProvider.notifier).loadMore(),
               separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, partner, i) => _PartnerCard(partner: partner),
+              itemBuilder: (context, partner, i) =>
+                  _PartnerCard(partner: partner),
             ),
           );
         },
@@ -78,7 +80,8 @@ class _PartnerCard extends StatelessWidget {
             if (partner.city != null)
               _PartnerRow(label: l.partnerAddress, value: partner.city!),
             if (partner.contactPhone != null)
-              _PartnerRow(label: l.partnerContact, value: partner.contactPhone!),
+              _PartnerRow(
+                  label: l.partnerContact, value: partner.contactPhone!),
           ],
         ),
       ),

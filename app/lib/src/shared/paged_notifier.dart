@@ -56,8 +56,7 @@ abstract class PagedNotifier<T> extends AsyncNotifier<PagedState<T>> {
     if (current == null || current.loading || !current.hasMore) return;
     state = AsyncData(current.copyWith(loading: true, clearError: true));
     try {
-      final next =
-          await fetchPage(current.items.length, pageSize);
+      final next = await fetchPage(current.items.length, pageSize);
       state = AsyncData(current.copyWith(
         items: [...current.items, ...next],
         loading: false,

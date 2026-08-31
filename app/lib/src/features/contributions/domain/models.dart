@@ -43,12 +43,14 @@ class PlaceContribution {
   final int? pointsAwarded;
   final DateTime createdAt;
 
-  factory PlaceContribution.fromJson(Map<String, dynamic> j) => PlaceContribution(
+  factory PlaceContribution.fromJson(Map<String, dynamic> j) =>
+      PlaceContribution(
         id: j['id'] as String,
         category: j['category'] as String,
         name: j['name'] as String,
         description: j['description'] as String?,
-        point: LatLng((j['lat'] as num).toDouble(), (j['lng'] as num).toDouble()),
+        point:
+            LatLng((j['lat'] as num).toDouble(), (j['lng'] as num).toDouble()),
         status: j['status'] as String,
         rejectionReason: j['rejection_reason'] as String?,
         pointsAwarded: (j['points_awarded'] as num?)?.toInt(),
@@ -57,7 +59,8 @@ class PlaceContribution {
 }
 
 class ContributorBadge {
-  const ContributorBadge({required this.code, required this.title, required this.awardedAt});
+  const ContributorBadge(
+      {required this.code, required this.title, required this.awardedAt});
   final String code;
   final String title;
   final DateTime awardedAt;

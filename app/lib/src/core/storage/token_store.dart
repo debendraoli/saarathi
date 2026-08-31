@@ -44,8 +44,8 @@ class TokenStore {
     // one, and the second write silently wins — the id used in one
     // in-flight request could then differ from what's cached elsewhere in
     // memory this launch. Dedupe concurrent calls onto one shared attempt.
-    return _deviceIdInFlight ??= _readOrCreateDeviceId()
-        .whenComplete(() => _deviceIdInFlight = null);
+    return _deviceIdInFlight ??=
+        _readOrCreateDeviceId().whenComplete(() => _deviceIdInFlight = null);
   }
 
   Future<String> _readOrCreateDeviceId() async {

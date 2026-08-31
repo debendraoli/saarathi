@@ -397,9 +397,8 @@ class _ActiveTripCard extends ConsumerWidget {
     // rider's own marketplace orders, and without this a newer delivery
     // trip silently outranked (in created_at order) an actual in-progress
     // ride, making the ride look cancelled from the rider's Home screen.
-    final active = trips
-        .where((t) => t.isActive && t.tripType != 'delivery')
-        .firstOrNull;
+    final active =
+        trips.where((t) => t.isActive && t.tripType != 'delivery').firstOrNull;
     if (active == null) return const SizedBox.shrink();
 
     // Same live-preview data the full trip screen shows, so the resume card
@@ -412,8 +411,7 @@ class _ActiveTripCard extends ConsumerWidget {
     if (driverLoc != null &&
         (routingToPickup || active.status == TripStatus.inProgress)) {
       final target = routingToPickup ? active.origin : active.dest;
-      final eta =
-          ref.watch(tripEtaProvider(EtaQuery(driverLoc, target))).value;
+      final eta = ref.watch(tripEtaProvider(EtaQuery(driverLoc, target))).value;
       if (eta != null) {
         etaText = routingToPickup
             ? l.etaArriving(eta.durationMins)
@@ -480,7 +478,8 @@ class _WhereToCard extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+              border: Border.all(
+                  color: scheme.outlineVariant.withValues(alpha: 0.5)),
             ),
             child: Row(
               children: [
@@ -528,7 +527,8 @@ class _WhereToCard extends StatelessWidget {
                         ),
                 ),
                 if (!locked)
-                  Icon(Icons.chevron_right_rounded, color: scheme.onSurfaceVariant),
+                  Icon(Icons.chevron_right_rounded,
+                      color: scheme.onSurfaceVariant),
               ],
             ),
           ),

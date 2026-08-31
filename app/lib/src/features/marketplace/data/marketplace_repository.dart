@@ -50,7 +50,10 @@ class MarketplaceRepository {
   Future<List<MerchantOffer>> activeOffers(String merchantId) async {
     final res =
         await _api.get('/v1/merchants/$merchantId/offers/active') as List;
-    return res.cast<Map<String, dynamic>>().map(MerchantOffer.fromJson).toList();
+    return res
+        .cast<Map<String, dynamic>>()
+        .map(MerchantOffer.fromJson)
+        .toList();
   }
 
   /// Active offers across every nearby open merchant in [vertical] — the
@@ -213,7 +216,9 @@ final merchantsProvider = FutureProvider.autoDispose
 
 final nearbyOffersProvider = FutureProvider.autoDispose
     .family<List<NearbyOffer>, (String, LatLng?)>((ref, args) {
-  return ref.watch(marketplaceRepositoryProvider).nearbyOffers(args.$1, args.$2);
+  return ref
+      .watch(marketplaceRepositoryProvider)
+      .nearbyOffers(args.$1, args.$2);
 }, retry: shortNetworkRetry);
 
 final myOrdersProvider = FutureProvider.autoDispose<List<CustomerOrder>>((ref) {

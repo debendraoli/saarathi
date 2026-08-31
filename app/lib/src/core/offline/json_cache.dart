@@ -38,8 +38,7 @@ Future<List<T>> cacheThroughList<T>({
       // that original error instead, same as having no cache at all.
       try {
         final envelope = jsonDecode(cached) as Map<String, dynamic>;
-        final list =
-            (envelope['items'] as List).cast<Map<String, dynamic>>();
+        final list = (envelope['items'] as List).cast<Map<String, dynamic>>();
         final savedAt = DateTime.parse(envelope['savedAt'] as String);
         onStale?.call(savedAt);
         return list.map(parse).toList();

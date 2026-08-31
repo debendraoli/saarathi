@@ -139,7 +139,8 @@ class _OfferTileState extends State<_OfferTile> {
         ),
         subtitle: Text(
           offer.active ? l.storeOfferActive : l.storeOfferInactive,
-          style: TextStyle(color: offer.active ? scheme.primary : scheme.outline),
+          style:
+              TextStyle(color: offer.active ? scheme.primary : scheme.outline),
         ),
         trailing: widget.onDeactivate == null
             ? null
@@ -200,8 +201,9 @@ class _NewOfferSheetState extends ConsumerState<_NewOfferSheet> {
             minOrderAmount:
                 double.tryParse(_minOrderController.text.trim()) ?? 0,
             endsAt: _endsAt,
-            dailyStartMinute:
-                _dailyWindow ? _dailyStart.hour * 60 + _dailyStart.minute : null,
+            dailyStartMinute: _dailyWindow
+                ? _dailyStart.hour * 60 + _dailyStart.minute
+                : null,
             dailyEndMinute:
                 _dailyWindow ? _dailyEnd.hour * 60 + _dailyEnd.minute : null,
           );
@@ -245,7 +247,8 @@ class _NewOfferSheetState extends ConsumerState<_NewOfferSheet> {
           SegmentedButton<String>(
             segments: [
               ButtonSegment(
-                  value: 'free_delivery', label: Text(l.storeOfferFreeDelivery)),
+                  value: 'free_delivery',
+                  label: Text(l.storeOfferFreeDelivery)),
               ButtonSegment(value: 'percent', label: Text(l.storeOfferPercent)),
               ButtonSegment(value: 'flat', label: Text(l.storeOfferFlat)),
             ],
@@ -256,7 +259,8 @@ class _NewOfferSheetState extends ConsumerState<_NewOfferSheet> {
           if (_kind != 'free_delivery') ...[
             TextField(
               controller: _valueController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(
                 labelText: _kind == 'percent'
                     ? l.storeOfferPercentLabel
@@ -268,7 +272,8 @@ class _NewOfferSheetState extends ConsumerState<_NewOfferSheet> {
           if (_kind == 'percent') ...[
             TextField(
               controller: _maxDiscountController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(labelText: l.storeOfferMaxDiscount),
             ),
             const SizedBox(height: 12),
@@ -332,7 +337,8 @@ class _NewOfferSheetState extends ConsumerState<_NewOfferSheet> {
                       );
                       if (picked != null) setState(() => _dailyEnd = picked);
                     },
-                    child: Text('${l.storeOfferTo} ${_dailyEnd.format(context)}'),
+                    child:
+                        Text('${l.storeOfferTo} ${_dailyEnd.format(context)}'),
                   ),
                 ),
               ],

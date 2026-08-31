@@ -12,7 +12,8 @@ import '../../../core/router/app_router.dart';
 const _releaseDate = '2026-08-26';
 
 const _privacyPolicyUrl = 'https://saarathi.apexinfratech.com.np/legal/privacy';
-const _licenseAgreementUrl = 'https://saarathi.apexinfratech.com.np/legal/terms';
+const _licenseAgreementUrl =
+    'https://saarathi.apexinfratech.com.np/legal/terms';
 
 /// Version/build/release-date + the legal links Play Store review expects
 /// to find surfaced somewhere in the app (Privacy Policy is a hard
@@ -66,8 +67,8 @@ class _AboutScreenState extends State<AboutScreen> {
                   ListTile(
                     leading: const Icon(Icons.info_outline_rounded),
                     title: Text(l.appVersion),
-                    trailing:
-                        Text(info.version, style: TextStyle(color: scheme.outline)),
+                    trailing: Text(info.version,
+                        style: TextStyle(color: scheme.outline)),
                   ),
                   ListTile(
                     leading: const Icon(Icons.tag_rounded),
@@ -79,8 +80,8 @@ class _AboutScreenState extends State<AboutScreen> {
                 ListTile(
                   leading: const Icon(Icons.event_rounded),
                   title: Text(l.releaseDate),
-                  trailing:
-                      Text(_releaseDate, style: TextStyle(color: scheme.outline)),
+                  trailing: Text(_releaseDate,
+                      style: TextStyle(color: scheme.outline)),
                 ),
                 ListTile(
                   leading: const Icon(Icons.apartment_rounded),

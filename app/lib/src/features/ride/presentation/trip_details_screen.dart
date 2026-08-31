@@ -145,7 +145,8 @@ class _BodyState extends ConsumerState<_Body> {
           Card(
             color: scheme.errorContainer,
             child: ListTile(
-              leading: Icon(Icons.info_outline_rounded, color: scheme.onErrorContainer),
+              leading: Icon(Icons.info_outline_rounded,
+                  color: scheme.onErrorContainer),
               title: Text(l.cancelReasonLabel,
                   style: TextStyle(color: scheme.onErrorContainer)),
               subtitle: Text(trip.cancelReason!,
@@ -175,7 +176,8 @@ class _BodyState extends ConsumerState<_Body> {
                   ? Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.star_rounded, size: 16, color: Colors.amber),
+                        const Icon(Icons.star_rounded,
+                            size: 16, color: Colors.amber),
                         const SizedBox(width: 2),
                         Text(driver.rating!.toStringAsFixed(1)),
                       ],

@@ -32,7 +32,8 @@ class ContributionsRepository {
     final form = FormData.fromMap({
       'category': s.category.wire,
       'name': s.name,
-      if (s.description != null && s.description!.isNotEmpty) 'description': s.description,
+      if (s.description != null && s.description!.isNotEmpty)
+        'description': s.description,
       'lat': s.point.latitude.toString(),
       'lng': s.point.longitude.toString(),
       'capture_lat': s.capturePoint.latitude.toString(),
@@ -44,7 +45,8 @@ class ContributionsRepository {
   }
 
   Future<List<PlaceContribution>> mine() async {
-    final res = await _api.get('/v1/places/contributions/mine') as Map<String, dynamic>;
+    final res =
+        await _api.get('/v1/places/contributions/mine') as Map<String, dynamic>;
     return (res['items'] as List? ?? const [])
         .cast<Map<String, dynamic>>()
         .map(PlaceContribution.fromJson)
@@ -65,7 +67,8 @@ class ContributionsRepository {
   }
 }
 
-final contributionsRepositoryProvider = Provider<ContributionsRepository>((ref) {
+final contributionsRepositoryProvider =
+    Provider<ContributionsRepository>((ref) {
   return ContributionsRepository(ref.watch(apiClientProvider));
 });
 

@@ -38,7 +38,8 @@ class DeliveryRepository {
   /// attempt (via [newIdempotencyKey]) and reused across retries of that same
   /// tap — a dropped response then replays the original parcel booking
   /// (same OTP included) instead of creating a duplicate.
-  Future<ParcelBooking> book(ParcelDraft draft, {String? idempotencyKey}) async {
+  Future<ParcelBooking> book(ParcelDraft draft,
+      {String? idempotencyKey}) async {
     final res = await _api.post(
       '/v1/delivery/parcels',
       body: draft.bookBody(),

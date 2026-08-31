@@ -128,8 +128,8 @@ class _EarningsBody extends StatelessWidget {
     final theme = Theme.of(context);
     final current = earnings.current;
     final change = earnings.changePct;
-    final maxTotal = earnings.buckets
-        .fold<double>(0, (m, b) => b.total > m ? b.total : m);
+    final maxTotal =
+        earnings.buckets.fold<double>(0, (m, b) => b.total > m ? b.total : m);
 
     return ListView(
       children: [

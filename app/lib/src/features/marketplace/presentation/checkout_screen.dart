@@ -152,8 +152,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     final cart = ref.watch(cartControllerProvider);
     final offers = cart.merchantId == null
         ? const <MerchantOffer>[]
-        : ref.watch(storeOffersProvider(cart.merchantId!)).value ??
-            const [];
+        : ref.watch(storeOffersProvider(cart.merchantId!)).value ?? const [];
 
     return Scaffold(
       appBar: AppBar(title: Text(l.checkout)),

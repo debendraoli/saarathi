@@ -184,8 +184,8 @@ class MerchantRepository {
   }
 
   Future<void> deactivateOffer(String merchantId, String offerId) async {
-    await _api.post(
-        '/v1/merchant/merchants/$merchantId/offers/$offerId/deactivate');
+    await _api
+        .post('/v1/merchant/merchants/$merchantId/offers/$offerId/deactivate');
   }
 }
 
@@ -251,9 +251,7 @@ final _merchantOrdersPollProvider = StreamProvider.autoDispose
           // busy counter, and is otherwise the only signal that fires while
           // the app is in the foreground.
           unawaited(NotificationService.instance.show(
-            newIds.length > 1
-                ? '${newIds.length} new orders'
-                : 'New order',
+            newIds.length > 1 ? '${newIds.length} new orders' : 'New order',
             'Tap to view and respond',
           ));
         } else if (ids.isEmpty) {
@@ -280,10 +278,7 @@ final merchantOrdersProvider = Provider.autoDispose
 /// recent poll failed.
 final merchantOrdersStaleProvider =
     Provider.autoDispose.family<bool, String>((ref, merchantId) {
-  return ref
-          .watch(_merchantOrdersPollProvider(merchantId))
-          .value
-          ?.stale ??
+  return ref.watch(_merchantOrdersPollProvider(merchantId)).value?.stale ??
       false;
 });
 

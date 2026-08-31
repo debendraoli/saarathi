@@ -65,21 +65,35 @@ class _ContributionTile extends StatelessWidget {
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
     final (label, color, icon) = switch (item.status) {
-      'approved' => (l.contributionStatusApproved, scheme.primary, Icons.check_circle_rounded),
-      'rejected' => (l.contributionStatusRejected, scheme.error, Icons.cancel_rounded),
-      _ => (l.contributionStatusPending, scheme.outline, Icons.hourglass_top_rounded),
+      'approved' => (
+          l.contributionStatusApproved,
+          scheme.primary,
+          Icons.check_circle_rounded
+        ),
+      'rejected' => (
+          l.contributionStatusRejected,
+          scheme.error,
+          Icons.cancel_rounded
+        ),
+      _ => (
+          l.contributionStatusPending,
+          scheme.outline,
+          Icons.hourglass_top_rounded
+        ),
     };
     return ListTile(
       leading: Icon(icon, color: color),
       title: Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: item.status == 'rejected' && item.rejectionReason != null
-          ? Text(item.rejectionReason!, maxLines: 2, overflow: TextOverflow.ellipsis)
+          ? Text(item.rejectionReason!,
+              maxLines: 2, overflow: TextOverflow.ellipsis)
           : null,
       trailing: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+          Text(label,
+              style: TextStyle(color: color, fontWeight: FontWeight.w600)),
           if (item.pointsAwarded != null)
             Text('+${item.pointsAwarded}',
                 style: Theme.of(context).textTheme.bodySmall),

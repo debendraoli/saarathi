@@ -24,8 +24,8 @@ class SettingsScreen extends ConsumerWidget {
     final user = ref.watch(authControllerProvider).user;
     final locale = ref.watch(localeControllerProvider);
     final merchants = ref.watch(myMerchantsProvider);
-    final showBackgroundCard = (user?.isDriver ?? false) ||
-        (merchants.value?.isNotEmpty ?? false);
+    final showBackgroundCard =
+        (user?.isDriver ?? false) || (merchants.value?.isNotEmpty ?? false);
     // The permission card hides itself once granted, so without this check a
     // rider with notifications already on and no background-running card
     // would see an empty "Notifications & device" section — just a label
@@ -63,7 +63,8 @@ class SettingsScreen extends ConsumerWidget {
                   const SizedBox(height: 8),
                   SegmentedButton<String>(
                     segments: [
-                      ButtonSegment(value: 'en', label: Text(l.languageEnglish)),
+                      ButtonSegment(
+                          value: 'en', label: Text(l.languageEnglish)),
                       ButtonSegment(value: 'ne', label: Text(l.languageNepali)),
                     ],
                     selected: {locale?.languageCode ?? 'en'},

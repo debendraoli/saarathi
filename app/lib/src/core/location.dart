@@ -93,15 +93,17 @@ class LocationResult {
 /// Best-effort current position, degrading to the Dang district centre when
 /// location is unavailable/denied (offline-tolerant, Nepal rural reality).
 Future<LocationResult> currentLocation() async {
-  const fallback =
-      LocationResult(LatLng(AppConfig.defaultLat, AppConfig.defaultLng), isFallback: true);
+  const fallback = LocationResult(
+      LatLng(AppConfig.defaultLat, AppConfig.defaultLng),
+      isFallback: true);
   try {
     if (!await ensureLocationPermission()) return fallback;
     if (!await Geolocator.isLocationServiceEnabled()) return fallback;
     final pos = await Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
     );
-    return LocationResult(LatLng(pos.latitude, pos.longitude), isFallback: false);
+    return LocationResult(LatLng(pos.latitude, pos.longitude),
+        isFallback: false);
   } catch (_) {
     return fallback;
   }

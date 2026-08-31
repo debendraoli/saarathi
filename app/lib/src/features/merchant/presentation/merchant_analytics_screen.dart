@@ -52,7 +52,8 @@ class MerchantAnalyticsScreen extends ConsumerWidget {
                   Expanded(
                     child: _StatCard(
                       label: l.storeTotalRevenue,
-                      value: 'NPR ${a.overview.totalRevenue.toStringAsFixed(0)}',
+                      value:
+                          'NPR ${a.overview.totalRevenue.toStringAsFixed(0)}',
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -70,7 +71,8 @@ class MerchantAnalyticsScreen extends ConsumerWidget {
                   Expanded(
                     child: _StatCard(
                       label: l.storeAvgOrderValue,
-                      value: 'NPR ${a.overview.avgOrderValue.toStringAsFixed(0)}',
+                      value:
+                          'NPR ${a.overview.avgOrderValue.toStringAsFixed(0)}',
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -103,7 +105,8 @@ class MerchantAnalyticsScreen extends ConsumerWidget {
                       Expanded(
                         child: _TodayStat(
                           label: l.merchantRevenueToday,
-                          value: 'NPR ${a.today.totalRevenue.toStringAsFixed(0)}',
+                          value:
+                              'NPR ${a.today.totalRevenue.toStringAsFixed(0)}',
                         ),
                       ),
                     ],
@@ -137,8 +140,8 @@ class MerchantAnalyticsScreen extends ConsumerWidget {
                 const SizedBox(height: 8),
                 Card(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Column(
                       children: [
                         for (final b in a.ratingBreakdown)
@@ -199,8 +202,8 @@ class _TodayStat extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(value,
-            style:
-                theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+            style: theme.textTheme.titleLarge
+                ?.copyWith(fontWeight: FontWeight.w800)),
         Text(label,
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),

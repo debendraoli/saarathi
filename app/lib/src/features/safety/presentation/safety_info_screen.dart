@@ -33,7 +33,8 @@ class SafetyInfoScreen extends ConsumerWidget {
             child: ListTile(
               leading: Icon(Icons.contacts_rounded, color: scheme.primary),
               title: Text(l.trustedContactsTitle),
-              subtitle: Text(l.trustedContactsBody, maxLines: 2, overflow: TextOverflow.ellipsis),
+              subtitle: Text(l.trustedContactsBody,
+                  maxLines: 2, overflow: TextOverflow.ellipsis),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => context.push(Routes.trustedContacts),
             ),
@@ -77,7 +78,8 @@ class SafetyInfoScreen extends ConsumerWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.check_circle_rounded, size: 18, color: scheme.primary),
+                  Icon(Icons.check_circle_rounded,
+                      size: 18, color: scheme.primary),
                   const SizedBox(width: 10),
                   Expanded(child: Text(tip)),
                 ],
@@ -98,9 +100,21 @@ class _RideIndexCard extends StatelessWidget {
     final l = AppL10n.of(context);
     final scheme = Theme.of(context).colorScheme;
     final (color, title, body) = switch (index.level) {
-      RideIndexLevel.green => (Colors.green.shade600, l.rideIndexGreenTitle, l.rideIndexGreenBody),
-      RideIndexLevel.yellow => (Colors.amber.shade700, l.rideIndexYellowTitle, l.rideIndexYellowBody),
-      RideIndexLevel.red => (scheme.error, l.rideIndexRedTitle, l.rideIndexRedBody),
+      RideIndexLevel.green => (
+          Colors.green.shade600,
+          l.rideIndexGreenTitle,
+          l.rideIndexGreenBody
+        ),
+      RideIndexLevel.yellow => (
+          Colors.amber.shade700,
+          l.rideIndexYellowTitle,
+          l.rideIndexYellowBody
+        ),
+      RideIndexLevel.red => (
+          scheme.error,
+          l.rideIndexRedTitle,
+          l.rideIndexRedBody
+        ),
     };
     return Card(
       child: Padding(
@@ -140,7 +154,8 @@ class _RideIndexCard extends StatelessWidget {
               child: Icon(Icons.arrow_drop_up_rounded, color: color, size: 28),
             ),
             const SizedBox(height: 8),
-            Text(title, style: TextStyle(fontWeight: FontWeight.w800, color: color)),
+            Text(title,
+                style: TextStyle(fontWeight: FontWeight.w800, color: color)),
             const SizedBox(height: 4),
             Text(body, style: Theme.of(context).textTheme.bodySmall),
             if (index.totalTrips > 0) ...[

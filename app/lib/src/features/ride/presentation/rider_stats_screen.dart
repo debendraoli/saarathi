@@ -55,8 +55,8 @@ class RiderStatsScreen extends ConsumerWidget {
                     ref.invalidate(orderStatsProvider);
                   },
                   child: ListView(
-                    padding: EdgeInsets.fromLTRB(16, 16, 16,
-                        16 + MediaQuery.of(context).padding.bottom),
+                    padding: EdgeInsets.fromLTRB(
+                        16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
                     children: [
                       Text(l.myStatsRidesHeader,
                           style: Theme.of(context)

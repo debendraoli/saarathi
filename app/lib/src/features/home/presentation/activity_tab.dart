@@ -40,7 +40,8 @@ class _ActivityTabState extends ConsumerState<ActivityTab> {
 
   void _onScroll() {
     if (!_scroll.hasClients) return;
-    final remaining = _scroll.position.maxScrollExtent - _scroll.position.pixels;
+    final remaining =
+        _scroll.position.maxScrollExtent - _scroll.position.pixels;
     if (remaining < 400) {
       ref.read(myOrdersPagedProvider.notifier).loadMore();
       ref.read(myTripsPagedProvider.notifier).loadMore();
@@ -83,8 +84,8 @@ class _ActivityTabState extends ConsumerState<ActivityTab> {
               ],
             );
           }
-          final loadingMore = tripsPage.loading ||
-              (ordersState.value?.loading ?? false);
+          final loadingMore =
+              tripsPage.loading || (ordersState.value?.loading ?? false);
           return ListView(
             controller: _scroll,
             padding: const EdgeInsets.symmetric(vertical: 8),

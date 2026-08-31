@@ -21,6 +21,7 @@ class AddressPick {
         chooseOnMap = true,
         forceDestination = false,
         originHit = null;
+
   /// A resolved Google Maps link — [hit] (the destination) should be used
   /// regardless of which field (pickup, destination, or a stop) was open
   /// when it was pasted/shared. [originHit] is only set for a "Directions"
@@ -122,18 +123,22 @@ class _AddressSearchScreenState extends ConsumerState<AddressSearchScreen> {
       final originReversed =
           await repo.reverse(resolved.origin!).catchError((_) => null);
       originHit = originReversed ??
-          PlaceHit(label: coordLabel(resolved.origin!), point: resolved.origin!);
+          PlaceHit(
+              label: coordLabel(resolved.origin!), point: resolved.origin!);
     }
     if (!mounted || value != _query) return;
     setState(() => _loading = false);
     final destHit = destReversed ??
-        PlaceHit(label: coordLabel(resolved.destination), point: resolved.destination);
+        PlaceHit(
+            label: coordLabel(resolved.destination),
+            point: resolved.destination);
     // Not `_select` — a Maps link is destination-first with no "which end
     // is this" context, so it always lands on the destination, regardless
     // of whether this screen was opened for pickup, destination, or a stop.
     repo.addRecent(destHit).ignore();
     if (originHit != null) repo.addRecent(originHit).ignore();
-    Navigator.of(context).pop(AddressPick.mapsLink(destHit, originHit: originHit));
+    Navigator.of(context)
+        .pop(AddressPick.mapsLink(destHit, originHit: originHit));
   }
 
   Future<void> _runSearch() async {

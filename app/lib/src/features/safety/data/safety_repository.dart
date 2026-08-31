@@ -10,7 +10,10 @@ class SafetyRepository {
 
   Future<List<TrustedContact>> trustedContacts() async {
     final res = await _api.get('/v1/trusted-contacts') as List;
-    return res.cast<Map<String, dynamic>>().map(TrustedContact.fromJson).toList();
+    return res
+        .cast<Map<String, dynamic>>()
+        .map(TrustedContact.fromJson)
+        .toList();
   }
 
   Future<TrustedContact> addTrustedContact(String name, String phone) async {

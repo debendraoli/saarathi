@@ -23,9 +23,8 @@ class AccountTab extends ConsumerWidget {
     final user = ref.watch(authControllerProvider).user;
     final mode = ref.watch(authControllerProvider).mode;
     final merchants = ref.watch(myMerchantsProvider);
-    final driverKyc = user?.isDriver ?? false
-        ? ref.watch(driverKycProvider).value
-        : null;
+    final driverKyc =
+        user?.isDriver ?? false ? ref.watch(driverKycProvider).value : null;
     final points = ref.watch(pointsSummaryProvider).value;
 
     return ListView(

@@ -70,7 +70,8 @@ class TrustedContactsScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
                 FilledButton(
-                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                  style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52)),
                   onPressed: nameController.text.trim().isEmpty ||
                           phoneController.text.trim().isEmpty
                       ? null
@@ -96,13 +97,16 @@ class TrustedContactsScreen extends ConsumerWidget {
       Haptics.error();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.isNetwork ? AppL10n.of(context).errorNetwork : e.message)),
+          SnackBar(
+              content: Text(
+                  e.isNetwork ? AppL10n.of(context).errorNetwork : e.message)),
         );
       }
     }
   }
 
-  Future<void> _remove(BuildContext context, WidgetRef ref, TrustedContact c) async {
+  Future<void> _remove(
+      BuildContext context, WidgetRef ref, TrustedContact c) async {
     final l = AppL10n.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
@@ -162,7 +166,8 @@ class TrustedContactsScreen extends ConsumerWidget {
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(32),
-                child: Text(l.noTrustedContactsYet, textAlign: TextAlign.center),
+                child:
+                    Text(l.noTrustedContactsYet, textAlign: TextAlign.center),
               ),
             );
           }
@@ -176,7 +181,8 @@ class TrustedContactsScreen extends ConsumerWidget {
                 final c = contacts[i];
                 return ListTile(
                   leading: CircleAvatar(
-                    child: Text(c.name.isNotEmpty ? c.name[0].toUpperCase() : '?'),
+                    child:
+                        Text(c.name.isNotEmpty ? c.name[0].toUpperCase() : '?'),
                   ),
                   title: Text(c.name),
                   subtitle: Text(c.phone),

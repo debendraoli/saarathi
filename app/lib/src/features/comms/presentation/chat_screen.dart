@@ -139,7 +139,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 child: Text(
                   l.chatEnded,
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Theme.of(context).colorScheme.outline),
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.outline),
                 ),
               ),
             )

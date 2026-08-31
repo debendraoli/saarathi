@@ -20,8 +20,9 @@ bool looksLikeGoogleMapsUrl(String text) {
 String coordLabel(LatLng p) =>
     '${p.latitude.toStringAsFixed(5)}, ${p.longitude.toStringAsFixed(5)}';
 
-LatLng? _latLng(RegExpMatch? m) =>
-    m == null ? null : LatLng(double.parse(m.group(1)!), double.parse(m.group(2)!));
+LatLng? _latLng(RegExpMatch? m) => m == null
+    ? null
+    : LatLng(double.parse(m.group(1)!), double.parse(m.group(2)!));
 
 /// The destination point: the `!3dlat!4dlng` pin-marker form Google Maps
 /// embeds in some share links, `.../@lat,lng,zoom...`, `?q=lat,lng`, or
@@ -34,7 +35,8 @@ LatLng? _extractDestination(String url) {
   return _latLng(RegExp(r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)').firstMatch(url)) ??
       _latLng(RegExp(r'@(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url)) ??
       _latLng(RegExp(r'[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url)) ??
-      _latLng(RegExp(r'[?&]destination=(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url));
+      _latLng(
+          RegExp(r'[?&]destination=(-?\d+\.\d+),(-?\d+\.\d+)').firstMatch(url));
 }
 
 /// Only Google's documented "Directions" deep-link shape
@@ -70,7 +72,8 @@ class ResolvedMapsLink {
 ResolvedMapsLink? _extract(String url) {
   final destination = _extractDestination(url);
   if (destination == null) return null;
-  return ResolvedMapsLink(origin: _extractOrigin(url), destination: destination);
+  return ResolvedMapsLink(
+      origin: _extractOrigin(url), destination: destination);
 }
 
 /// Cheap, synchronous pre-check so a caller can tell "this is worth trying

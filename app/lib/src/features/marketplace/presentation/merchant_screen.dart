@@ -44,8 +44,8 @@ class MerchantScreen extends ConsumerWidget {
                 .add(it);
           }
           // Flatten header + category sections + items into one bounded list.
-          final offers = ref.watch(storeOffersProvider(merchant.id)).value ??
-              const [];
+          final offers =
+              ref.watch(storeOffersProvider(merchant.id)).value ?? const [];
           final rows = <Widget>[
             _Header(merchant: loaded),
             if (offers.isNotEmpty) _OfferBanner(offer: offers.first),
@@ -322,13 +322,15 @@ class _ItemCard extends ConsumerWidget {
             Text(
               l.itemSoldOut,
               style: TextStyle(
-                  fontWeight: FontWeight.w700, color: scheme.error, fontSize: 12),
+                  fontWeight: FontWeight.w700,
+                  color: scheme.error,
+                  fontSize: 12),
             )
           else
             Text(
               'NPR ${item.price.toStringAsFixed(0)}',
-              style: TextStyle(
-                  fontWeight: FontWeight.w800, color: scheme.primary),
+              style:
+                  TextStyle(fontWeight: FontWeight.w800, color: scheme.primary),
             ),
         ],
       ),

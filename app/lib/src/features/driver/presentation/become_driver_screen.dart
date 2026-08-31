@@ -152,7 +152,8 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
             ),
             _Field(controller: _address, label: 'Address'),
             const Divider(height: 32),
-            Text(l.jobTypesLabel, style: Theme.of(context).textTheme.labelLarge),
+            Text(l.jobTypesLabel,
+                style: Theme.of(context).textTheme.labelLarge),
             const SizedBox(height: 8),
             SegmentedButton<String>(
               segments: [
@@ -168,8 +169,7 @@ class _BecomeDriverScreenState extends ConsumerState<BecomeDriverScreen> {
                 ),
               ],
               selected: {_serviceType},
-              onSelectionChanged: (s) =>
-                  setState(() => _serviceType = s.first),
+              onSelectionChanged: (s) => setState(() => _serviceType = s.first),
             ),
             const SizedBox(height: 24),
             FilledButton(

@@ -58,7 +58,8 @@ class NotificationsScreen extends ConsumerWidget {
             onRefresh: () => ref.read(inboxPagedProvider.notifier).refresh(),
             child: PaginatedListView<AppNotification>(
               state: page,
-              onLoadMore: () => ref.read(inboxPagedProvider.notifier).loadMore(),
+              onLoadMore: () =>
+                  ref.read(inboxPagedProvider.notifier).loadMore(),
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, n, i) {
                 return ListTile(

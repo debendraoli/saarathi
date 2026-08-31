@@ -97,7 +97,9 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
       Haptics.error();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.isNetwork ? AppL10n.of(context).errorNetwork : e.message)),
+          SnackBar(
+              content: Text(
+                  e.isNetwork ? AppL10n.of(context).errorNetwork : e.message)),
         );
       }
     } finally {
@@ -117,7 +119,8 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
         child: Column(
           children: [
             if (widget.tripId != null) _TripContextCard(tripId: widget.tripId!),
-            if (widget.orderId != null) _OrderContextCard(orderId: widget.orderId!),
+            if (widget.orderId != null)
+              _OrderContextCard(orderId: widget.orderId!),
             Expanded(
               child: async.when(
                 loading: () => const Center(child: CircularProgressIndicator()),
@@ -130,7 +133,8 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
                     return Center(
                       child: Padding(
                         padding: const EdgeInsets.all(32),
-                        child: Text(l.supportEmptyState, textAlign: TextAlign.center),
+                        child: Text(l.supportEmptyState,
+                            textAlign: TextAlign.center),
                       ),
                     );
                   }
@@ -160,13 +164,15 @@ class _SupportChatScreenState extends ConsumerState<SupportChatScreen> {
                   ),
                   const SizedBox(width: 8),
                   IconButton.filled(
-                    style: IconButton.styleFrom(backgroundColor: scheme.primary),
+                    style:
+                        IconButton.styleFrom(backgroundColor: scheme.primary),
                     onPressed: _sending ? null : _send,
                     icon: _sending
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
                           )
                         : const Icon(Icons.send_rounded, color: Colors.white),
                   ),
@@ -211,7 +217,8 @@ class _TripContextCard extends ConsumerWidget {
         : ' · ${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
     return _ContextCard(
       icon: Icons.two_wheeler_rounded,
-      label: '${l.supportAboutTrip} · NPR ${trip.finalFare.toStringAsFixed(0)}$dateLabel',
+      label:
+          '${l.supportAboutTrip} · NPR ${trip.finalFare.toStringAsFixed(0)}$dateLabel',
     );
   }
 }
@@ -265,9 +272,12 @@ class _ContextCard extends StatelessWidget {
                     TextSpan(
                       text: '${l.supportAbout}: ',
                       style: TextStyle(
-                          fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant),
+                          fontWeight: FontWeight.w700,
+                          color: scheme.onSurfaceVariant),
                     ),
-                    TextSpan(text: label, style: TextStyle(color: scheme.onSurfaceVariant)),
+                    TextSpan(
+                        text: label,
+                        style: TextStyle(color: scheme.onSurfaceVariant)),
                   ]),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -294,7 +304,8 @@ class _Bubble extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
         decoration: BoxDecoration(
           color: mine ? scheme.primary : scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
