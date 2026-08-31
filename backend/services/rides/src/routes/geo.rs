@@ -25,6 +25,16 @@ use std::time::Duration;
 /// treated as effectively immutable).
 const REVERSE_CACHE_TTL_SECS: i64 = 30 * 24 * 3600;
 
+/// Short-lived by design (unlike `reverse`'s 30-day cache) — autocomplete
+/// text isn't stable the way a coordinate's address is, but the same exact
+/// query does recur within a short window: a debounced keystroke sequence
+/// commonly revisits an earlier prefix (type "kathm", backspace to "kath",
+/// retype "kathm"), and common destination names get searched by many
+/// different riders. Long enough to absorb that churn, short enough that a
+/// freshly-approved place contribution (indexed straight into Pelias — see
+/// the comment on `search` below) shows up for everyone within a minute.
+const SEARCH_CACHE_TTL_SECS: i64 = 90;
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/geo/search", get(search))
@@ -65,13 +75,39 @@ struct SearchQuery {
     lng: Option<f64>,
 }
 
+fn search_cache_key(query: &str, lat: Option<f64>, lng: Option<f64>) -> String {
+    // The focus point only nudges ranking, and rounding it to an H3 cell
+    // (reusing the same spatial index `reverse`'s cache keys off) keeps the
+    // key stable across the sub-cell GPS jitter a live location would
+    // otherwise fragment the cache on.
+    let bias = match (lat, lng) {
+        (Some(lat), Some(lng)) => cell_for(lat, lng)
+            .ok()
+            .map(|c| u64::from(c).to_string())
+            .unwrap_or_else(|| "none".into()),
+        _ => "none".into(),
+    };
+    format!("geo:search:{bias}:{}", query.to_lowercase())
+}
+
 async fn search(
+    State(st): State<AppState>,
     _auth: AuthUser,
     Query(q): Query<SearchQuery>,
 ) -> AppResult<Json<Vec<GeoPlace>>> {
     let query = q.q.trim();
     if query.chars().count() < 2 {
         return Ok(Json(vec![]));
+    }
+    let cache_key = search_cache_key(query, q.lat, q.lng);
+    let mut r = st.redis.clone();
+    if let Ok(Some(cached)) = redis::cmd("GET")
+        .arg(&cache_key)
+        .query_async::<Option<String>>(&mut r)
+        .await
+        && let Ok(places) = serde_json::from_str::<Vec<GeoPlace>>(&cached)
+    {
+        return Ok(Json(places));
     }
     let mut params: Vec<(&str, String)> = vec![
         ("text", query.to_string()),
@@ -99,10 +135,24 @@ async fn search(
     // Approved place-contributions are indexed straight into Pelias at
     // approval time (see saarathi-places' pelias_index.rs), so they surface
     // here for free — no separate cross-service query needed.
-    let places = fetch(&format!("{}/v1/autocomplete", geocoder_url()), &params)
-        .await
-        .unwrap_or_default();
-    Ok(Json(places))
+    let fetch_result = fetch(&format!("{}/v1/autocomplete", geocoder_url()), &params).await;
+    // Same care as `reverse`: only a genuine `Ok` from Pelias (however many
+    // results, including zero) is a real answer worth caching — an `Err`
+    // means Pelias was unreachable/timed out, and caching *that* as "no
+    // results" would keep serving a stuck empty list for the full TTL after
+    // a transient outage.
+    if let Ok(places) = &fetch_result
+        && let Ok(raw) = serde_json::to_string(places)
+    {
+        let _: Result<(), _> = redis::cmd("SET")
+            .arg(&cache_key)
+            .arg(raw)
+            .arg("EX")
+            .arg(SEARCH_CACHE_TTL_SECS)
+            .query_async::<()>(&mut r)
+            .await;
+    }
+    Ok(Json(fetch_result.unwrap_or_default()))
 }
 
 #[derive(Deserialize)]
@@ -128,12 +178,10 @@ async fn reverse(
             .arg(key)
             .query_async::<Option<String>>(&mut r)
             .await
-        {
-            if let Some(raw) = cached {
+            && let Some(raw) = cached {
                 let place: Option<GeoPlace> = serde_json::from_str(&raw).unwrap_or(None);
                 return Ok(Json(place));
             }
-        }
     }
 
     let params: Vec<(&str, String)> = vec![
@@ -153,8 +201,8 @@ async fn reverse(
         .ok()
         .and_then(|places| places.first().cloned());
 
-    if fetch_result.is_ok() {
-        if let Some(key) = &key {
+    if fetch_result.is_ok()
+        && let Some(key) = &key {
             let mut r = st.redis.clone();
             if let Ok(raw) = serde_json::to_string(&place) {
                 let _: Result<(), _> = redis::cmd("SET")
@@ -166,7 +214,6 @@ async fn reverse(
                     .await;
             }
         }
-    }
     Ok(Json(place))
 }
 
@@ -193,11 +240,10 @@ fn feature_to_place(f: &Value) -> Option<GeoPlace> {
     // the 3-letter ISO alpha code (country_a: "NPL"), unlike Photon's 2-letter
     // countrycode ("NP") — the data is already Nepal-scoped at import time so
     // this is defense-in-depth, not the primary filter.
-    if let Some(cc) = get("country_a") {
-        if !cc.eq_ignore_ascii_case("NPL") {
+    if let Some(cc) = get("country_a")
+        && !cc.eq_ignore_ascii_case("NPL") {
             return None;
         }
-    }
 
     let name = get("name");
     let street = get("street");
