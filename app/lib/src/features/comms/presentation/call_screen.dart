@@ -1,15 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:saarathi/l10n/app_localizations.dart';
 
 import '../application/call_controller.dart';
 
 class CallArgs {
-  const CallArgs(
-      {required this.tripId, this.video = false, this.asCaller = true});
+  const CallArgs({required this.tripId, this.asCaller = true});
   final String tripId;
-  final bool video;
   final bool asCaller;
 }
 
@@ -23,6 +22,7 @@ class CallScreen extends ConsumerStatefulWidget {
 
 class _CallScreenState extends ConsumerState<CallScreen> {
   late final CallController _c;
+  Timer? _durationTicker;
 
   @override
   void initState() {
@@ -30,9 +30,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     _c = ref.read(callControllerProvider(widget.args.tripId));
     _c.addListener(_onChange);
     if (widget.args.asCaller) {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _c.start(withVideo: widget.args.video),
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) => _c.start());
     }
   }
 
@@ -47,11 +45,24 @@ class _CallScreenState extends ConsumerState<CallScreen> {
         if (mounted) Navigator.of(context).maybePop();
       });
     }
+    // The stopwatch needs its own per-second tick (nothing else calls
+    // notifyListeners() once a second) — started the moment we go
+    // connected, stopped as soon as we leave it either way.
+    if (_c.status == CallStatus.connected) {
+      _durationTicker ??= Timer.periodic(
+        const Duration(seconds: 1),
+        (_) => mounted ? setState(() {}) : null,
+      );
+    } else {
+      _durationTicker?.cancel();
+      _durationTicker = null;
+    }
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _durationTicker?.cancel();
     _c.removeListener(_onChange);
     super.dispose();
   }
@@ -59,7 +70,6 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final connected = _c.status == CallStatus.connected;
     final incoming = _c.status == CallStatus.incoming;
 
     return Scaffold(
@@ -67,41 +77,43 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          if (_c.video && connected)
-            RTCVideoView(
-              _c.remoteRenderer,
-              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-            )
-          else
-            Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircleAvatar(
-                    radius: 48,
-                    backgroundColor: scheme.primaryContainer,
-                    child: Icon(
-                      _c.video ? Icons.videocam_rounded : Icons.call_rounded,
-                      size: 44,
-                      color: scheme.onPrimaryContainer,
-                    ),
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 48,
+                  backgroundColor: scheme.primaryContainer,
+                  child: Icon(
+                    Icons.call_rounded,
+                    size: 44,
+                    color: scheme.onPrimaryContainer,
                   ),
-                  const SizedBox(height: 20),
-                  Text(_statusLabel(),
-                      style:
-                          const TextStyle(color: Colors.white, fontSize: 18)),
-                ],
-              ),
+                ),
+                const SizedBox(height: 20),
+                Text(_statusLabel(),
+                    style: const TextStyle(color: Colors.white, fontSize: 18)),
+              ],
             ),
-          if (_c.video && (connected || _c.status == CallStatus.calling))
+          ),
+          if (_c.status != CallStatus.idle && _c.status != CallStatus.ended)
             Positioned(
-              right: 16,
-              top: 48,
-              width: 110,
-              height: 160,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: RTCVideoView(_c.localRenderer, mirror: true),
+              top: 16 + MediaQuery.of(context).padding.top,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white12,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    AppL10n.of(context).callEncryptedBadge,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ),
               ),
             ),
           Align(
@@ -126,12 +138,19 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   String _statusLabel() {
     final l = AppL10n.of(context);
     switch (_c.status) {
-      case CallStatus.calling:
-        return l.callStatusCalling;
+      case CallStatus.connecting:
+        return l.callStatusConnecting;
+      case CallStatus.ringing:
+        return l.callStatusRinging;
       case CallStatus.incoming:
         return l.callStatusIncoming;
       case CallStatus.connected:
-        return l.callStatusConnected;
+        final d = _c.connectedAt == null
+            ? Duration.zero
+            : DateTime.now().difference(_c.connectedAt!);
+        final mins = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+        final secs = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+        return '${l.callStatusConnected} · $mins:$secs';
       default:
         return l.callStatusEnded;
     }
@@ -170,14 +189,6 @@ class _CallScreenState extends ConsumerState<CallScreen> {
           icon: Icons.call_end_rounded,
           onTap: () => _c.hangup(),
         ),
-        if (_c.video) ...[
-          const SizedBox(width: 20),
-          _RoundBtn(
-            color: Colors.white30,
-            icon: Icons.cameraswitch_rounded,
-            onTap: _c.switchCamera,
-          ),
-        ],
       ],
     );
   }

@@ -10,11 +10,16 @@ import '../../ride/application/trip_channel.dart';
 import '../../ride/domain/models.dart' show TripStatus;
 import '../data/rtc_repository.dart';
 
-enum CallStatus { idle, calling, incoming, connected, ended }
+/// `connecting` is local setup (media + peer connection) before our offer has
+/// even left the device; `ringing` is after it's sent, waiting on the other
+/// side. There's no signaling ack for "their phone is actually ringing" (see
+/// `_onSignal`'s `offer`/`answer` cases) — `ringing` is this side's own best
+/// read of "offer is out, awaiting response", not a confirmed remote state.
+enum CallStatus { idle, connecting, ringing, incoming, connected, ended }
 
-/// Peer-to-peer voice/video call over WebRTC. Media stays P2P (Coturn TURN when
-/// direct fails); only SDP/ICE signaling is relayed through the trip channel.
-/// Masked — no real phone numbers involved.
+/// Peer-to-peer voice call over WebRTC (audio-only — see `_setup`). Media
+/// stays P2P (Coturn TURN when direct fails); only SDP/ICE signaling is
+/// relayed through the trip channel. Masked — no real phone numbers involved.
 class CallController extends ChangeNotifier {
   CallController(this._channel, this._myId, this._rtc) {
     _sub = _channel.ofType('signal').listen(_onSignal);
@@ -23,9 +28,6 @@ class CallController extends ChangeNotifier {
   final TripChannel _channel;
   final String? _myId;
   final RtcRepository _rtc;
-
-  final RTCVideoRenderer localRenderer = RTCVideoRenderer();
-  final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
 
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
@@ -38,29 +40,29 @@ class CallController extends ChangeNotifier {
   bool _remoteReady = false;
 
   CallStatus status = CallStatus.idle;
-  bool video = false;
   bool muted = false;
 
+  /// Set the instant the peer connection reaches `connected`; drives the
+  /// call screen's duration stopwatch. `null` before/after that.
+  DateTime? connectedAt;
+
   bool get inCall =>
-      status == CallStatus.calling ||
+      status == CallStatus.connecting ||
+      status == CallStatus.ringing ||
       status == CallStatus.incoming ||
       status == CallStatus.connected;
 
-  Future<void> _ensureRenderers() async {
-    if (localRenderer.textureId == null) await localRenderer.initialize();
-    if (remoteRenderer.textureId == null) await remoteRenderer.initialize();
-  }
-
-  Future<void> _setup(bool withVideo) async {
-    await _ensureRenderers();
-    video = withVideo;
+  Future<void> _setup() async {
     final iceServers = await _rtc.iceServers();
     _pc = await createPeerConnection({'iceServers': iceServers});
+    // Audio-only: this is a masked voice channel between rider and driver,
+    // not a video call feature — no caller has ever passed `video: true`
+    // (there's no UI for it), and requesting the camera here previously
+    // triggered an unwanted camera-permission prompt on every call.
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
-      'video': withVideo ? {'facingMode': 'user'} : false,
+      'video': false,
     });
-    localRenderer.srcObject = _localStream;
     for (final track in _localStream!.getTracks()) {
       await _pc!.addTrack(track, _localStream!);
     }
@@ -73,12 +75,10 @@ class CallController extends ChangeNotifier {
         });
       }
     };
-    _pc!.onTrack = (e) {
-      if (e.streams.isNotEmpty) remoteRenderer.srcObject = e.streams.first;
-    };
     _pc!.onConnectionState = (s) {
       if (s == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         status = CallStatus.connected;
+        connectedAt = DateTime.now();
         notifyListeners();
       } else if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
           s == RTCPeerConnectionState.RTCPeerConnectionStateClosed ||
@@ -88,20 +88,22 @@ class CallController extends ChangeNotifier {
     };
   }
 
-  Future<void> start({required bool withVideo}) async {
+  Future<void> start() async {
     if (inCall) return;
-    status = CallStatus.calling;
+    status = CallStatus.connecting;
     notifyListeners();
     try {
-      await _setup(withVideo);
+      await _setup();
       final offer = await _pc!.createOffer();
       await _pc!.setLocalDescription(offer);
       _channel.sendSignal('offer', {'sdp': offer.sdp, 'type': offer.type});
+      status = CallStatus.ringing;
+      notifyListeners();
     } catch (_) {
-      // Mic/camera permission denied (first prompt or revoked since), no
-      // device found, etc. — `_setup` can throw partway through, leaving a
+      // Mic permission denied (first prompt or revoked since), no device
+      // found, etc. — `_setup` can throw partway through, leaving a
       // half-created `_pc`/`_localStream`. Without this, `status` was left
-      // stuck on `calling` forever with no error and nothing cleaned up.
+      // stuck on `connecting` forever with no error and nothing cleaned up.
       await _end(local: true);
     }
   }
@@ -110,7 +112,7 @@ class CallController extends ChangeNotifier {
     final offer = _pendingOffer;
     if (offer == null) return;
     try {
-      await _setup(video);
+      await _setup();
       await _pc!.setRemoteDescription(
         RTCSessionDescription(offer['sdp'] as String, offer['type'] as String),
       );
@@ -141,11 +143,6 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> switchCamera() async {
-    final tracks = _localStream?.getVideoTracks() ?? const <MediaStreamTrack>[];
-    if (tracks.isNotEmpty) await Helper.switchCamera(tracks.first);
-  }
-
   void hangup() => _end(local: true);
 
   Future<void> _onSignal(Map<String, dynamic> m) async {
@@ -157,19 +154,20 @@ class CallController extends ChangeNotifier {
       case 'offer':
         if (status == CallStatus.idle) {
           _pendingOffer = (data as Map).cast<String, dynamic>();
-          video = true; // offer may carry video; accept with camera available
           status = CallStatus.incoming;
           notifyListeners();
-        } else if (status == CallStatus.calling && senderId != null) {
+        } else if ((status == CallStatus.connecting ||
+                status == CallStatus.ringing) &&
+            senderId != null) {
           // Glare: both sides tapped "call" at essentially the same moment,
           // each already sent their own offer, and the `idle`-only guard
           // above silently dropped both incoming offers — the call hung in
-          // "Calling…" forever on both ends with no way out but a manual
-          // hangup. Break the tie deterministically: the lexicographically
-          // smaller id yields, tearing down its own half-open attempt and
-          // accepting the other side's offer as an ordinary incoming call;
-          // the other side (unaffected) just waits for that accept's
-          // 'answer' to its still-standing offer.
+          // "Connecting…"/"Ringing…" forever on both ends with no way out
+          // but a manual hangup. Break the tie deterministically: the
+          // lexicographically smaller id yields, tearing down its own
+          // half-open attempt and accepting the other side's offer as an
+          // ordinary incoming call; the other side (unaffected) just waits
+          // for that accept's 'answer' to its still-standing offer.
           final myId = _myId ?? '';
           if (myId.compareTo(senderId) < 0) {
             await _localStream?.dispose();
@@ -179,7 +177,6 @@ class CallController extends ChangeNotifier {
             _queuedCandidates.clear();
             _remoteReady = false;
             _pendingOffer = (data as Map).cast<String, dynamic>();
-            video = true;
             status = CallStatus.incoming;
             notifyListeners();
           }
@@ -214,9 +211,8 @@ class CallController extends ChangeNotifier {
     _pc = null;
     _queuedCandidates.clear();
     _remoteReady = false;
-    remoteRenderer.srcObject = null;
-    localRenderer.srcObject = null;
     _pendingOffer = null;
+    connectedAt = null;
     status = CallStatus.ended;
     notifyListeners();
   }
@@ -225,8 +221,6 @@ class CallController extends ChangeNotifier {
     await _sub?.cancel();
     await _localStream?.dispose();
     await _pc?.close();
-    await localRenderer.dispose();
-    await remoteRenderer.dispose();
     super.dispose();
   }
 }
