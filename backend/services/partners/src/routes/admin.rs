@@ -283,21 +283,19 @@ async fn update(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdatePartner>,
 ) -> AppResult<Json<Partner>> {
-    if let Some(s) = &body.status {
-        if !matches!(
+    if let Some(s) = &body.status
+        && !matches!(
             s.as_str(),
             "pending" | "active" | "suspended" | "terminated"
         ) {
             return Err(AppError::BadRequest("invalid status".into()));
         }
-    }
-    if let Some(t) = &body.partner_type {
-        if !matches!(t.as_str(), "fleet" | "corporate" | "agent") {
+    if let Some(t) = &body.partner_type
+        && !matches!(t.as_str(), "fleet" | "corporate" | "agent") {
             return Err(AppError::BadRequest(
                 "partner_type must be 'fleet', 'corporate', or 'agent'".into(),
             ));
         }
-    }
     if body.name.as_deref().is_some_and(|s| s.trim().is_empty()) {
         return Err(AppError::BadRequest("name can't be blank".into()));
     }

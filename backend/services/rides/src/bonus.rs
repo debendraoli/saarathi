@@ -29,11 +29,10 @@ fn compute_bonus(kind: &str, value: Decimal, cap: Option<Decimal>, gross: Decima
         "percent" => (gross * value / dec!(100)).round_dp(2),
         _ => value,
     };
-    if let Some(c) = cap {
-        if bonus > c {
+    if let Some(c) = cap
+        && bonus > c {
             bonus = c;
         }
-    }
     bonus
 }
 
@@ -165,10 +164,9 @@ pub async fn grant_driver_bonus(
         .await?;
 
     // Partner-funded: the fleet pays for the bonus out of its wallet.
-    if c.funded_by == "partner" {
-        if let Some(pid) = c.partner_id {
+    if c.funded_by == "partner"
+        && let Some(pid) = c.partner_id {
             crate::partner_ledger::append(tx, pid, Some(trip_id), "promo_spend", -bonus).await?;
         }
-    }
     Ok(bonus)
 }

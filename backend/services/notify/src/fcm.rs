@@ -88,11 +88,10 @@ impl FcmSender {
         let now = chrono::Utc::now().timestamp();
         {
             let guard = self.token.lock().await;
-            if let Some((tok, exp)) = guard.as_ref() {
-                if *exp - 60 > now {
+            if let Some((tok, exp)) = guard.as_ref()
+                && *exp - 60 > now {
                     return Ok(tok.clone());
                 }
-            }
         }
         let claims = AuthClaims {
             iss: &self.sa.client_email,

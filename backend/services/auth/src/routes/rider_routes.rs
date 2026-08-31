@@ -237,20 +237,18 @@ async fn update_preferences(
     AuthUser(claims): AuthUser,
     Json(body): Json<UpdatePreferences>,
 ) -> AppResult<Json<Preferences>> {
-    if let Some(m) = &body.default_payment_method {
-        if m != "cash" && m != "wallet" {
+    if let Some(m) = &body.default_payment_method
+        && m != "cash" && m != "wallet" {
             return Err(crate::error::AppError::BadRequest(
                 "payment method must be 'cash' or 'wallet'".into(),
             ));
         }
-    }
-    if let Some(t) = &body.theme {
-        if !matches!(t.as_str(), "system" | "light" | "dark") {
+    if let Some(t) = &body.theme
+        && !matches!(t.as_str(), "system" | "light" | "dark") {
             return Err(crate::error::AppError::BadRequest(
                 "theme must be system|light|dark".into(),
             ));
         }
-    }
     let prefs: Preferences = sqlx::query_as(
         "INSERT INTO user_preferences (user_id, default_payment_method, theme, updated_at) \
          VALUES ($1, COALESCE($2, 'cash'), COALESCE($3, 'system'), now()) \

@@ -1390,11 +1390,10 @@ fn savings_for_offer(
         "free_delivery" => delivery_fee,
         "percent" => {
             let mut d = (subtotal * value.unwrap_or_default() / Decimal::from(100)).round_dp(2);
-            if let Some(cap) = max_discount {
-                if d > cap {
+            if let Some(cap) = max_discount
+                && d > cap {
                     d = cap;
                 }
-            }
             d
         }
         _ => value.unwrap_or_default(),
@@ -1979,23 +1978,20 @@ async fn update_merchant(
     if !claims.can_approve() {
         return Err(AppError::Forbidden);
     }
-    if let Some(name) = &body.name {
-        if name.trim().is_empty() {
+    if let Some(name) = &body.name
+        && name.trim().is_empty() {
             return Err(AppError::BadRequest("name cannot be empty".into()));
         }
-    }
-    if let Some(address) = &body.address {
-        if address.trim().is_empty() {
+    if let Some(address) = &body.address
+        && address.trim().is_empty() {
             return Err(AppError::BadRequest("address cannot be empty".into()));
         }
-    }
-    if let Some(vertical) = &body.vertical {
-        if !matches!(vertical.as_str(), "food" | "grocery") {
+    if let Some(vertical) = &body.vertical
+        && !matches!(vertical.as_str(), "food" | "grocery") {
             return Err(AppError::BadRequest(
                 "vertical must be 'food' or 'grocery'".into(),
             ));
         }
-    }
 
     let name = body.name.as_deref().map(str::trim);
     let updated: Option<(Uuid,)> = sqlx::query_as(

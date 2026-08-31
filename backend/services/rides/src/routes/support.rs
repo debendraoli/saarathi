@@ -203,7 +203,7 @@ async fn list_threads(
     .fetch_all(&st.db)
     .await?;
     let mut sorted = rows;
-    sorted.sort_by(|a, b| b.last_at.cmp(&a.last_at));
+    sorted.sort_by_key(|r| std::cmp::Reverse(r.last_at));
     Ok(Json(sorted))
 }
 

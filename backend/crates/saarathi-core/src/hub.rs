@@ -30,12 +30,14 @@ fn subject(room: &str, id: Uuid) -> String {
     format!("saarathi.rt.{room}.{id}")
 }
 
+type RoomMap = HashMap<(String, Uuid), broadcast::Sender<String>>;
+
 #[derive(Clone)]
 pub struct Hub {
     /// Present in production; drives cross-node/cross-service fan-out.
     nats: Option<async_nats::Client>,
     /// In-process fallback, used only when NATS is absent.
-    rooms: Arc<Mutex<HashMap<(String, Uuid), broadcast::Sender<String>>>>,
+    rooms: Arc<Mutex<RoomMap>>,
 }
 
 impl Hub {

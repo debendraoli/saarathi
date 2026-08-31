@@ -127,9 +127,7 @@ async fn ride_index(
     };
     // Too few rides to say anything meaningful either way — one cancelled
     // trip out of two looks alarming as a raw rate but isn't a pattern yet.
-    let level = if total < 5 {
-        "green"
-    } else if rate <= 0.15 {
+    let level = if total < 5 || rate <= 0.15 {
         "green"
     } else if rate <= 0.35 {
         "yellow"
