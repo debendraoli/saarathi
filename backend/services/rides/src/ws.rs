@@ -90,12 +90,32 @@ async fn is_participant(
 async fn socket_loop(socket: WebSocket, st: AppState, uid: Uuid, trip: Uuid) {
     let (mut sink, mut stream) = socket.split();
     let mut rx = st.hub.subscribe("trip", trip).await;
+    // Per-user room a staff suspend/ban publishes to (see
+    // `user_status_sub::run`) so this socket force-closes immediately rather
+    // than waiting for the access token to expire or the next refresh.
+    let mut account_rx = st.hub.subscribe("account", uid).await;
 
-    // Forward broadcast messages to this client.
+    // Forward broadcast messages to this client; close outright on an
+    // account-status signal instead of forwarding it as a trip event.
     let send_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if sink.send(Message::Text(msg.into())).await.is_err() {
-                break;
+        loop {
+            tokio::select! {
+                msg = rx.recv() => {
+                    match msg {
+                        Some(msg) => {
+                            if sink.send(Message::Text(msg.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                msg = account_rx.recv() => {
+                    if msg.is_some() {
+                        let _ = sink.send(Message::Close(None)).await;
+                    }
+                    break;
+                }
             }
         }
     });

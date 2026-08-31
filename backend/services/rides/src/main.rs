@@ -8,7 +8,7 @@
 //! tests can reuse it.
 
 use saarathi_rides::config::Config;
-use saarathi_rides::{bootstrap, dispatch, routes};
+use saarathi_rides::{bootstrap, dispatch, routes, user_status_sub};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,6 +24,7 @@ async fn main() -> anyhow::Result<()> {
     let state = bootstrap(config).await?;
 
     tokio::spawn(dispatch::run_dispatcher(state.clone()));
+    tokio::spawn(user_status_sub::run(state.clone()));
 
     let app = routes::router(state);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));

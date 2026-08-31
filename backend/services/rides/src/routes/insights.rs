@@ -342,6 +342,8 @@ async fn rider_detail(
 
 async fn set_rider_status(
     st: &AppState,
+    actor: Uuid,
+    action: &str,
     id: Uuid,
     status: &str,
 ) -> AppResult<Json<serde_json::Value>> {
@@ -353,6 +355,8 @@ async fn set_rider_status(
     .fetch_optional(&st.db)
     .await?;
     updated.ok_or(AppError::NotFound)?;
+    audit_record(&st.db, actor, action, id, json!({ "status": status })).await?;
+    crate::notify::publish_status_changed(&st.nats, id, status).await;
     Ok(Json(json!({ "ok": true, "status": status })))
 }
 
@@ -360,18 +364,18 @@ async fn set_rider_status(
 /// in-progress trip; that's a separate concern (cancellation/SOS flows).
 async fn suspend_rider(
     State(st): State<AppState>,
-    _admin: AdminUser,
+    AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    set_rider_status(&st, id, "suspended").await
+    set_rider_status(&st, claims.sub, "rider.suspend", id, "suspended").await
 }
 
 async fn reactivate_rider(
     State(st): State<AppState>,
-    _admin: AdminUser,
+    AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    set_rider_status(&st, id, "active").await
+    set_rider_status(&st, claims.sub, "rider.reactivate", id, "active").await
 }
 
 /// Appends to the shared `audit_log` table — this service has no `audit`
@@ -408,11 +412,10 @@ async fn update_rider(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateRiderInput>,
 ) -> AppResult<Json<serde_json::Value>> {
-    if let Some(name) = &body.full_name {
-        if name.trim().is_empty() {
+    if let Some(name) = &body.full_name
+        && name.trim().is_empty() {
             return Err(AppError::BadRequest("full_name cannot be empty".into()));
         }
-    }
     let full_name = body.full_name.as_deref().map(str::trim);
 
     let updated: Option<(Uuid,)> = sqlx::query_as(

@@ -222,6 +222,22 @@ async fn deliver(
     // surfaces on its own from an open connection. The in-app inbox row
     // above is written unconditionally either way, so nothing is lost, just
     // the redundant push/SMS a reachable user doesn't need.
+    // A suspended/banned account can't log in (verify_otp/refresh both reject
+    // it), so a push or SMS would just be noise it can never see — skip both,
+    // but leave the inbox row above intact so it's there if the account is
+    // reactivated later.
+    let active = sqlx::query_scalar::<_, String>("SELECT status::text FROM users WHERE id = $1")
+        .bind(req.user_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .is_none_or(|status| status == saarathi_core::domain::user_status::ACTIVE);
+    if !active {
+        tracing::debug!(user_id = %req.user_id, "notify: skipping push/SMS for non-active account");
+        return Ok(());
+    }
+
     let online = if req.silent { false } else {
         match redis.as_mut() {
             Some(conn) => saarathi_core::presence::is_online(conn, req.user_id).await,
@@ -280,8 +296,8 @@ async fn deliver(
     // is fine. Silent signals never escalate to SMS — there's no user-
     // facing content to send, and a device-to-device signal that can't
     // reach the device isn't something to text about.
-    if should_escalate_to_sms(req.silent, &req.class, any_push_sent || online) {
-        if let Some(sender) = sms {
+    if should_escalate_to_sms(req.silent, &req.class, any_push_sent || online)
+        && let Some(sender) = sms {
             let phone: Option<String> =
                 sqlx::query_scalar("SELECT phone FROM users WHERE id = $1")
                     .bind(req.user_id)
@@ -298,7 +314,6 @@ async fn deliver(
                 }}
             }
         }
-    }
     Ok(())
 }
 

@@ -32,6 +32,21 @@ pub enum UserStatus {
     Banned,
 }
 
+impl UserStatus {
+    /// The wire value, matching `saarathi_core::domain::user_status`'s
+    /// constants — for publishing to other services rather than serializing
+    /// this enum's own JSON representation at the call site.
+    pub fn wire(self) -> &'static str {
+        use saarathi_core::domain::user_status as w;
+        match self {
+            UserStatus::Pending => w::PENDING,
+            UserStatus::Active => w::ACTIVE,
+            UserStatus::Suspended => w::SUSPENDED,
+            UserStatus::Banned => w::BANNED,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "kyc_status", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]

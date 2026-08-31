@@ -22,6 +22,7 @@ pub mod rules;
 pub mod settle;
 pub mod state;
 pub mod surge;
+pub mod user_status_sub;
 pub mod ws;
 
 use config::Config;

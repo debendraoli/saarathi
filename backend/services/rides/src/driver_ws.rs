@@ -48,16 +48,37 @@ pub async fn driver_ws_handler(
 async fn driver_socket_loop(socket: WebSocket, st: AppState, driver_id: uuid::Uuid) {
     let (mut sink, mut stream) = socket.split();
     let mut rx = st.hub.subscribe("driver", driver_id).await;
+    // Separate room from "driver" (which carries dispatch offers): a staff
+    // suspend/ban flips `users.status` and `user_status_sub::run` publishes
+    // here so this socket force-closes immediately rather than waiting for
+    // the access token to expire or the next refresh to reject it.
+    let mut account_rx = st.hub.subscribe("account", driver_id).await;
 
     let mut presence_conn = st.redis.clone();
     saarathi_core::presence::mark_online(&mut presence_conn, driver_id).await;
 
     // Forward every push (offers, and anything else later published to this
-    // driver's channel) straight to the client.
+    // driver's channel) straight to the client; close the socket outright on
+    // an account-status signal instead of forwarding it as a regular message.
     let send_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if sink.send(Message::Text(msg.into())).await.is_err() {
-                break;
+        loop {
+            tokio::select! {
+                msg = rx.recv() => {
+                    match msg {
+                        Some(msg) => {
+                            if sink.send(Message::Text(msg.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                msg = account_rx.recv() => {
+                    if msg.is_some() {
+                        let _ = sink.send(Message::Close(None)).await;
+                    }
+                    break;
+                }
             }
         }
     });

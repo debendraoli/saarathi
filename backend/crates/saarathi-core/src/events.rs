@@ -35,3 +35,18 @@ pub struct NotifyRequest {
     #[serde(default)]
     pub silent: bool,
 }
+
+/// NATS subject for account status changes (`auth` publishes, `rides`
+/// subscribes to force-close live sockets for a newly suspended/banned
+/// user — see [`crate::domain::user_status`] for the wire values).
+pub const USER_STATUS_CHANGED_SUBJECT: &str = "saarathi.user.status_changed.v1";
+
+/// Fired whenever a staff action flips `users.status` (suspend, reactivate,
+/// ban). Not fired for the routine `pending` → `active` transition at
+/// signup — only staff-initiated changes to an existing account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserStatusChanged {
+    pub user_id: Uuid,
+    /// One of [`crate::domain::user_status`]'s constants.
+    pub status: String,
+}

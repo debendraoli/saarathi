@@ -19,6 +19,14 @@ pub mod roles {
     pub const ANALYST: &str = "analyst";
 }
 
+/// Account lifecycle (`users.status`).
+pub mod user_status {
+    pub const PENDING: &str = "pending";
+    pub const ACTIVE: &str = "active";
+    pub const SUSPENDED: &str = "suspended";
+    pub const BANNED: &str = "banned";
+}
+
 /// Partner-scoped roles (`partner_members.role`).
 pub mod partner_roles {
     pub const OWNER: &str = "owner";

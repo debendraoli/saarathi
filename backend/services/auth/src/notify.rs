@@ -4,7 +4,9 @@
 //! persists it and runs the push ladder. Fire-and-forget: a bus blip never
 //! fails an approval.
 
-use saarathi_core::events::{NotifyRequest, NOTIFY_SUBJECT};
+use saarathi_core::events::{
+    NotifyRequest, UserStatusChanged, NOTIFY_SUBJECT, USER_STATUS_CHANGED_SUBJECT,
+};
 use uuid::Uuid;
 
 pub async fn send(
@@ -64,5 +66,29 @@ pub async fn send_silent(nats: &Option<async_nats::Client>, user_id: Uuid, data:
             }
         }
         Err(e) => tracing::warn!(error = %e, "failed to encode silent notification"),
+    }
+}
+
+/// Fire the machine-readable status-change event, separate from the
+/// user-facing `send()` push above — `rides` subscribes to this to force-close
+/// a suspended/banned user's live WebSockets, and `notify` reads current
+/// `users.status` itself before pushing, so this isn't about content, only
+/// about telling other services this account's status just changed.
+pub async fn publish_status_changed(nats: &Option<async_nats::Client>, user_id: Uuid, status: &str) {
+    let Some(client) = nats else {
+        tracing::debug!(%user_id, status, "status-changed event skipped (no NATS)");
+        return;
+    };
+    let evt = UserStatusChanged {
+        user_id,
+        status: status.to_string(),
+    };
+    match serde_json::to_vec(&evt) {
+        Ok(bytes) => {
+            if let Err(e) = client.publish(USER_STATUS_CHANGED_SUBJECT, bytes.into()).await {
+                tracing::warn!(error = %e, "failed to publish status-changed event");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "failed to encode status-changed event"),
     }
 }

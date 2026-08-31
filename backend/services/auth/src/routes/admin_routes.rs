@@ -338,6 +338,12 @@ async fn suspend_driver(
         None,
     )
     .await;
+    crate::notify::publish_status_changed(
+        &st.nats,
+        user_id,
+        saarathi_core::domain::user_status::SUSPENDED,
+    )
+    .await;
 
     Ok(Json(json!({ "ok": true, "status": "suspended" })))
 }
@@ -373,6 +379,12 @@ async fn reactivate_driver(
         "Account reactivated",
         "Your Saarathi account is active again — you can sign in and go online.",
         None,
+    )
+    .await;
+    crate::notify::publish_status_changed(
+        &st.nats,
+        user_id,
+        saarathi_core::domain::user_status::ACTIVE,
     )
     .await;
 
@@ -447,32 +459,27 @@ async fn update_driver(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateDriverInput>,
 ) -> AppResult<Json<Driver>> {
-    if let Some(name) = &body.full_name {
-        if name.trim().is_empty() {
+    if let Some(name) = &body.full_name
+        && name.trim().is_empty() {
             return Err(AppError::BadRequest("full_name cannot be empty".into()));
         }
-    }
-    if let Some(license) = &body.license_number {
-        if license.trim().is_empty() {
+    if let Some(license) = &body.license_number
+        && license.trim().is_empty() {
             return Err(AppError::BadRequest("license_number cannot be empty".into()));
         }
-    }
-    if let Some(address) = &body.address {
-        if address.trim().is_empty() {
+    if let Some(address) = &body.address
+        && address.trim().is_empty() {
             return Err(AppError::BadRequest("address cannot be empty".into()));
         }
-    }
     if let Some(v) = &body.vehicle {
-        if let Some(plate) = &v.plate_number {
-            if plate.trim().is_empty() {
+        if let Some(plate) = &v.plate_number
+            && plate.trim().is_empty() {
                 return Err(AppError::BadRequest("plate_number cannot be empty".into()));
             }
-        }
-        if let Some(model) = &v.model {
-            if model.trim().is_empty() {
+        if let Some(model) = &v.model
+            && model.trim().is_empty() {
                 return Err(AppError::BadRequest("model cannot be empty".into()));
             }
-        }
     }
     let full_name = body.full_name.as_deref().map(str::trim);
 
@@ -910,14 +917,13 @@ async fn update_staff(
             return Err(AppError::Forbidden);
         }
     }
-    if let Some(name) = &body.full_name {
-        if name.trim().is_empty() {
+    if let Some(name) = &body.full_name
+        && name.trim().is_empty() {
             return Err(AppError::bad(
                 ErrorCode::Validation,
                 "full_name cannot be empty",
             ));
         }
-    }
 
     let current: Option<(UserRole,)> = sqlx::query_as("SELECT role FROM users WHERE id = $1")
         .bind(id)
@@ -980,6 +986,7 @@ async fn set_staff_status(
     .await?;
 
     audit::record(&st.db, claims.sub, action, "user", id, json!({})).await?;
+    crate::notify::publish_status_changed(&st.nats, id, status.wire()).await;
     Ok(Json(staff))
 }
 
