@@ -15,6 +15,7 @@ class DriverOffer {
     this.expiresAt,
     this.pricingMode = 'instant',
     this.askFare,
+    this.maxCounter,
   });
 
   final String tripId;
@@ -30,6 +31,14 @@ class DriverOffer {
   /// instead — see `routes::bidding` server-side).
   final String pricingMode;
   final double? askFare;
+
+  /// The most this driver may counter-bid — the same legal-cap-clamped
+  /// ceiling `POST /v1/rides/{id}/bid` enforces server-side (see
+  /// `saarathi-rides::routes::dispatch::my_offers`). `null` outside bid
+  /// mode. UI must use this rather than re-deriving a ratio locally — a
+  /// client-side guess here previously let the counter-bid slider offer
+  /// values the server would always reject.
+  final double? maxCounter;
 
   bool get isBidding => pricingMode == 'bid';
 
@@ -50,6 +59,8 @@ class DriverOffer {
             : DateTime.tryParse(j['expires_at'] as String),
         pricingMode: (j['pricing_mode'] as String?) ?? 'instant',
         askFare: j['ask_fare'] == null ? null : asDouble(j['ask_fare']),
+        maxCounter:
+            j['max_counter'] == null ? null : asDouble(j['max_counter']),
       );
 }
 
@@ -110,8 +121,7 @@ class DriverKyc {
     final driver = j['driver'] as Map<String, dynamic>?;
     final docs =
         (j['documents'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
-    final types =
-        (driver?['service_types'] as List?)?.cast<String>().toSet();
+    final types = (driver?['service_types'] as List?)?.cast<String>().toSet();
     return DriverKyc(
       status: KycStatus.fromWire(driver?['kyc_status'] as String?),
       uploadedKinds: docs.map((d) => d['kind'] as String).toSet(),

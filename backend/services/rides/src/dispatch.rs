@@ -126,6 +126,23 @@ struct Candidate {
     lng: f64,
 }
 
+/// One driver's raw Redis presence row: `(lat, lng, last_seen_epoch, job_types)`.
+type PresenceRow = (Option<f64>, Option<f64>, Option<i64>, Option<String>);
+
+/// A trip row's dispatch-relevant columns, in `SELECT` order — see
+/// `dispatch_trip`'s query.
+type DispatchTripRow = (
+    String,
+    Option<Uuid>,
+    f64,
+    f64,
+    String,
+    String,
+    Option<f64>,
+    String,
+    Option<Uuid>,
+);
+
 /// Fetch + parse meta for every driver in the H3 disk around `(lat, lng)` who
 /// opted into `job_type`, lazily evicting anyone stale, without yet filtering
 /// by exact distance.
@@ -164,8 +181,7 @@ async fn candidates_in_disk(
             .arg("last_seen")
             .arg("job_types");
     }
-    let rows: Vec<(Option<f64>, Option<f64>, Option<i64>, Option<String>)> =
-        pipe.query_async(&mut r).await?;
+    let rows: Vec<PresenceRow> = pipe.query_async(&mut r).await?;
 
     let mut out = Vec::with_capacity(driver_ids.len());
     for (driver_id, (lat, lng, last_seen, job_types)) in driver_ids.into_iter().zip(rows) {
@@ -352,17 +368,7 @@ pub async fn dispatch_trip(
     trip_id: Uuid,
     ignore_declines: bool,
 ) -> anyhow::Result<Option<Uuid>> {
-    let trip: Option<(
-        String,
-        Option<Uuid>,
-        f64,
-        f64,
-        String,
-        String,
-        Option<f64>,
-        String,
-        Option<Uuid>,
-    )> = sqlx::query_as(
+    let trip: Option<DispatchTripRow> = sqlx::query_as(
         "SELECT status::text, driver_id, origin_lat, origin_lng, trip_type::text, pricing_mode, \
                 search_radius_km, vehicle_class, preferred_driver_id \
          FROM trips WHERE id = $1",
@@ -441,9 +447,9 @@ pub async fn dispatch_trip(
     // dispatch_trip call finds `tried_before == true` and proceeds straight
     // to the normal candidate search like any other driver would.
     let mut preferred_target: Option<Uuid> = None;
-    if !bid_mode {
-        if let Some(preferred) = preferred_driver_id {
-            if !already.contains(&preferred) {
+    if !bid_mode
+        && let Some(preferred) = preferred_driver_id
+            && !already.contains(&preferred) {
                 let tried_before: bool = sqlx::query_scalar(
                     "SELECT EXISTS(SELECT 1 FROM trip_offers WHERE trip_id = $1 AND driver_id = $2)",
                 )
@@ -455,8 +461,6 @@ pub async fn dispatch_trip(
                     preferred_target = Some(preferred);
                 }
             }
-        }
-    }
 
     let broadcast: bool;
     let targets: Vec<Uuid>;

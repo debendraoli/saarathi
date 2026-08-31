@@ -81,7 +81,7 @@ pub(crate) async fn do_place_bid(
         ));
     }
 
-    let trip = load_bid_trip(&st, id).await?;
+    let trip = load_bid_trip(st, id).await?;
     if trip.status != "requested" {
         return Err(AppError::bad(
             ErrorCode::TripUnavailable,
@@ -141,14 +141,16 @@ pub(crate) async fn do_place_bid(
     // finalizing immediately instead of also waiting on a second, redundant
     // "accept" tap from the rider on a bid that already matches what they
     // asked for. A `counter` still needs the rider to actually choose it.
-    if kind == "accept_ask" {
-        match finalize_bid(st, &trip, bid_id, claims.sub, body.amount).await {
-            Ok(_) => return Ok(json!({ "ok": true, "kind": kind, "accepted": true })),
-            // Losing the race (trip taken by another accept in the meantime)
-            // just leaves this as a plain live bid for the rider to see —
-            // not an error the driver placing the bid should hit.
-            Err(_) => {}
-        }
+    // Losing the race (trip taken by another accept in the meantime) just
+    // leaves this as a plain live bid for the rider to see — not an error
+    // the driver placing the bid should hit, so a failed finalize here
+    // falls through rather than propagating.
+    if kind == "accept_ask"
+        && finalize_bid(st, &trip, bid_id, claims.sub, body.amount)
+            .await
+            .is_ok()
+    {
+        return Ok(json!({ "ok": true, "kind": kind, "accepted": true }));
     }
 
     notify::send(
@@ -425,13 +427,14 @@ pub(crate) async fn do_change_ask(
     let floor = (trip.gross_fare * st.config.bargain_floor_ratio).round_dp(2);
     let ask = body.amount.max(floor).min(ceiling);
 
-    let updated: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+    let mut updated: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE trips SET ask_fare = $2, updated_at = now() WHERE id = $1 RETURNING {TRIP_COLS}"
     )))
     .bind(id)
     .bind(ask)
     .fetch_one(&st.db)
     .await?;
+    updated.ask_ceiling = Some(ceiling);
 
     st.hub.publish(
         "trip",

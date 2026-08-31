@@ -692,6 +692,18 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
   double _counterFloor(double? askFare) =>
       (askFare ?? 0) > 0 ? askFare! : 100.0;
 
+  // `offer.maxCounter` is the server's own legal-cap-clamped ceiling (see
+  // `saarathi-rides::routes::dispatch::my_offers`) — trusting it here is
+  // what keeps this slider from ever offering a value `POST .../bid` will
+  // then reject with "counter may not exceed NPR …". `* 2.0` is only a
+  // fallback for an older backend that hasn't started sending the field yet.
+  double _counterCeiling(DriverOffer offer) {
+    final floor = _counterFloor(offer.askFare);
+    final serverMax = offer.maxCounter;
+    if (serverMax != null && serverMax >= floor) return serverMax;
+    return floor * 2.0;
+  }
+
   bool get _expired {
     final expiresAt = widget.offer.expiresAt;
     return expiresAt != null && !expiresAt.isAfter(DateTime.now());
@@ -828,10 +840,7 @@ class _OfferCardState extends ConsumerState<_OfferCard> {
                 FareStepper(
                   amount: _counterAmount ?? _counterFloor(offer.askFare),
                   min: _counterFloor(offer.askFare),
-                  // Matches the backend's own BID_COUNTER_MAX_RATIO (still
-                  // clamped there to the legal per-km ceiling regardless of
-                  // this client-side max) — keep the two in sync.
-                  max: _counterFloor(offer.askFare) * 2.0,
+                  max: _counterCeiling(offer),
                   onChanged: (v) => setState(() => _counterAmount = v),
                 ),
                 const SizedBox(height: 10),

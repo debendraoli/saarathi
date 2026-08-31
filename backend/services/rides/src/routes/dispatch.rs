@@ -4,6 +4,7 @@ use crate::auth::{AuthUser, StaffUser};
 use crate::dispatch;
 use crate::error::{AppError, AppResult};
 use crate::models::{Trip, TRIP_COLS};
+use crate::pricing;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::{
@@ -148,8 +149,8 @@ async fn go_offline(
     Ok(Json(json!({ "online": false })))
 }
 
-#[derive(Serialize, sqlx::FromRow)]
-struct OfferView {
+#[derive(sqlx::FromRow)]
+struct OfferRow {
     trip_id: Uuid,
     expires_at: DateTime<Utc>,
     origin_lat: f64,
@@ -166,11 +167,33 @@ struct OfferView {
     ask_fare: Option<rust_decimal::Decimal>,
 }
 
+#[derive(Serialize)]
+struct OfferView {
+    trip_id: Uuid,
+    expires_at: DateTime<Utc>,
+    origin_lat: f64,
+    origin_lng: f64,
+    dest_lat: f64,
+    dest_lng: f64,
+    gross_fare: rust_decimal::Decimal,
+    final_fare: rust_decimal::Decimal,
+    vehicle_class: String,
+    distance_km: rust_decimal::Decimal,
+    pricing_mode: String,
+    ask_fare: Option<rust_decimal::Decimal>,
+    /// The most a driver may counter-bid, bid mode only — the exact ceiling
+    /// `do_place_bid` (`routes::bidding`) enforces server-side, computed the
+    /// same way here so the client never has to re-derive (and risk
+    /// drifting from) `bid_counter_max_ratio` or the legal per-km cap
+    /// itself. `None` for an instant-pricing trip (no bidding to do).
+    max_counter: Option<rust_decimal::Decimal>,
+}
+
 async fn my_offers(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> AppResult<Json<Vec<OfferView>>> {
-    let offers: Vec<OfferView> = sqlx::query_as(
+    let rows: Vec<OfferRow> = sqlx::query_as(
         "SELECT o.trip_id, o.expires_at, t.origin_lat, t.origin_lng, t.dest_lat, t.dest_lng, \
                 t.gross_fare, t.final_fare, t.vehicle_class, t.distance_km, \
                 t.pricing_mode, t.ask_fare \
@@ -181,6 +204,31 @@ async fn my_offers(
     .bind(claims.sub)
     .fetch_all(&st.db)
     .await?;
+    let offers = rows
+        .into_iter()
+        .map(|r| {
+            let max_counter = r.ask_fare.and_then(|ask| {
+                let vclass = pricing::parse_vehicle_class(&r.vehicle_class).ok()?;
+                let ceiling = saarathi_core::pricing::legal_ceiling(vclass, r.distance_km);
+                Some((ask * st.config.bid_counter_max_ratio).min(ceiling))
+            });
+            OfferView {
+                trip_id: r.trip_id,
+                expires_at: r.expires_at,
+                origin_lat: r.origin_lat,
+                origin_lng: r.origin_lng,
+                dest_lat: r.dest_lat,
+                dest_lng: r.dest_lng,
+                gross_fare: r.gross_fare,
+                final_fare: r.final_fare,
+                vehicle_class: r.vehicle_class,
+                distance_km: r.distance_km,
+                pricing_mode: r.pricing_mode,
+                ask_fare: r.ask_fare,
+                max_counter,
+            }
+        })
+        .collect();
     Ok(Json(offers))
 }
 

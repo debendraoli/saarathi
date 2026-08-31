@@ -44,6 +44,14 @@ pub struct Trip {
     pub pricing_mode: String,
     /// The rider's current asking price, bid mode only.
     pub ask_fare: Option<Decimal>,
+    /// The most the rider may raise `ask_fare` to — the same legal-cap
+    /// ceiling `do_change_ask` clamps against server-side (see
+    /// `routes::bidding`), so the client's ask-raising slider doesn't have
+    /// to (mis)re-derive it. Not a DB column: only the endpoints that
+    /// actually compute it (`get_trip`, `do_change_ask`) set it; every
+    /// other `Trip` query leaves this `None` via `#[sqlx(default)]`.
+    #[sqlx(default)]
+    pub ask_ceiling: Option<Decimal>,
     /// Per-trip override for dispatch's starting search radius (km), set on
     /// a "search wider" re-request. Null = use the service default.
     pub search_radius_km: Option<f64>,

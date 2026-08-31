@@ -9,7 +9,8 @@ import '../../../../shared/widgets/fare_stepper.dart';
 import '../../application/ride_controller.dart';
 import '../../data/ride_repository.dart';
 import '../../domain/models.dart';
-import '../trip_screen.dart' show showCancelReasonSheet, RouteSummary, EtaFareRow;
+import '../trip_screen.dart'
+    show showCancelReasonSheet, RouteSummary, EtaFareRow;
 import 'bid_card.dart';
 
 /// Replaces the plain "searching" status sheet while a bid-mode trip is
@@ -99,9 +100,9 @@ class _BiddingSheetState extends ConsumerState<BiddingSheet> {
     }
   }
 
-  Future<void> _cancel() => showCancelReasonSheet(
-      context, ref, widget.trip.id, false,
-      searching: true);
+  Future<void> _cancel() =>
+      showCancelReasonSheet(context, ref, widget.trip.id, false,
+          searching: true);
 
   @override
   Widget build(BuildContext context) {
@@ -114,8 +115,13 @@ class _BiddingSheetState extends ConsumerState<BiddingSheet> {
     // work with.
     final rawAsk = widget.trip.askFare ?? 0;
     final ask = rawAsk > 0 ? rawAsk : 100.0;
-    final bids =
-        ref.watch(tripBidsProvider(widget.trip.id)).value ?? const [];
+    // The server's own legal-cap ceiling (see `Trip.askCeiling`) — falls
+    // back to the old `* 3` guess only if it's missing (an older backend,
+    // or a `Trip` from an endpoint that doesn't compute it) or degenerate.
+    final askCeiling = widget.trip.askCeiling;
+    final maxAsk =
+        (askCeiling != null && askCeiling > ask) ? askCeiling : ask * 3;
+    final bids = ref.watch(tripBidsProvider(widget.trip.id)).value ?? const [];
     final originLabelAsync = ref.watch(tripOriginLabelProvider(widget.trip.id));
     final destLabelAsync = ref.watch(tripDestLabelProvider(widget.trip.id));
     // Any live bid quiets the nudge — it's only for a genuinely dead auction.
@@ -167,7 +173,7 @@ class _BiddingSheetState extends ConsumerState<BiddingSheet> {
               FareStepper(
                 amount: ask,
                 min: ask,
-                max: ask * 3,
+                max: maxAsk,
                 // Every tap raises the ask immediately — no separate
                 // "update" step. Drivers already invited get re-notified
                 // on the next dispatch pass within seconds.
