@@ -47,7 +47,6 @@ import '../../features/places/presentation/saved_places_screen.dart';
 import '../../features/wallet/presentation/wallet_screen.dart';
 import '../../features/ride/presentation/driver_earnings_screen.dart';
 import '../../features/ride/presentation/rider_stats_screen.dart';
-import '../../features/ride/presentation/navigation_screen.dart';
 import '../../features/ride/presentation/trip_details_screen.dart';
 import '../../features/ride/presentation/trip_screen.dart';
 import '../../features/ride/presentation/where_to_screen.dart';
@@ -65,7 +64,6 @@ class Routes {
   static const whereTo = '/ride/where-to';
   static const trip = '/ride/trip'; // /ride/trip/:id
   static const tripDetails = '/ride/trip-details'; // /ride/trip-details/:id
-  static const tripNavigate = '/ride/trip'; // /ride/trip/:id/navigate
   static const becomeDriver = '/driver/register';
   static const kyc = '/driver/kyc';
   static const chat = '/ride/chat';
@@ -255,36 +253,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           TripDetailsScreen(tripId: state.pathParameters['id']!),
           key: state.pageKey,
         ),
-      ),
-      GoRoute(
-        // A proper go_router route (not a raw `Navigator.push`/
-        // `MaterialPageRoute`) deliberately — mixing an imperative push onto
-        // go_router's own Navigator with its declarative page-list
-        // reconciliation is exactly what produced a live, reproducible
-        // `_dependents.isEmpty` framework crash on the way back out of this
-        // screen (go_router losing track of an untracked route it didn't
-        // put there itself). Routed the normal way, it's just another page.
-        path: '${Routes.tripNavigate}/:id/navigate',
-        pageBuilder: (_, state) {
-          final args = state.extra as NavigationScreenArgs;
-          // No fade/slide transition here (unlike `_page`) — this route's
-          // fullscreen map means many more simultaneously-compositing tile
-          // layers than any other screen, and layering that under a
-          // FadeTransition/SlideTransition (Impeller's Vulkan backend, per
-          // the "Using the Impeller rendering backend" log line) is exactly
-          // when flutter_map was reproduced leaving most of its viewport
-          // unpainted — only ever the small region it managed to render
-          // before/during the transition. A plain cut avoids the
-          // transition-time compositing entirely.
-          return NoTransitionPage(
-            key: state.pageKey,
-            child: NavigationScreen(
-              tripId: state.pathParameters['id']!,
-              target: args.target,
-              vehicleClass: args.vehicleClass,
-            ),
-          );
-        },
       ),
       GoRoute(
         path: Routes.becomeDriver,

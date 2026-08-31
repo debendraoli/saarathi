@@ -23,14 +23,14 @@ dependencies:
   flutter_secure_storage: ^11.0.0
   web_socket_channel: ^3.0.1
 
-  # Maps (self-hosted OSM/Valhalla tiles) + location
-  flutter_map: ^8.3.1
+  # Maps (self-hosted Martin vector tiles) + location. Native MapLibre GL
+  # wrapper (Android/iOS/web) — see MapView's own doc comment.
+  maplibre_gl: ^0.27.0
   http: ^1.6.0
   latlong2: ^0.10.1
   geolocator: ^14.0.3
   location: ^10.0.2
   flutter_compass: ^0.8.1
-  flutter_tts: ^4.2.3
 
   # Platform integration
   app_links: ^7.2.1
@@ -87,6 +87,9 @@ flutter:
   generate: true
   assets:
     - assets/images/
+    - assets/dev/
+    - assets/map_icons/
+    - assets/map_style/
 
 # Regenerate after changing the source image: dart run flutter_launcher_icons
 flutter_launcher_icons:

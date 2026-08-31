@@ -264,10 +264,12 @@
   "callInAppBody": "निःशुल्क — तपाईंको फोन नम्बर गोप्य रहन्छ",
   "callDirect": "सिधै कल गर्नुहोस्",
   "callDirectBody": "तपाईंको फोनको आफ्नै डायलर प्रयोग गर्छ",
-  "callStatusCalling": "कल गर्दै…",
+  "callStatusConnecting": "जडान गर्दै…",
+  "callStatusRinging": "घण्टी बज्दै…",
   "callStatusIncoming": "आगमन कल",
   "callStatusConnected": "जोडियो",
   "callStatusEnded": "कल समाप्त भयो",
+  "callEncryptedBadge": "🔒 एन्ड-टु-एन्ड इन्क्रिप्टेड अडियो",
   "chatTitle": "च्याट",
   "chatSayHello": "नमस्ते भन्नुहोस् 👋",
   "chatMessageHint": "सन्देश…",
@@ -615,8 +617,5 @@
   "supportAboutTrip": "यात्रा",
   "supportContextUnavailable": "सन्दर्भ अब उपलब्ध छैन",
   "getHelp": "सहयोग लिनुहोस्",
-  "supportSend": "पठाउनुहोस्",
-  "navFullscreen": "पूर्ण स्क्रिन नेभिगेसन",
-  "navExit": "नेभिगेसनबाट बाहिरिनुहोस्",
-  "navMinutesLeft": "{min} मिनेट"
+  "supportSend": "पठाउनुहोस्"
 }

@@ -23,10 +23,18 @@ Future<RatingResult?> showRatingSheet(
   BuildContext context, {
   required RatingContext ratingContext,
   TripSummary? summary,
+  // The trip-completion flow shows this sheet right before navigating the
+  // calling screen away — pushing on the root navigator (rather than
+  // whatever nested one `context` happens to sit in) is what lets it stay
+  // up as an independent overlay on top of the page that ends up
+  // underneath, instead of being torn down along with the screen it was
+  // opened from.
+  bool useRootNavigator = false,
 }) {
   return showModalBottomSheet<RatingResult>(
     context: context,
     isScrollControlled: true,
+    useRootNavigator: useRootNavigator,
     builder: (_) =>
         _RatingSheet(ratingContext: ratingContext, summary: summary),
   );

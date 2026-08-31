@@ -275,10 +275,12 @@
   "callInAppBody": "Free — your number stays private",
   "callDirect": "Call directly",
   "callDirectBody": "Uses your phone's own dialer",
-  "callStatusCalling": "Calling…",
+  "callStatusConnecting": "Connecting…",
+  "callStatusRinging": "Ringing…",
   "callStatusIncoming": "Incoming call",
   "callStatusConnected": "Connected",
   "callStatusEnded": "Call ended",
+  "callEncryptedBadge": "🔒 End-to-End Encrypted Audio",
   "chatTitle": "Chat",
   "chatSayHello": "Say hello 👋",
   "chatMessageHint": "Message…",
@@ -640,9 +642,5 @@
   "supportAboutTrip": "Ride",
   "supportContextUnavailable": "Reference no longer available",
   "getHelp": "Get help",
-  "supportSend": "Send",
-  "navFullscreen": "Fullscreen navigation",
-  "navExit": "Exit navigation",
-  "navMinutesLeft": "{min} min",
-  "@navMinutesLeft": { "placeholders": { "min": {} } }
+  "supportSend": "Send"
 }

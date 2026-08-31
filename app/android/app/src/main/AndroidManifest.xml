@@ -99,11 +99,5 @@
             <action android:name="android.intent.action.DIAL"/>
             <data android:scheme="tel"/>
         </intent>
-        <!-- Required on Android 11+ for flutter_tts to find the system's
-             text-to-speech engine (turn-by-turn voice announcements) —
-             without this, package visibility rules hide it entirely. -->
-        <intent>
-            <action android:name="android.intent.action.TTS_SERVICE"/>
-        </intent>
     </queries>
 </manifest>

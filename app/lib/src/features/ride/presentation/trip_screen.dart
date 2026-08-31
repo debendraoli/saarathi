@@ -27,7 +27,6 @@ import '../application/trip_ws.dart';
 import '../data/ride_repository.dart';
 import '../domain/models.dart';
 import '../domain/rating_tags.dart';
-import 'navigation_screen.dart';
 import 'widgets/bidding_sheet.dart';
 import 'widgets/map_view.dart';
 import 'widgets/rating_sheet.dart';
@@ -80,6 +79,28 @@ class _TripScreenState extends ConsumerState<TripScreen> {
   // pings instead.
   static const _routeRequeryMeters = 25.0;
   LatLng? _routeQueryPoint;
+
+  // Shared with `_StatusSheet`'s `DraggableScrollableSheet` so a double-tap
+  // on the map can snap it between its collapsed ("fullscreen" map) and
+  // expanded ("card") extents, same two stops the sheet's own drag/snap
+  // already has (`snapSizes` in `_StatusSheet.build`) — this is just a
+  // shortcut onto the same two states, not a third one.
+  final _sheetController = DraggableScrollableController();
+
+  void _toggleSheetFullscreen() {
+    final size = _sheetController.isAttached ? _sheetController.size : 0.32;
+    _sheetController.animateTo(
+      size > 0.5 ? 0.32 : 0.85,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  void dispose() {
+    _sheetController.dispose();
+    super.dispose();
+  }
 
   LatLng _throttledRoutePoint(LatLng liveLoc) {
     final last = _routeQueryPoint;
@@ -135,6 +156,47 @@ class _TripScreenState extends ConsumerState<TripScreen> {
           SnackBar(content: Text(l.driverCancelledNotice)),
         );
         context.go(Routes.whereTo);
+      });
+    });
+
+    // A trip reaching `completed` previously trapped the rider/driver on
+    // this screen — the only way off it was through the "Rate trip" button,
+    // so skipping/ignoring rating meant staying stuck here. Now the screen
+    // exits (back to wherever it's popped/goes to) the instant the trip
+    // completes, and the rating sheet is shown independently on top of
+    // whatever's underneath rather than gating that exit.
+    ref.listen(effectiveTripProvider(tripId), (prev, next) {
+      final trip = next.value;
+      final prevTrip = prev?.value;
+      if (trip == null || prevTrip == null) return;
+      final justCompleted = trip.status == TripStatus.completed &&
+          prevTrip.status != TripStatus.completed;
+      if (!justCompleted) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final myId = ref.read(authControllerProvider).user?.id;
+        final iAmDriver = myId != null && myId == trip.driverId;
+        // Pushed before navigating below (on the root navigator, so it
+        // stays up regardless of which page ends up underneath it) — its
+        // result is awaited and posted independently, not blocking the
+        // navigation that follows.
+        _autoRate(
+          context,
+          ref,
+          trip,
+          _ratingContextFor(trip, iAmDriver),
+          TripSummary(
+            pickupLabel: ref.read(tripOriginLabelProvider(tripId)).value,
+            destLabel: ref.read(tripDestLabelProvider(tripId)).value,
+            fare: trip.finalFare,
+          ),
+        );
+        ref.invalidate(myTripsProvider);
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go(Routes.home);
+        }
       });
     });
 
@@ -208,7 +270,7 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                         ),
                       ))
                       .value;
-                  if (freshRoute != null) _lastRouteGeometry = freshRoute;
+                  if (freshRoute != null) _lastRouteGeometry = freshRoute.points;
                   final routeGeometry =
                       _lastRouteGeometry ?? [trip.origin, trip.dest];
                   // Same ETA `EtaFareRow` already shows as sheet text —
@@ -291,63 +353,77 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                   ];
                   return Stack(
                     children: [
-                      searching
-                          ? SearchRadar(
-                              origin: trip.origin,
-                              builder: (context, driverPins, circles) =>
-                                  MapView(
-                                center: trip.origin,
+                      // Double-tap the map to snap the status sheet between
+                      // its collapsed ("fullscreen" map) and expanded
+                      // ("card") extents — the map itself never resizes,
+                      // it's always full-bleed underneath; what toggles is
+                      // how much of it the sheet covers. `translucent` so
+                      // this doesn't steal single-tap gestures the map or
+                      // its pins/buttons need (only double-tap is claimed
+                      // here).
+                      GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onDoubleTap: _toggleSheetFullscreen,
+                        child: searching
+                            ? SearchRadar(
+                                origin: trip.origin,
+                                builder: (context, driverPins, circles) =>
+                                    MapView(
+                                  center: trip.origin,
+                                  route: routeGeometry,
+                                  circles: circles,
+                                  showLocateButton: true,
+                                  enableDoubleTapZoom: false,
+                                  locateButtonBottomOffset:
+                                      MediaQuery.of(context).size.height *
+                                          _sheetClearance,
+                                  pins: [
+                                    ...fixedPins,
+                                    for (final p in driverPins)
+                                      MapPin(
+                                        p,
+                                        Icons.two_wheeler_rounded,
+                                        Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                      ),
+                                  ],
+                                ),
+                              )
+                            : MapView(
+                                center: driverLoc ?? trip.origin,
                                 route: routeGeometry,
-                                circles: circles,
-                                showLocateButton: true,
+                                pins: fixedPins,
+                                callouts: mapCallouts,
+                                showRecenterButton: true,
+                                enableDoubleTapZoom: false,
                                 locateButtonBottomOffset:
                                     MediaQuery.of(context).size.height *
                                         _sheetClearance,
-                                pins: [
-                                  ...fixedPins,
-                                  for (final p in driverPins)
-                                    MapPin(
-                                      p,
-                                      Icons.two_wheeler_rounded,
-                                      Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                    ),
-                                ],
+                                // Deliberately not `navigationTarget` — that
+                                // drives its camera glide off every heading
+                                // update, and the device compass fires many
+                                // times a second even stationary. On this
+                                // small in-trip map that churn was reliably
+                                // producing a `_dependents.isEmpty` framework
+                                // crash and a momentarily-flipped marker
+                                // (confirmed live, reproduced while
+                                // rotating/testing the phone) — a >3° throttle
+                                // on the animation restart wasn't enough to
+                                // fully rule it out. `autoFitPins` instead:
+                                // its own change-detection only looks at pin
+                                // *positions*, never heading, so compass noise
+                                // can't trigger it at all — it only re-fits
+                                // when the driver's point actually moves
+                                // (~5s GPS ping cadence). The vehicle pin
+                                // still turns in place via its own `heading`;
+                                // only the *camera* auto-follow moved to the
+                                // fullscreen NavigationScreen, the one place
+                                // that dedicated heading-up nav experience
+                                // actually belongs.
+                                autoFitPins: true,
                               ),
-                            )
-                          : MapView(
-                              center: driverLoc ?? trip.origin,
-                              route: routeGeometry,
-                              pins: fixedPins,
-                              callouts: mapCallouts,
-                              showRecenterButton: true,
-                              locateButtonBottomOffset:
-                                  MediaQuery.of(context).size.height *
-                                      _sheetClearance,
-                              // Deliberately not `navigationTarget` — that
-                              // drives its camera glide off every heading
-                              // update, and the device compass fires many
-                              // times a second even stationary. On this
-                              // small in-trip map that churn was reliably
-                              // producing a `_dependents.isEmpty` framework
-                              // crash and a momentarily-flipped marker
-                              // (confirmed live, reproduced while
-                              // rotating/testing the phone) — a >3° throttle
-                              // on the animation restart wasn't enough to
-                              // fully rule it out. `autoFitPins` instead:
-                              // its own change-detection only looks at pin
-                              // *positions*, never heading, so compass noise
-                              // can't trigger it at all — it only re-fits
-                              // when the driver's point actually moves
-                              // (~5s GPS ping cadence). The vehicle pin
-                              // still turns in place via its own `heading`;
-                              // only the *camera* auto-follow moved to the
-                              // fullscreen NavigationScreen, the one place
-                              // that dedicated heading-up nav experience
-                              // actually belongs.
-                              autoFitPins: true,
-                            ),
+                      ),
                       // Invisible: routes incoming calls to the call screen.
                       _CallWatcher(tripId: tripId),
                       // Invisible: feeds the rider's own "you are here"
@@ -442,36 +518,13 @@ class _TripScreenState extends ConsumerState<TripScreen> {
                       // its collapsed size can still cover this
                       // temporarily, same as any bottom sheet, but it's
                       // never stuck — drag the sheet back down to reveal it.
-                      // Offset well above the map's own recenter/locate
-                      // button (MapView's `locateButtonBottomOffset`, same
-                      // `_sheetClearance` baseline, same right edge) —
-                      // matching offsets meant the two stacked directly on
-                      // top of each other, confirmed live.
-                      if (iAmDriver && trip.isActive)
-                        Positioned(
-                          right: 12,
-                          bottom: MediaQuery.of(context).size.height *
-                                  _sheetClearance +
-                              76,
-                          child: SafeArea(
-                            top: false,
-                            child: MapCircleButton(
-                              icon: Icons.fullscreen_rounded,
-                              tooltip: l.navFullscreen,
-                              onTap: () => context.push(
-                                '${Routes.tripNavigate}/$tripId/navigate',
-                                extra: NavigationScreenArgs(
-                                  target: routeTarget,
-                                  vehicleClass:
-                                      trip.vehicleClass ?? 'two_wheeler',
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
                       trip.isBidding && trip.status == TripStatus.requested
                           ? BiddingSheet(trip: trip)
-                          : _StatusSheet(trip: trip, driverLoc: driverLoc),
+                          : _StatusSheet(
+                              trip: trip,
+                              driverLoc: driverLoc,
+                              sheetController: _sheetController,
+                            ),
                     ],
                   );
                 },
@@ -622,9 +675,11 @@ Future<void> showCancelReasonSheet(
 }
 
 class _StatusSheet extends ConsumerWidget {
-  const _StatusSheet({required this.trip, this.driverLoc});
+  const _StatusSheet(
+      {required this.trip, this.driverLoc, required this.sheetController});
   final Trip trip;
   final LatLng? driverLoc;
+  final DraggableScrollableController sheetController;
 
   /// Short status line only — the route (pickup/destination), live ETA, and
   /// fare each get their own dedicated row now instead of being crammed into
@@ -695,8 +750,8 @@ class _StatusSheet extends ConsumerWidget {
     // about to interact with (the merchant), not the eventual delivery
     // recipient. Once `inProgress` (order in hand, heading to `dest`), it's
     // the recipient that matters, same as it always has been.
-    final onPickupLeg =
-        trip.status == TripStatus.accepted || trip.status == TripStatus.arriving;
+    final onPickupLeg = trip.status == TripStatus.accepted ||
+        trip.status == TripStatus.arriving;
     final merchant = participants.value?.merchant;
     final TripPerson? counterpart = iAmDriver
         ? (trip.tripType == 'delivery' && onPickupLeg && merchant != null
@@ -706,6 +761,7 @@ class _StatusSheet extends ConsumerWidget {
     final driverDetail = !iAmDriver ? participants.value?.driver : null;
 
     return DraggableScrollableSheet(
+      controller: sheetController,
       initialChildSize: 0.32,
       minChildSize: 0.32,
       maxChildSize: 0.85,
@@ -874,23 +930,8 @@ class _StatusSheet extends ConsumerWidget {
 
   Future<void> _rate(BuildContext context, WidgetRef ref, Trip trip,
       bool iAmDriver, TripSummary summary) async {
-    final ratingContext = iAmDriver
-        ? RatingContext.driverRatesRider
-        : trip.tripType == 'delivery'
-            ? RatingContext.senderRatesCourier
-            : RatingContext.riderRatesDriver;
-    final result = await showRatingSheet(
-      context,
-      ratingContext: ratingContext,
-      summary: summary,
-    );
-    if (result == null) return;
-    try {
-      await ref
-          .read(rideRepositoryProvider)
-          .rate(trip.id, result.stars, tags: result.tags);
-    } catch (_) {/* non-blocking */}
-    ref.invalidate(myTripsProvider);
+    await _autoRate(
+        context, ref, trip, _ratingContextFor(trip, iAmDriver), summary);
     if (!context.mounted) return;
     if (context.canPop()) {
       context.pop();
@@ -898,6 +939,34 @@ class _StatusSheet extends ConsumerWidget {
       context.go(Routes.home);
     }
   }
+}
+
+RatingContext _ratingContextFor(Trip trip, bool iAmDriver) => iAmDriver
+    ? RatingContext.driverRatesRider
+    : trip.tripType == 'delivery'
+        ? RatingContext.senderRatesCourier
+        : RatingContext.riderRatesDriver;
+
+/// Shows the rating sheet and posts its result, independent of any
+/// navigation the caller does around it — see the `TripScreen` completion
+/// listener (shown before navigating away) and `_StatusSheet._rate` (the
+/// manual "Rate trip"/"Edit rating" button, for revisiting a trip from
+/// history) for the two call sites.
+Future<void> _autoRate(BuildContext context, WidgetRef ref, Trip trip,
+    RatingContext ratingContext, TripSummary summary) async {
+  final result = await showRatingSheet(
+    context,
+    useRootNavigator: true,
+    ratingContext: ratingContext,
+    summary: summary,
+  );
+  if (result == null) return;
+  try {
+    await ref
+        .read(rideRepositoryProvider)
+        .rate(trip.id, result.stars, tags: result.tags);
+  } catch (_) {/* non-blocking */}
+  ref.invalidate(myTripsProvider);
 }
 
 /// Pickup + destination addresses, always shown together — previously

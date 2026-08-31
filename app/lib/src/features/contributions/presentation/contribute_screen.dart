@@ -1,7 +1,6 @@
 import 'dart:io' show File;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
@@ -26,7 +25,7 @@ class ContributeScreen extends ConsumerStatefulWidget {
 }
 
 class _ContributeScreenState extends ConsumerState<ContributeScreen> {
-  final _mapController = MapController();
+  final _mapController = MapViewController();
   final _name = TextEditingController();
   final _description = TextEditingController();
   ContributionCategory _category = ContributionCategory.organisation;

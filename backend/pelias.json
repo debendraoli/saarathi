@@ -12,9 +12,6 @@
       "leveldbpath": "/data/openstreetmap/leveldb",
       "import": [
         { "filename": "nepal-latest.osm.pbf" }
-      ],
-      "download": [
-        { "sourceURL": "https://download.geofabrik.de/asia/nepal-latest.osm.pbf" }
       ]
     },
     "whosonfirst": {

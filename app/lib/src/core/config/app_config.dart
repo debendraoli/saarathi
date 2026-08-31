@@ -42,10 +42,16 @@ class AppConfig {
           {'urls': turnUrl, 'username': turnUser, 'credential': turnPass},
       ];
 
-  /// Default map tiles. Swap to your self-hosted OSM tile server in production
-  /// (e.g. https://tiles.saarathi.np/{z}/{x}/{y}.png) — Nepal/cost reasons.
-  static const String tileUrlTemplate =
-      String.fromEnvironment('SAARATHI_TILE_URL', defaultValue: '');
+  /// Self-hosted Martin vector-tile server base (no trailing slash), e.g.
+  /// http://tiles.saarathi.np:8092 — MapView (see its doc comment) builds the
+  /// full style from this at runtime: tiles at `$martinBaseUrl/nepal/{z}/{x}/{y}`,
+  /// glyphs at `$martinBaseUrl/font/{fontstack}/{range}`. Configure at build:
+  ///   --dart-define=SAARATHI_MARTIN_URL=http://localhost:8092
+  /// Empty falls back to MapLibre's public demo style/tiles — enough to
+  /// render *something* before a Martin deployment is configured, same
+  /// graceful-degradation spirit as the old raster tile URL had.
+  static const String martinBaseUrl =
+      String.fromEnvironment('SAARATHI_MARTIN_URL', defaultValue: '');
 
   /// Dang district centre (Ghorahi) — used before we have a GPS fix.
   static const double defaultLat = 28.033;

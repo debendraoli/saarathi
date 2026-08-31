@@ -379,6 +379,34 @@ services:
       retries: 5
       start_period: 20s
 
+  # Single source of the Nepal OSM extract: Valhalla, the Pelias importer, and
+  # the Planetiler tile build each used to independently download their own
+  # copy of the same file from Geofabrik — three redundant fetches of the
+  # same ~100MB+ extract, plus the risk of them landing on different
+  # snapshots if Geofabrik refreshes the file between two of those downloads.
+  # This fetches it once into a shared volume; the three consumers below read
+  # that local file instead of hitting Geofabrik themselves. Only actually
+  # downloads when the file isn't already there — safe to depend on from
+  # every profile="routing" one-off command (`docker compose run` starts a
+  # service's `depends_on` same as `up` does).
+  fetch-osm:
+    image: curlimages/curl:latest
+    profiles: ["routing"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ -f /data/nepal-latest.osm.pbf ]; then
+          echo "fetch-osm: /data/nepal-latest.osm.pbf already present, skipping download"
+        else
+          echo "fetch-osm: downloading nepal-latest.osm.pbf from Geofabrik"
+          curl -fsSL -o /data/nepal-latest.osm.pbf.tmp \
+            https://download.geofabrik.de/asia/nepal-latest.osm.pbf
+          mv /data/nepal-latest.osm.pbf.tmp /data/nepal-latest.osm.pbf
+        fi
+    volumes:
+      - ./.data/osm:/data
+
   # Self-hosted Valhalla routing (OSM-based). On first boot it downloads the
   # configured OSM extract and builds tiles into ./.data/valhalla (this takes a
   # while); subsequent boots reuse the tiles. Point the rides service at it with
@@ -417,7 +445,12 @@ services:
         limits:
           memory: 2G
     environment:
-      # Nepal (Lumbini) OSM extract — swap for a wider region as coverage grows.
+      # Nepal (Lumbini) OSM extract. `fetch-osm` (above) puts the shared copy
+      # straight into `custom_files` (mounted below) — Valhalla builds from
+      # that directly without hitting Geofabrik itself. This URL only fires
+      # as a fallback (e.g. running `valhalla` standalone without
+      # `fetch-osm` having run first, or `.data/osm` cleared but
+      # `.data/valhalla` not) — swap for a wider region as coverage grows.
       tile_urls: "https://download.geofabrik.de/asia/nepal-latest.osm.pbf"
       # Build + serve concurrency. Raise on a bigger host for more parallel trips.
       server_threads: "4"
@@ -438,6 +471,10 @@ services:
       traffic_name: "traffic.tar"
     volumes:
       - ./.data/valhalla:/custom_files
+      - ./.data/osm/nepal-latest.osm.pbf:/custom_files/nepal-latest.osm.pbf:ro
+    depends_on:
+      fetch-osm:
+        condition: service_completed_successfully
     healthcheck:
       # wget isn't in this image; curl is.
       test: ["CMD", "curl", "-fsS", "http://localhost:8002/status"]
@@ -452,10 +489,11 @@ services:
   # nothing here ever actually built the "self-hosted tile server" the
   # client's SAARATHI_TILE_URL config comment already assumed existed.
   #
-  # One-off build step (same Geofabrik extract Valhalla/Pelias already use):
-  # renders it into a single vector tileset with Planetiler — minutes, not
-  # the hours a classic osm2pgsql+mod_tile raster pipeline would take, and a
-  # few hundred MB instead of that pipeline's 10-20GB PostGIS import.
+  # One-off build step: renders the shared OSM extract (`fetch-osm`, same
+  # file Valhalla/Pelias use) into a single vector tileset with Planetiler —
+  # minutes, not the hours a classic osm2pgsql+mod_tile raster pipeline would
+  # take, and a few hundred MB instead of that pipeline's 10-20GB PostGIS
+  # import.
   #   docker compose --profile routing run --rm tiles-build
   # Re-run whenever the extract should be refreshed; skipped automatically
   # on a normal `up` since it's a one-shot job, not a daemon.
@@ -463,11 +501,14 @@ services:
     image: ghcr.io/onthegomap/planetiler:latest
     profiles: ["routing"]
     command:
-      - --download
-      - --area=nepal
-      - --output=/data/nepal.mbtiles
+      - --osm-path=/data/osm/nepal-latest.osm.pbf
+      - --output=/data/tiles/nepal.mbtiles
     volumes:
-      - ./.data/tiles:/data
+      - ./.data/osm:/data/osm:ro
+      - ./.data/tiles:/data/tiles
+    depends_on:
+      fetch-osm:
+        condition: service_completed_successfully
 
   # Serves the tileset tiles-build produces, rasterizing vector → PNG on
   # request with its own on-disk render cache — the app's TileLayer needs no
@@ -503,6 +544,37 @@ services:
       resources:
         limits:
           memory: 1G
+
+  # Vector-tile server for the maplibre_gl client migration (see MapView's
+  # doc comment) — serves the same tiles-build mbtiles directly as MVT
+  # instead of tileserver-gl's raster rasterize-on-request approach. Runs
+  # alongside tileserver-gl rather than replacing it: the client still uses
+  # flutter_map/raster until the MapView rewrite lands, so nothing here
+  # should break that in the meantime. Source id = the mbtiles filename
+  # without extension ("nepal.mbtiles" -> tiles at :8092/nepal), consumed by
+  # deploy/martin/style.json.
+  martin:
+    image: ghcr.io/maplibre/martin:1.14.0
+    profiles: ["routing"]
+    restart: unless-stopped
+    ports:
+      - "8092:3000"
+    # Directory, not a single file path — Martin watches it and hot-reloads
+    # the catalog if tiles-build ever produces a refreshed mbtiles, no
+    # restart needed (see Martin's own mbtiles-hot-reload docs). --font
+    # points at the real Noto Sans Regular TTF (same font OpenMapTiles'
+    # own glyph generation uses, so it matches the existing style's
+    # `text-font: ["Noto Sans Regular"]` everywhere) — Martin generates
+    # glyph range PBFs from it on the fly, unlike tileserver-gl-styles'
+    # pre-rendered-PBF-only bundle, which has no usable raw font source.
+    command: ["/data", "--font", "/fonts"]
+    volumes:
+      - ./.data/tiles:/data:ro
+      - ./deploy/martin/fonts:/fonts:ro
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # Self-hosted geocoder (replaces the public photon.komoot.io dependency).
   # Nepal-only data: same Geofabrik extract Valhalla uses, filtered
@@ -601,11 +673,19 @@ services:
     volumes:
       - ./pelias.json:/code/pelias.json:ro
       - ./.data/pelias-import/openstreetmap:/data/openstreetmap
+      # The shared extract `fetch-osm` downloaded — pelias.json's
+      # `imports.openstreetmap` deliberately has no `download` block, so this
+      # importer only ever works from a local file already at
+      # `datapath`/`import[0].filename`; without this mount there'd be
+      # nothing there for it to import.
+      - ./.data/osm/nepal-latest.osm.pbf:/data/openstreetmap/nepal-latest.osm.pbf:ro
       # Needed for admin (country/region/locality) lookup during import —
       # same directory pelias-import-whosonfirst populates via
       # `imports.whosonfirst.datapath` in pelias.json.
       - ./.data/pelias-import/whosonfirst:/data/whosonfirst:ro
     depends_on:
+      fetch-osm:
+        condition: service_completed_successfully
       pelias-opensearch:
         condition: service_healthy
 
