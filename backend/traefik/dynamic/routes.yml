@@ -149,13 +149,9 @@ http:
     health-rewrite:
       replacePath:
         path: /health
-    # CORS lives here now, not in each service. Allow the dashboard origin.
     cors:
       headers:
-        # Also allow the LAN address so the dashboard works when opened via
-        # its printed "Network" URL (e.g. from a phone/tablet on the same
-        # Wi-Fi) instead of localhost. Update the IP if your machine's changes.
-        accessControlAllowOriginList: ["http://localhost:3000", "http://192.168.1.66:3000"]
+        accessControlAllowOriginList: ["http://localhost:3000", "http://192.168.1.1:3000"]
         accessControlAllowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
         accessControlAllowHeaders: ["authorization", "content-type", "x-idempotency-key"]
         accessControlMaxAge: 3600

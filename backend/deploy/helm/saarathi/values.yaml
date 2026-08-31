@@ -275,7 +275,7 @@ pelias:
   # Kept the field name `opensearch` so it doesn't ripple through every
   # other file that references `.Values.pelias.opensearch.*`.
   opensearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2
     resources:
       requests: { cpu: 500m, memory: 1.5Gi }
       limits: { cpu: 1000m, memory: 2.5Gi }
