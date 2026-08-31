@@ -85,7 +85,7 @@ DTOKEN=$(echo "$DLOGIN" | jq -r '.access_token')
 DUID=$(echo "$DLOGIN" | jq -r '.user.id')
 j -X POST "$API/v1/driver/register" -H "authorization: Bearer $DTOKEN" \
   -H 'content-type: application/json' \
-  -d '{"license_number":"DL-0001","vehicle":{"class":"two_wheeler","plate_number":"BA-1-PA-1234","make":"Honda","model":"Shine"}}' >/dev/null
+  -d '{"license_number":"DL-0001","address":"Ghorahi-5, Dang","vehicle":{"class":"two_wheeler","plate_number":"BA-1-PA-1234","make":"Honda","model":"Shine"}}' >/dev/null
 printf 'vehicle photo bytes' > /tmp/saarathi_vphoto.jpg
 j -X POST "$API/v1/driver/documents" -H "authorization: Bearer $DTOKEN" \
   -F kind=vehicle_photo -F file=@/tmp/saarathi_vphoto.jpg >/dev/null
@@ -130,7 +130,7 @@ FLAGCOUNT=$(j "$RIDES/v1/admin/flags" -H "authorization: Bearer $ADMIN_TOKEN" | 
 j -X PUT "$RIDES/v1/admin/flags/rides.new_requests" -H "authorization: Bearer $ADMIN_TOKEN" \
   -H 'content-type: application/json' -d '{"enabled":false}' >/dev/null
 BREAK=$(curl -sS -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
-  -H 'content-type: application/json' -d "$BODY" | jq -r '.error.code')
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d "$BODY" | jq -r '.error.code')
 [ "$BREAK" = "FEATURE_DISABLED" ] || { echo "  circuit breaker not enforced (got '$BREAK')"; exit 1; }
 j -X PUT "$RIDES/v1/admin/flags/rides.new_requests" -H "authorization: Bearer $ADMIN_TOKEN" \
   -H 'content-type: application/json' -d '{"enabled":true}' >/dev/null
@@ -143,7 +143,8 @@ EST=$(j -X POST "$RIDES/v1/rides/estimate" -H "authorization: Bearer $RTOKEN" \
 ALGO=$(echo "$EST" | jq -r '.gross_fare')
 FLOOR=$(echo "$EST" | jq -r '.fare_floor')
 CEIL=$(echo "$EST" | jq -r '.fare_ceiling')
-BTRIP=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" -H 'content-type: application/json' \
+BTRIP=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' \
   -d "{\"origin\":{\"lat\":28.0336,\"lng\":82.4836},\"dest\":{\"lat\":28.0450,\"lng\":82.4970},\"vehicle_class\":\"two_wheeler\",\"payment_method\":\"cash\",\"offered_fare\":$FLOOR}")
 AGREED=$(echo "$BTRIP" | jq -r '.gross_fare')
 awk -v a="$AGREED" -v f="$FLOOR" 'BEGIN{exit !(a+0==f+0)}' \
@@ -170,7 +171,7 @@ step "on-site KYC entry (staff onboards a walk-in driver)"
 OPHONE="+97798$(( RANDOM % 900000 + 100000 ))"
 ODID=$(j -X POST "$API/v1/admin/drivers/onboard" -H "authorization: Bearer $ADMIN_TOKEN" \
   -H 'content-type: application/json' \
-  -d "{\"phone\":\"$OPHONE\",\"full_name\":\"Walk In\",\"license_number\":\"DL-9\",\"vehicle\":{\"class\":\"two_wheeler\",\"plate_number\":\"BA-2-PA-9\"}}" | jq -r '.id')
+  -d "{\"phone\":\"$OPHONE\",\"full_name\":\"Walk In\",\"license_number\":\"DL-9\",\"address\":\"Tulsipur-3, Dang\",\"vehicle\":{\"class\":\"two_wheeler\",\"plate_number\":\"BA-2-PA-9\",\"model\":\"Shine\"}}" | jq -r '.id')
 [ -n "$ODID" ] && [ "$ODID" != "null" ] || { echo "  onboard failed"; exit 1; }
 printf 'license bytes' > /tmp/saarathi_lic.jpg
 j -X POST "$API/v1/admin/drivers/$ODID/documents" -H "authorization: Bearer $ADMIN_TOKEN" \
@@ -208,7 +209,7 @@ echo "  credits after top-up: NPR $CREDITS0"
 
 step "create multi-stop trip → accept → complete"
 TRIPJSON=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
-  -H 'content-type: application/json' -d "$BODY")
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d "$BODY")
 TID=$(echo "$TRIPJSON" | jq -r '.id')
 NSTOPS=$(echo "$TRIPJSON" | jq -r '.stops | length')
 [ "$NSTOPS" -eq 1 ] || { echo "  stops not stored"; exit 1; }
@@ -313,7 +314,7 @@ DQUOTE=$(j -X POST "$RIDES/v1/delivery/estimate" -H "authorization: Bearer $RTOK
 DFEE_Q=$(echo "$DQUOTE" | jq -r '.delivery_fee')
 awk -v f="$DFEE_Q" 'BEGIN{exit !(f+0>0)}' || { echo "  delivery quote failed ($DFEE_Q)"; exit 1; }
 PBOOK=$(j -X POST "$RIDES/v1/delivery/parcels" -H "authorization: Bearer $RTOKEN" \
-  -H 'content-type: application/json' \
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' \
   -d '{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"size_tier":"small","fragile":true,"recipient_name":"Sita","recipient_phone":"+9779812345678","cod_amount":200}')
 PT=$(echo "$PBOOK" | jq -r '.trip.id')
 POTP=$(echo "$PBOOK" | jq -r '.delivery_otp')
@@ -370,7 +371,7 @@ j -X POST "$RIDES/v1/driver/heartbeat" -H "authorization: Bearer $DTOKEN" \
 WALLET_BEFORE_CASH=$(j "$RIDES/v1/wallet" -H "authorization: Bearer $DTOKEN" | jq -r '.balance')
 CASH_BODY='{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler","payment_method":"cash"}'
 T2=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
-  -H 'content-type: application/json' -d "$CASH_BODY" | jq -r '.id')
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d "$CASH_BODY" | jq -r '.id')
 OF=""
 for _ in $(seq 1 15); do
   OF=$(j "$RIDES/v1/driver/offers" -H "authorization: Bearer $DTOKEN" \
@@ -430,7 +431,7 @@ ZPHONE="+97798$(( RANDOM % 900000 + 100000 ))"
 ZLOGIN=$(login "$ZPHONE" true)
 ZTOKEN=$(echo "$ZLOGIN" | jq -r '.access_token')
 j -X POST "$API/v1/driver/register" -H "authorization: Bearer $ZTOKEN" -H 'content-type: application/json' \
-  -d '{"license_number":"DL-ZERO","vehicle":{"class":"two_wheeler","plate_number":"BA-1-PA-9999"}}' >/dev/null
+  -d '{"license_number":"DL-ZERO","address":"Ghorahi-5, Dang","vehicle":{"class":"two_wheeler","plate_number":"BA-1-PA-9999","model":"Shine"}}' >/dev/null
 j -X POST "$API/v1/driver/documents" -H "authorization: Bearer $ZTOKEN" \
   -F kind=vehicle_photo -F file=@/tmp/saarathi_vphoto.jpg >/dev/null
 ZID=$(j "$API/v1/admin/drivers?status=queue" -H "authorization: Bearer $ADMIN_TOKEN" \
@@ -444,7 +445,7 @@ j -X POST "$RIDES/v1/driver/offline" -H "authorization: Bearer $DTOKEN" >/dev/nu
 j -X POST "$RIDES/v1/driver/heartbeat" -H "authorization: Bearer $ZTOKEN" \
   -H 'content-type: application/json' -d '{"lat":28.0336,"lng":82.4836,"job_types":["ride"]}' >/dev/null
 BT=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
-  -H 'content-type: application/json' -d "$CASH_BODY" | jq -r '.id')
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d "$CASH_BODY" | jq -r '.id')
 BOF=""
 for _ in $(seq 1 15); do
   BOF=$(j "$RIDES/v1/driver/offers" -H "authorization: Bearer $ZTOKEN" \
@@ -468,7 +469,7 @@ WPHONE="+97798$(( RANDOM % 900000 + 100000 ))"
 WLOGIN=$(login "$WPHONE" true)
 WTOKEN=$(echo "$WLOGIN" | jq -r '.access_token')
 j -X POST "$API/v1/driver/register" -H "authorization: Bearer $WTOKEN" -H 'content-type: application/json' \
-  -d '{"license_number":"DL-W1","vehicle":{"class":"two_wheeler","plate_number":"BA-1-PA-6543"}}' >/dev/null
+  -d '{"license_number":"DL-W1","address":"Ghorahi-5, Dang","vehicle":{"class":"two_wheeler","plate_number":"BA-1-PA-6543","model":"Shine"}}' >/dev/null
 j -X POST "$API/v1/driver/documents" -H "authorization: Bearer $WTOKEN" \
   -F kind=vehicle_photo -F file=@/tmp/saarathi_vphoto.jpg >/dev/null
 WID=$(j "$API/v1/admin/drivers?status=queue" -H "authorization: Bearer $ADMIN_TOKEN" \
@@ -489,7 +490,8 @@ j -X POST "$PAYMENTS/v1/credits/topup/confirm" -H "authorization: Bearer $WRTOKE
 j -X POST "$RIDES/v1/driver/heartbeat" -H "authorization: Bearer $WTOKEN" \
   -H 'content-type: application/json' -d '{"lat":27.0,"lng":81.5,"job_types":["ride"]}' >/dev/null
 BIGBODY='{"origin":{"lat":27.0,"lng":81.5},"dest":{"lat":29.0,"lng":83.5},"vehicle_class":"two_wheeler","payment_method":"wallet"}'
-WT=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $WRTOKEN" -H 'content-type: application/json' -d "$BIGBODY" | jq -r '.id')
+WT=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $WRTOKEN" \
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d "$BIGBODY" | jq -r '.id')
 WOF=""
 for _ in $(seq 1 15); do
   WOF=$(j "$RIDES/v1/driver/offers" -H "authorization: Bearer $WTOKEN" \
@@ -571,7 +573,7 @@ echo "  driver bonus granted on trip completion (redemptions=$DUSED)"
 
 step "cancellation with reason → complaints feed"
 CID=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
-  -H 'content-type: application/json' -d "$EBODY" | jq -r '.id')
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d "$EBODY" | jq -r '.id')
 j -X POST "$RIDES/v1/rides/$CID/status" -H "authorization: Bearer $RTOKEN" \
   -H 'content-type: application/json' -d '{"status":"cancelled","reason":"changed my mind"}' >/dev/null
 INFEED=$(j "$RIDES/v1/admin/cancellations" -H "authorization: Bearer $ADMIN_TOKEN" \
@@ -681,7 +683,8 @@ j -X POST "$PARTNERS/v1/partner/$PID/members" -H "authorization: Bearer $OWNER_T
   -H 'content-type: application/json' -d "{\"phone\":\"$MGR_PHONE\",\"role\":\"manager\"}" >/dev/null
 MGR_TOKEN=$(login "$MGR_PHONE" | jq -r '.access_token')
 j -X POST "$PARTNERS/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" \
-  -H 'content-type: application/json' -d "{\"phone\":\"$DPHONE\"}" >/dev/null
+  -H 'content-type: application/json' \
+  -d "{\"phone\":\"$DPHONE\",\"full_name\":\"Test Driver\",\"license_number\":\"DL-0001\",\"address\":\"Ghorahi-5, Dang\",\"vehicle_class\":\"two_wheeler\",\"plate_number\":\"BA-1-PA-1234\",\"model\":\"Shine\"}" >/dev/null
 ROSTER=$(j "$PARTNERS/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" | jq 'length')
 [ "$ROSTER" -ge 1 ] || { echo "  fleet roster empty"; exit 1; }
 FLEET_TRIPS=$(j "$PARTNERS/v1/partner/$PID/analytics" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.trips.completed')
@@ -701,19 +704,20 @@ FDLOGIN=$(login "$FDPHONE" true)
 FDTOKEN=$(echo "$FDLOGIN" | jq -r '.access_token')
 FDUID=$(echo "$FDLOGIN" | jq -r '.user.id')
 j -X POST "$API/v1/driver/register" -H "authorization: Bearer $FDTOKEN" -H 'content-type: application/json' \
-  -d '{"license_number":"DL-FLEET","vehicle":{"class":"two_wheeler","plate_number":"BA-9-PA-9"}}' >/dev/null
+  -d '{"license_number":"DL-FLEET","address":"Ghorahi-5, Dang","vehicle":{"class":"two_wheeler","plate_number":"BA-9-PA-9","model":"Shine"}}' >/dev/null
 j -X POST "$API/v1/driver/documents" -H "authorization: Bearer $FDTOKEN" \
   -F kind=license -F file=@/tmp/saarathi_lic.jpg >/dev/null
 FDID=$(j "$API/v1/admin/drivers?status=queue" -H "authorization: Bearer $ADMIN_TOKEN" \
   | jq -r --arg p "$FDPHONE" '.[] | select(.phone==$p) | .id' | head -n1)
 j -X POST "$API/v1/admin/drivers/$FDID/approve" -H "authorization: Bearer $ADMIN_TOKEN" >/dev/null
 j -X POST "$PARTNERS/v1/partner/$PID/drivers" -H "authorization: Bearer $MGR_TOKEN" \
-  -H 'content-type: application/json' -d "{\"phone\":\"$FDPHONE\"}" >/dev/null
+  -H 'content-type: application/json' \
+  -d "{\"phone\":\"$FDPHONE\",\"full_name\":\"Fleet Driver\",\"license_number\":\"DL-FLEET\",\"address\":\"Ghorahi-5, Dang\",\"vehicle_class\":\"two_wheeler\",\"plate_number\":\"BA-9-PA-9\",\"model\":\"Shine\"}" >/dev/null
 
 fleet_trip() { # completes a trip driven by the fleet driver via ops-assign; echoes trip id
   local t
   t=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $RTOKEN" \
-    -H 'content-type: application/json' -d "$EBODY" | jq -r '.id')
+    -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' -d "$EBODY" | jq -r '.id')
   j -X POST "$RIDES/v1/admin/rides/$t/assign" -H "authorization: Bearer $ADMIN_TOKEN" \
     -H 'content-type: application/json' -d "{\"driver_id\":\"$FDUID\"}" >/dev/null
   for s in arriving in_progress completed; do
@@ -764,7 +768,8 @@ j -X POST "$PARTNERS/v1/partner/$PID/wallet/topup/confirm" -H "authorization: Be
   -H 'content-type: application/json' -d "{\"reference\":\"$TREF2\"}" >/dev/null
 BAL0=$(j "$PARTNERS/v1/partner/$PID/wallet" -H "authorization: Bearer $OWNER_TOKEN" | jq -r '.balance')
 # The corporate rider books on the company tab; a fleet driver completes it.
-CT=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $CRTOKEN" -H 'content-type: application/json' \
+CT=$(j -X POST "$RIDES/v1/rides" -H "authorization: Bearer $CRTOKEN" \
+  -H "x-idempotency-key: $(idem)" -H 'content-type: application/json' \
   -d '{"origin":{"lat":28.0336,"lng":82.4836},"dest":{"lat":28.0450,"lng":82.4970},"vehicle_class":"two_wheeler","payment_method":"corporate"}' | jq -r '.id')
 j -X POST "$RIDES/v1/admin/rides/$CT/assign" -H "authorization: Bearer $ADMIN_TOKEN" \
   -H 'content-type: application/json' -d "{\"driver_id\":\"$FDUID\"}" >/dev/null
