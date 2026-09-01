@@ -2,7 +2,11 @@
 Shared pelias.json — mounted into both pelias-api and the import Jobs, same
 config file every official Pelias docker-compose example uses. Nepal-only:
 openstreetmap points at the same Geofabrik extract Valhalla uses, and
-whosonfirst is filtered to Nepal's country code.
+whosonfirst is filtered to Nepal's country code. Deliberately no `download`
+block under `imports.openstreetmap` — the extract comes from the shared
+fetch-osm Job (fetch-osm-job.yaml) instead, pre-mounted read-only at
+`datapath`/`import[0].filename` by pelias-import-job.yaml, same as the
+local docker-compose pelias-import-openstreetmap service.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -25,8 +29,7 @@ data:
         "openstreetmap": {
           "datapath": "/data/openstreetmap",
           "leveldbpath": "/data/openstreetmap/leveldb",
-          "import": [{ "filename": "nepal-latest.osm.pbf" }],
-          "download": [{ "sourceURL": {{ .Values.pelias.import.osmPbfUrl | quote }} }]
+          "import": [{ "filename": "nepal-latest.osm.pbf" }]
         },
         "whosonfirst": {
           "datapath": "/data/whosonfirst",

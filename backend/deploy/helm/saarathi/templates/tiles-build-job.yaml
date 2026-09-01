@@ -1,17 +1,17 @@
 {{/*
-One-off: builds the vector tileset tileserver-gl serves — a few hundred MB,
-minutes to build (not the hours a classic osm2pgsql+mod_tile raster
-pipeline would take). Not triggered automatically by `helm upgrade`, same
-reasoning as the Pelias import Jobs (slow, shouldn't block/re-run on every
-deploy) — run manually, once, after the first install:
+One-off: builds the vector tileset martin serves from the shared OSM
+extract fetch-osm-job.yaml downloads — a few hundred MB, minutes to build
+(not the hours a classic osm2pgsql+mod_tile raster pipeline would take).
+Not triggered automatically by `helm upgrade`, same reasoning as the Pelias
+import Jobs (slow, shouldn't block/re-run on every deploy) — run fetch-osm
+first, then this, once, after the first install:
 
   kubectl apply -f <(helm template saarathi backend/deploy/helm/saarathi -s templates/tiles-build-job.yaml)
   kubectl -n saarathi wait --for=condition=complete job/tiles-build --timeout=20m
 
-Then roll out tileserver-gl (tileserver-gl-deployment.yaml) — it reads the
-same PVC this Job writes to. Re-running later (e.g. to refresh with newer
-OSM data) means deleting the old Job first — Jobs are immutable once
-created:
+Then roll out martin (martin-deployment.yaml) — it reads the same PVC this
+Job writes to. Re-running later (e.g. to refresh with newer OSM data) means
+deleting the old Job first — Jobs are immutable once created:
 
   kubectl -n saarathi delete job tiles-build
 */}}
@@ -46,14 +46,22 @@ spec:
       containers:
         - name: tiles-build
           image: {{ .Values.tiles.build.image }}
+          # --osm-path, not --download --area=nepal — reads the shared
+          # extract fetch-osm-job.yaml already downloaded instead of
+          # Planetiler fetching its own separate copy.
           args:
-            - --download
-            - --area={{ .Values.tiles.build.area }}
+            - --osm-path=/osm-data/nepal-latest.osm.pbf
             - --output=/data/nepal.mbtiles
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: osm-data
+              mountPath: /osm-data
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: tiles-data
+        - name: osm-data
+          persistentVolumeClaim:
+            claimName: osm-data

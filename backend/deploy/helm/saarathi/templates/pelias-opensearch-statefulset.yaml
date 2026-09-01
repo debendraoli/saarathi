@@ -1,9 +1,10 @@
 {{/*
 Single-node, security disabled — internal-only ClusterIP, never exposed.
-Despite the resource name, this is real Elasticsearch 7.17 (see values.yaml
+Despite the resource name, this is real Elasticsearch 8.x (see values.yaml
 `pelias.opensearch.image` for why — OpenSearch's own version numbering fails
 Pelias's hard-coded Elasticsearch version check no matter which major
-version is pinned). The entrypoint override installs the analysis-icu
+version is pinned; 8.x chosen over 9.x since only 7.x/8.x are documented as
+supported by Pelias). The entrypoint override installs the analysis-icu
 plugin, which Pelias's schema requires and the stock image doesn't bundle,
 before handing off to the image's normal startup.
 */}}
@@ -23,7 +24,7 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: pelias-opensearch
+        {{- include "saarathi.componentLabels" (dict "component" "pelias-opensearch" "Release" .Release) | nindent 8 }}
     spec:
       containers:
         - name: opensearch

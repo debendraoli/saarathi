@@ -20,7 +20,7 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: {{ $name }}
+        {{- include "saarathi.componentLabels" (dict "component" $name "Release" $.Release) | nindent 8 }}
     spec:
       containers:
         - name: {{ $name }}
@@ -38,6 +38,22 @@ spec:
             - name: {{ $key | snakecase | upper }}
               value: {{ $value | quote }}
             {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ $svc.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ $svc.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             {{- toYaml $svc.resources | nindent 12 }}
           {{- if and (hasKey $svc "pvc") $svc.pvc.enabled }}

@@ -1,8 +1,8 @@
 {{/*
 Vector-tile + glyph server for the app's MapView (martinBaseUrl in
 app_config.dart). Reads the same mbtiles PVC tiles-build-job.yaml produces
-and tileserver-gl-deployment.yaml also reads (mounted read-only here, like
-docker-compose's `:ro`). No IngressRoute of its own — reached at
+(mounted read-only here, like docker-compose's `:ro`). No IngressRoute of
+its own — reached at
 api.<domain>/tiles/... via the "tiles-stripprefix" + "tiles-ratelimit"
 middlewares in middleware.yaml, alongside the other services' IngressRoutes
 in services.yaml, so it gets the same TLS termination and no bare port
@@ -23,7 +23,7 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: martin
+        {{- include "saarathi.componentLabels" (dict "component" "martin" "Release" .Release) | nindent 8 }}
     spec:
       containers:
         - name: martin
@@ -31,9 +31,8 @@ spec:
           # The specific .mbtiles file, not the whole /data directory — see
           # the docker-compose martin service comment this was ported from:
           # pointing at the directory made Martin auto-scan every file in it
-          # for tile sources, including tileserver-gl's own config.json,
-          # which it failed to parse as GeoJSON — fatal on every startup, so
-          # the pod just crash-looped.
+          # for tile sources, which failed to parse a stray non-tile file —
+          # fatal on every startup, so the pod just crash-looped.
           args: ["/data/nepal.mbtiles", "--font", "/fonts"]
           ports:
             - containerPort: 3000

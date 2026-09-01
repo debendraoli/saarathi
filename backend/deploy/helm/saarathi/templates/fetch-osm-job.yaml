@@ -1,0 +1,68 @@
+{{/*
+One-off: downloads the shared Nepal OSM extract that valhalla,
+pelias-import-openstreetmap, and tiles-build all consume — replaces each of
+them downloading their own copy independently (confirmed: three separate
+~150-300MB Geofabrik downloads per fresh cluster before this). Ported from
+docker-compose's fetch-osm service. Not triggered automatically by `helm
+upgrade`, same reasoning as the other one-off bootstrap Jobs — run
+manually, once, BEFORE valhalla is first rolled out and before
+pelias-import-openstreetmap / tiles-build run (see README's "OSM extract
+bootstrap" section):
+
+  kubectl apply -f <(helm template saarathi backend/deploy/helm/saarathi -s templates/fetch-osm-job.yaml)
+  kubectl -n saarathi wait --for=condition=complete job/fetch-osm --timeout=10m
+
+Re-running later (e.g. to refresh with newer OSM data) means deleting the
+old Job first — Jobs are immutable once created:
+
+  kubectl -n saarathi delete job fetch-osm
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: osm-data
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "osm" "Release" .Release) | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.osm.storage }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fetch-osm
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "osm" "Release" .Release) | nindent 4 }}
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fetch-osm
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: fetch-osm
+          image: curlimages/curl:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              if [ -f /data/nepal-latest.osm.pbf ]; then
+                echo "fetch-osm: /data/nepal-latest.osm.pbf already present, skipping download"
+              else
+                echo "fetch-osm: downloading nepal-latest.osm.pbf from Geofabrik"
+                curl -fsSL -o /data/nepal-latest.osm.pbf.tmp {{ .Values.osm.pbfUrl | quote }}
+                mv /data/nepal-latest.osm.pbf.tmp /data/nepal-latest.osm.pbf
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: osm-data

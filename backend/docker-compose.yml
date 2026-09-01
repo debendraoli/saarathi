@@ -65,11 +65,6 @@ services:
       timeout: 3s
       retries: 5
 
-  # API gateway — the single north-south front door. Mirrors production: k3s ships
-  # Traefik as its default ingress, so the same router rules translate 1:1 to
-  # Traefik IngressRoute CRDs (see deploy/k8s/ingressroute.yaml). Routes by path
-  # to the service containers by name; `routing` (8084) stays internal to rides.
-  # Gateway: http://localhost:8080   Dashboard: http://localhost:8090
   gateway:
     image: traefik:v3.1
     command:
@@ -97,13 +92,6 @@ services:
       - campaigns
       - partners
 
-  # ── Rust services ───────────────────────────────────────────────────────────
-  # Built from services/<name>/Dockerfile (context = this workspace root). The
-  # first `up --build` compiles the shared dependencies once (cache mounts), then
-  # each service's own crate. Ports are published so you can also hit a service
-  # directly (e.g. curl localhost:8081/health) in addition to via the gateway.
-
-  # Identity + KYC + location. Runs migrations and seeds a dev super-admin on boot.
   auth:
     <<: *svc-base
     build:
@@ -134,7 +122,6 @@ services:
       retries: 5
       start_period: 20s
 
-  # Trips, fare estimation, dispatch, realtime WS. Measures distance via routing.
   rides:
     <<: *svc-base
     build:
@@ -168,7 +155,6 @@ services:
       retries: 5
       start_period: 20s
 
-  # In-app inbox; consumes NotifyRequest off NATS (read-only if the bus is down).
   notify:
     <<: *svc-base
     build:
@@ -203,8 +189,6 @@ services:
       retries: 5
       start_period: 20s
 
-  # Distance/duration engine (wraps Valhalla; haversine fallback). No database.
-  # Internal dependency of rides — port is published for local health checks only.
   routing:
     <<: *svc-base
     build:
@@ -308,9 +292,6 @@ services:
       retries: 5
       start_period: 20s
 
-  # Community map contributions: submit → staff review → points/badges,
-  # redeemable via rides' shared wallet tables (needs rides to have migrated
-  # first, same as merchant/payments/campaigns already assume).
   places:
     <<: *svc-base
     build:
@@ -320,8 +301,6 @@ services:
       <<: *svc-env
       PLACES_PORT: 8089
       PLACES_STORAGE_DIR: /data/places
-      # Only reachable when the `routing` profile is also up — a best-effort
-      # write, see pelias_index.rs; harmless if this host doesn't resolve.
       PELIAS_ES_URL: http://pelias-opensearch:9200
     ports:
       - "8089:8089"
@@ -339,7 +318,6 @@ services:
       retries: 5
       start_period: 20s
 
-  # Fleet/partner domain: roster, fleet money, dashboards, fleet campaigns.
   partners:
     <<: *svc-base
     build:
@@ -411,12 +389,6 @@ services:
         limits:
           memory: 2G
     environment:
-      # Nepal (Lumbini) OSM extract. `fetch-osm` (above) puts the shared copy
-      # straight into `custom_files` (mounted below) — Valhalla builds from
-      # that directly without hitting Geofabrik itself. This URL only fires
-      # as a fallback (e.g. running `valhalla` standalone without
-      # `fetch-osm` having run first, or `.data/osm` cleared but
-      # `.data/valhalla` not) — swap for a wider region as coverage grows.
       tile_urls: "https://download.geofabrik.de/asia/nepal-latest.osm.pbf"
       # Build + serve concurrency. Raise on a bigger host for more parallel trips.
       server_threads: "4"
@@ -442,7 +414,6 @@ services:
       fetch-osm:
         condition: service_completed_successfully
     healthcheck:
-      # wget isn't in this image; curl is.
       test: ["CMD", "curl", "-fsS", "http://localhost:8002/status"]
       interval: 15s
       timeout: 5s
@@ -476,68 +447,12 @@ services:
       fetch-osm:
         condition: service_completed_successfully
 
-  # Serves the tileset tiles-build produces, rasterizing vector → PNG on
-  # request with its own on-disk render cache — the app's TileLayer needs no
-  # changes at all, still just a plain {z}/{x}/{y}.png URL. Point the app at
-  # it with --dart-define=SAARATHI_TILE_URL=http://<host>:8091/styles/basic-preview/{z}/{x}/{y}.png
-  tileserver-gl:
-    image: maptiler/tileserver-gl:latest
-    profiles: ["routing"]
-    restart: ${RESTART_POLICY:-unless-stopped}
-    # No `depends_on` on `tiles-build` deliberately — same reasoning as
-    # Pelias's own one-off import steps just above: it's a manual, deliberate
-    # "run once, then start the daemon" flow, not something `up` should
-    # silently re-trigger (which a completion-based dependency would, since
-    # `tiles-build` always re-downloads/rebuilds rather than skipping when
-    # the mbtiles already exists).
-    ports:
-      - "8091:8080"
-    # Explicit config + our own recolored style, not the plain `--mbtiles`
-    # shorthand — that auto-picks tileserver-gl-styles' single bundled
-    # "basic-preview" style, which is an explicitly-named dev preview (warm
-    # khaki background/landuse, confirmed live as the muddy/brown look
-    # reported on-device) rather than something meant to ship. Same style
-    # *id* ("basic-preview") and data id ("v3") as that auto-generated
-    # config, so the app's tile URL didn't need to change — only the
-    # palette did. config.json/styles/ are tracked in git (small, hand-
-    # authored); .data/tiles holds only the large generated mbtiles.
-    command: ["-c", "/data/config.json"]
-    volumes:
-      - ./.data/tiles:/data
-      - ./deploy/tileserver/config.json:/data/config.json:ro
-      - ./deploy/tileserver/styles:/data/styles:ro
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-
-  # Vector-tile server for the maplibre_gl client migration (see MapView's
-  # doc comment) — serves the same tiles-build mbtiles directly as MVT
-  # instead of tileserver-gl's raster rasterize-on-request approach. Runs
-  # alongside tileserver-gl rather than replacing it: the client still uses
-  # flutter_map/raster until the MapView rewrite lands, so nothing here
-  # should break that in the meantime. Source id = the mbtiles filename
-  # without extension ("nepal.mbtiles" -> tiles at :8092/nepal), consumed by
-  # deploy/martin/style.json.
   martin:
     image: ghcr.io/maplibre/martin:1.14.0
     profiles: ["routing"]
     restart: ${RESTART_POLICY:-unless-stopped}
     ports:
       - "8092:3000"
-    # The specific .mbtiles file, not the whole directory — Martin still
-    # hot-reloads it in place if tiles-build ever refreshes it (see Martin's
-    # own mbtiles-hot-reload docs), but pointing at the directory made it
-    # auto-scan every file in there for tile sources too, including
-    # tileserver-gl's own (empty) config.json, which it tried to parse as
-    # GeoJSON and failed — a fatal error on every startup, so
-    # restart:unless-stopped just looped it forever (confirmed live: logs
-    # showed "Starting Martin" every ~60s). --font points at the real Noto
-    # Sans Regular TTF (same font OpenMapTiles' own glyph generation uses,
-    # so it matches the existing style's `text-font: ["Noto Sans Regular"]`
-    # everywhere) — Martin generates glyph range PBFs from it on the fly,
-    # unlike tileserver-gl-styles' pre-rendered-PBF-only bundle, which has
-    # no usable raw font source.
     command: ["/data/nepal.mbtiles", "--font", "/fonts"]
     volumes:
       - ./.data/tiles:/data:ro
@@ -547,29 +462,9 @@ services:
         limits:
           memory: 512M
 
-  # Self-hosted geocoder (replaces the public photon.komoot.io dependency).
-  # Nepal-only data: same Geofabrik extract Valhalla uses, filtered
-  # WhosOnFirst admin boundaries. Start with:  docker compose --profile routing up -d
-  # pelias-opensearch pelias-api
-  # then run the one-off imports (see scripts/, or docs/pelias-import.md):
-  #   docker compose --profile routing run --rm pelias-import-openstreetmap
-  #   docker compose --profile routing run --rm pelias-import-whosonfirst
-  # Despite the service name (kept as-is so pelias.json's esclient host and
-  # the other services' depends_on don't need to change), this actually runs
-  # real Elasticsearch, not OpenSearch. OpenSearch — 1.x and 2.x both,
-  # verified directly against both — reports its own independent version
-  # number ("1.3.20", "2.19.6", ...) from its info endpoint, but Pelias's
-  # schema tool hard-checks for an Elasticsearch version
-  # (SUPPORTED_ES_VERSIONS = '>=7.4.2' in pelias/schema), which OpenSearch
-  # can never satisfy regardless of which major version is pinned.
   pelias-opensearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.21
     profiles: ["routing"]
-    # Neither this nor pelias-api had a restart policy — both silently
-    # exited (255, likely the disk-pressure episode earlier this session)
-    # and stayed down for ~11h with nothing surfacing it until reverse-geocode
-    # lookups started coming back empty and getting cached that way for 30
-    # days (see routes::geo's fetch-failure-vs-empty-result fix).
     restart: ${RESTART_POLICY:-unless-stopped}
     environment:
       discovery.type: single-node
@@ -644,15 +539,7 @@ services:
     volumes:
       - ./pelias.json:/code/pelias.json:ro
       - ./.data/pelias-import/openstreetmap:/data/openstreetmap
-      # The shared extract `fetch-osm` downloaded — pelias.json's
-      # `imports.openstreetmap` deliberately has no `download` block, so this
-      # importer only ever works from a local file already at
-      # `datapath`/`import[0].filename`; without this mount there'd be
-      # nothing there for it to import.
       - ./.data/osm/nepal-latest.osm.pbf:/data/openstreetmap/nepal-latest.osm.pbf:ro
-      # Needed for admin (country/region/locality) lookup during import —
-      # same directory pelias-import-whosonfirst populates via
-      # `imports.whosonfirst.datapath` in pelias.json.
       - ./.data/pelias-import/whosonfirst:/data/whosonfirst:ro
     depends_on:
       fetch-osm:
@@ -673,13 +560,6 @@ services:
       pelias-opensearch:
         condition: service_healthy
 
-  # Self-hosted STUN/TURN (Coturn) for WebRTC peer-to-peer voice/video. Keeping
-  # it in our infra means relay traffic + signaling stay in-country (golden rule:
-  # data stays in Nepal), and we avoid per-minute third-party TURN costs. The
-  # rides service mints short-lived credentials from TURN_SECRET via /v1/rtc/ice.
-  # Start it explicitly:  docker compose --profile comms up -d coturn
-  # PROD: set --external-ip to the public IP and open UDP 3478 + the relay range.
-  # macOS Docker can't route the relay; local calls still work over STUN.
   coturn:
     image: coturn/coturn:4.6
     profiles: ["comms"]
@@ -701,8 +581,6 @@ services:
       - "3478:3478/tcp"
       - "49160-49200:49160-49200/udp"
 
-# Named volumes so the non-root containers own their data dirs (bind mounts
-# would be created root-owned and block writes).
 volumes:
   kyc-data:
   places-data:

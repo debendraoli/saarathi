@@ -52,14 +52,39 @@ helm upgrade --install saarathi backend/deploy/helm/saarathi \
   --set-file secrets.fcmServiceAccountJson=backend/secrets/fcm-service-account.json
 ```
 
+## OSM extract bootstrap (one-time, after the first install — do this first)
+
+`valhalla`, the Pelias `openstreetmap` import, and the tile-build Job below
+all need the same Nepal OSM extract. Rather than each downloading its own
+copy (three separate ~150-300MB Geofabrik downloads, the previous
+behavior), one Job fetches it once into a shared PVC that the other three
+mount read-only — same dedup docker-compose's `fetch-osm` service already
+does locally:
+
+```bash
+kubectl apply -f <(helm template saarathi backend/deploy/helm/saarathi -s templates/fetch-osm-job.yaml)
+kubectl -n saarathi wait --for=condition=complete job/fetch-osm --timeout=10m
+```
+
+Run this **before** the Pelias and map-tiles bootstraps below, and before
+`valhalla` is first rolled out (it has its own download fallback if you
+don't — see `values.yaml`'s `valhalla.tileUrls` comment — but running this
+first avoids yet another redundant download on first boot). Re-running
+later (e.g. to refresh with newer OSM data) means deleting the old Job
+first — Jobs are immutable once created:
+
+```bash
+kubectl -n saarathi delete job fetch-osm
+```
+
 ## Pelias bootstrap (one-time, after the first install)
 
 The `helm upgrade --install` above brings up `pelias-opensearch` and
 `pelias-api`, but the search index starts empty and the one-off import Jobs
-aren't triggered automatically (they're slow — a few hundred MB of download
-plus several minutes of processing — not something that should block or
-re-run on every `helm upgrade`). Run these once, **in this order**, each
-waiting for the previous to finish:
+aren't triggered automatically (they're slow — several minutes of
+processing — not something that should block or re-run on every `helm
+upgrade`). Run these once, **in this order**, each waiting for the previous
+to finish:
 
 ```bash
 # 1. Wait for pelias-opensearch to be Ready (it installs the analysis-icu
@@ -75,7 +100,9 @@ kubectl -n saarathi wait --for=condition=complete job/pelias-schema --timeout=5m
 #    finished), but running it to completion first is simplest:
 kubectl apply -f <(helm template saarathi backend/deploy/helm/saarathi -s templates/pelias-import-job.yaml -s templates/pelias-config-configmap.yaml)
 # ^ applies both PVCs and both Jobs; if the openstreetmap Job starts before
-#   whosonfirst has finished downloading, delete and re-apply it.
+#   whosonfirst has finished downloading, delete and re-apply it. Requires
+#   the OSM extract bootstrap above to have completed first — openstreetmap
+#   imports straight from that shared PVC, no download step of its own.
 kubectl -n saarathi wait --for=condition=complete job/pelias-import-whosonfirst --timeout=10m
 kubectl -n saarathi wait --for=condition=complete job/pelias-import-openstreetmap --timeout=30m
 ```
@@ -89,27 +116,23 @@ kubectl -n saarathi delete job pelias-import-openstreetmap pelias-import-whosonf
 
 ## Map tiles bootstrap (one-time, after the first install)
 
-Same idea as Pelias above — `tileserver-gl` needs a tileset built before it
-has anything to serve, and building one is slow enough (a few hundred MB
-download plus a few minutes of processing) that it shouldn't block or
-re-run on every `helm upgrade`:
+Same idea as Pelias above — `martin` needs a tileset built before it has
+anything to serve, and building one is slow enough (a few minutes of
+processing) that it shouldn't block or re-run on every `helm upgrade`.
+Requires the OSM extract bootstrap above to have completed first — this Job
+reads that shared extract instead of downloading its own:
 
 ```bash
 kubectl apply -f <(helm template saarathi backend/deploy/helm/saarathi -s templates/tiles-build-job.yaml)
 kubectl -n saarathi wait --for=condition=complete job/tiles-build --timeout=20m
 ```
 
-Then a normal `helm upgrade --install` rolls out `tileserver-gl` (it mounts
-the same PVC the Job just wrote to). Point the app's
-`SAARATHI_TILE_URL` build define at
-`https://tiles.<domain>/styles/basic-preview/{z}/{x}/{y}.png`.
-
-This same PVC is also what `martin` (martin-deployment.yaml) reads for the
-app's vector-tile `MapView` — no separate bootstrap step needed for it, just
-point the app's `SAARATHI_MARTIN_URL` build define at
-`https://api.<domain>/tiles` (Martin has no public port of its own; it's
-reached through the `api.<domain>` IngressRoute like every other service,
-with the `/tiles` prefix stripped by Traefik before forwarding).
+Then a normal `helm upgrade --install` rolls out `martin` (martin-
+deployment.yaml, it mounts the same PVC the Job just wrote to) for the
+app's vector-tile `MapView`. Point the app's `SAARATHI_MARTIN_URL` build
+define at `https://api.<domain>/tiles` (Martin has no public port of its
+own; it's reached through the `api.<domain>` IngressRoute like every other
+service, with the `/tiles` prefix stripped by Traefik before forwarding).
 
 Without this, the app's `TileLayer` has no explicit `tileProvider` and
 silently falls back to the public `tile.openstreetmap.org` — not meant for
@@ -142,8 +165,12 @@ templates:
   repository doesn't exist).
 - Every Pelias import image's **default command is a bare shell** — a Job
   without an explicit `command` "succeeds" instantly having imported
-  nothing, silently. Each needs `npm run download && npm start` (or `npm
-  run create_index` for the schema tool).
+  nothing, silently. `whosonfirst` needs `npm run download && npm start`
+  (it fetches its own sqlite bundles); `openstreetmap` needs just `npm
+  start` — its `download` step is deliberately skipped in favor of the
+  shared extract the OSM bootstrap Job already placed on disk (see
+  `pelias-config-configmap.yaml`'s comment). The schema tool needs `npm run
+  create_index`.
 - `pelias.json`'s `imports.openstreetmap` needs `datapath` /
   `leveldbpath` / `import: [{filename: ...}]` — older examples floating
   around use `dataFile` / `leveldbDir` (singular, different names), which

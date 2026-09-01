@@ -1,4 +1,12 @@
-{{/* Single replica, internal-only — no IngressRoute, called only by saarathi-routing. */}}
+{{/*
+Single replica, internal-only — no IngressRoute, called only by
+saarathi-routing. /custom_files/nepal-latest.osm.pbf is the shared extract
+fetch-osm-job.yaml downloads (mounted read-only via subPath, alongside the
+writable valhalla-storage PVC at the same /custom_files dir — same nested-
+mount shape as docker-compose's valhalla service). tile_urls stays wired up
+as a fallback: if fetch-osm hasn't run yet, valhalla's own entrypoint just
+downloads it directly instead of finding it pre-mounted.
+*/}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,7 +22,7 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: valhalla
+        {{- include "saarathi.componentLabels" (dict "component" "valhalla" "Release" .Release) | nindent 8 }}
     spec:
       containers:
         - name: valhalla
@@ -41,6 +49,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /custom_files
+            - name: osm-data
+              mountPath: /custom_files/nepal-latest.osm.pbf
+              subPath: nepal-latest.osm.pbf
+              readOnly: true
           # First readiness can take a while — the image builds routing
           # tiles from the Nepal PBF on first boot (cached in the PVC after
           # that). No wget in this image, only curl.
@@ -59,6 +71,9 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: valhalla-storage
+        - name: osm-data
+          persistentVolumeClaim:
+            claimName: osm-data
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

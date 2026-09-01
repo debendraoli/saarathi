@@ -2,21 +2,27 @@
 Manual/one-off Jobs (kubectl apply -f, or `helm install --set pelias.import.run=true`
 re-triggers by bumping the job name — Jobs are immutable once created). A
 CronJob for periodic re-import is a v2 addition, not this pass — see plan
-section 5. Each importer gets its own PVC (they don't share files, no reason
-to contend over one ReadWriteOnce volume) — except pelias-import-openstreetmap
-also mounts the whosonfirst PVC read-only, since it needs the *downloaded*
-WhosOnFirst sqlite bundles (not the ES import, just the raw files) for its
+section 5. Each importer gets its own PVC for its own working data (they
+don't share those, no reason to contend over one ReadWriteOnce volume) —
+except pelias-import-openstreetmap, which also mounts two read-only PVCs it
+doesn't own: the shared osm-data extract (fetch-osm-job.yaml) it imports
+from, and the whosonfirst PVC, since it needs the *downloaded* WhosOnFirst
+sqlite bundles (not the ES import, just the raw files) for its
 country/region/locality admin lookup step.
 
-Run pelias-schema first, then these two — see README's "Pelias bootstrap"
-section for the full one-time sequence and why the order matters.
+Run fetch-osm (fetch-osm-job.yaml), then pelias-schema, then these two — see
+README's "Pelias bootstrap" section for the full one-time sequence and why
+the order matters.
 
 Each image's default CMD is a bare `/bin/bash` (meant for interactive
 debugging) — without an explicit command a Job's pod just starts and exits
-immediately, "succeeding" without importing anything. `npm run download`
-(fetch the source data) then `npm start` (the image's own documented
-entrypoint) is the real sequence; skipping `download` fails with a missing
-data file error instead.
+immediately, "succeeding" without importing anything. `npm start` is the
+image's own documented entrypoint. openstreetmap deliberately does NOT run
+`npm run download` first — pelias.json's `imports.openstreetmap` has no
+`download` block (see pelias-config-configmap.yaml), so it imports straight
+from the shared extract fetch-osm already placed at
+`datapath`/`import[0].filename` (mounted read-only below); without that
+mount this fails with a missing data file error.
 */}}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -99,7 +105,7 @@ spec:
         - name: import
           # NOT pelias/openstreetmap-import — that repository doesn't exist.
           image: pelias/openstreetmap:latest
-          command: ["sh", "-c", "npm run download && npm start"]
+          command: ["npm", "start"]
           env:
             - name: PELIAS_CONFIG
               value: /code/pelias.json
@@ -109,6 +115,15 @@ spec:
               subPath: pelias.json
             - name: data
               mountPath: /data/openstreetmap
+            # The shared extract fetch-osm-job.yaml downloaded — pelias.json's
+            # `imports.openstreetmap` deliberately has no `download` block, so
+            # this importer only ever works from a local file already at
+            # `datapath`/`import[0].filename`; without this mount there'd be
+            # nothing there for it to import.
+            - name: osm-data
+              mountPath: /data/openstreetmap/nepal-latest.osm.pbf
+              subPath: nepal-latest.osm.pbf
+              readOnly: true
             # Admin (country/region/locality) lookup during import needs
             # WhosOnFirst's raw sqlite bundles on disk — run
             # pelias-import-whosonfirst (or at least its `npm run download`
@@ -124,6 +139,9 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: pelias-import-osm-data
+        - name: osm-data
+          persistentVolumeClaim:
+            claimName: osm-data
         - name: wof-data
           persistentVolumeClaim:
             claimName: pelias-import-wof-data

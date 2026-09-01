@@ -1,0 +1,338 @@
+{{/*
+Kubernetes NetworkPolicies — restrict traffic between pods to only what's needed.
+Default: deny all ingress + egress (fail-secure). Explicit allow rules carve out
+required routes: data layer (postgres/redis/nats), inter-service (rides→routing,
+merchant→rides), DNS (CoreDNS), and external APIs (payment gateways, SMS, etc.).
+
+Requires a CNI plugin with NetworkPolicy support (Calico, Cilium, Weave, AWS VPC CNI).
+On EKS: aws eks update-addon --cluster-name CLUSTER --addon-name vpc-cni 
+  --configuration-values '{"enableNetworkPolicy": "true"}'
+On managed k8s (AKS, GKE): typically enabled by default.
+
+Traffic routes:
+  Ingress: gateway (traefik) → services, service→service (merchant→rides, rides→routing)
+  Egress: services → data layer (postgres/redis/nats), external APIs, DNS
+*/}}
+{{- if .Values.networkPolicies.enabled }}
+---
+{{/*
+1. Default deny: all pods in the namespace drop ingress + egress by default.
+   Subsequent policies explicitly allow specific routes.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: saarathi-default-deny
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  # Empty ingress/egress = deny all (fail-secure). Allow rules below permit specific traffic.
+---
+{{/*
+2. Allow DNS (CoreDNS) on port 53 — required so pods can resolve service names
+   (e.g., "postgres.saarathi.svc.cluster.local"). CoreDNS typically runs in
+   kube-system namespace, may also be in kube-dns. Both covered here.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: saarathi-allow-dns
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    {{- if .Values.networkPolicies.allowDNS }}
+    # DNS queries (UDP 53)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+        - namespaceSelector:
+            matchLabels:
+              name: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    {{- end }}
+---
+{{/*
+3. Data layer access: postgres, redis, nats — stateful backend services that
+   all (or most) other services depend on. Grouped into one policy for simplicity.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: saarathi-allow-data-layer
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    {{- if .Values.networkPolicies.allowDataLayer }}
+    # Postgres (TCP 5432): auth, rides, notify, payments, campaigns, merchant, places, partners
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Redis (TCP 6379): auth, rides, notify, payments, campaigns, merchant, partners, routing
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # NATS (TCP 4222): auth, rides, notify, payments, campaigns, merchant, places, partners
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+    {{- end }}
+---
+{{/*
+4. Inter-service ingress: allow pods to receive traffic from specific other pods.
+   Traefik (gateway) routes to all backend services; some services call each other
+   (merchant→rides for courier dispatch, rides→routing for distance, places→rides
+   for gamification wallet access, etc.).
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: saarathi-allow-inter-service-ingress
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.labels" . | nindent 4 }}
+spec:
+  {{/* Allow all backend services + infrastructure (valhalla, martin, pelias-api) to receive traffic */}}
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: saarathi
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- if .Values.networkPolicies.allowInterServiceIngress }}
+    # From Traefik (gateway) in the traefik namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 80
+    # Within-namespace service-to-service calls (same pod label)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: saarathi
+      ports:
+        - protocol: TCP
+          port: 80
+    {{- end }}
+---
+{{/*
+5. Inter-service egress: allow pods to call specific other internal services.
+   Mapping:
+    - rides: calls routing (8084), merchant (8088)
+    - merchant: calls rides (8082), routing (8084)
+    - places: calls rides (8082)
+    - pelias-api: called by rides, merchant, places (reverse: they call it)
+    - valhalla: called by routing (reverse: routing calls it)
+   For simplicity, we allow all backend services to call each other on their
+   published ports (80 in k8s Service). If you need stricter controls later,
+   split by service name and target port.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: saarathi-allow-inter-service-egress
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    {{- if .Values.networkPolicies.allowInterServiceEgress }}
+    # Service-to-service calls (rides→routing, merchant→rides, places→rides, etc.)
+    # All use port 80 (Service-translated to their actual container ports)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: saarathi
+      ports:
+        - protocol: TCP
+          port: 80
+    {{- end }}
+---
+{{/*
+6. External egress: allow specific services to reach external APIs.
+   This is the most restrictive: we explicitly list target IPs/hostnames + ports.
+   For now, we use CIDR 0.0.0.0/0 with high ports (443 HTTPS) as a placeholder.
+   In production, replace with actual IPs (or use egress policies on your router).
+   
+   Services that need external access:
+    - auth: OTP SMS (Sparrow), WhatsApp API
+    - rides: geocoder (Photon), WebRTC STUN, potential traffic API
+    - payments: Khalti payment gateway
+    - notify: FCM (Firebase Cloud Messaging)
+    - pelias-api: (N/A, internal only; imports happen in Jobs)
+    - valhalla, martin: (N/A, internal only; no external APIs)
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: saarathi-allow-external-egress
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: ["auth", "rides", "payments", "notify"]
+  policyTypes:
+    - Egress
+  egress:
+    {{- if .Values.networkPolicies.allowExternalEgress }}
+    # HTTPS (443) to external APIs — covers most cases (Khalti, WhatsApp, FCM, geocoder, etc.)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+    # HTTP (80) for some APIs (Photon geocoder, public tile servers)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 80
+    # WebRTC STUN (UDP 3478 for Coturn relay, though STUN is usually 3478 UDP)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 3478
+    {{- end }}
+---
+{{/*
+7. Auxiliary ingress: allow infrastructure pods (valhalla, martin, pelias-api)
+   to accept traffic from backend services that depend on them.
+   
+   Callers:
+    - routing → valhalla (8002)
+    - martin ← rides + app (via Traefik)
+    - pelias-api ← rides, merchant, places
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: saarathi-allow-auxiliary-ingress
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: ["valhalla", "martin", "pelias-api"]
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- if .Values.networkPolicies.allowAuxiliaryIngress }}
+    # From other backend services (via Service DNS, port 80)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: saarathi
+      ports:
+        - protocol: TCP
+          port: 80
+    # From Traefik (gateway)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 80
+    {{- end }}
+---
+{{/*
+8. Auxiliary egress: infrastructure pods call data layer and external services.
+   
+   Callers:
+    - valhalla: (N/A, no external calls; reads OSM tile cache from PVC)
+    - martin: (N/A, no external calls; reads tiles from PVC)
+    - pelias-api: (N/A, internal only; no external APIs)
+   
+   So this policy is empty/optional. If any of these need external access later,
+   add explicit rules here.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: saarathi-allow-auxiliary-egress
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: ["valhalla", "martin", "pelias-api"]
+  policyTypes:
+    - Egress
+  egress:
+    {{- if .Values.networkPolicies.allowDataLayer }}
+    # Auxiliary pods can call data layer (though typically they don't; kept for completeness)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats
+      ports:
+        - protocol: TCP
+          port: 4222
+    {{- end }}
+{{- end }}
