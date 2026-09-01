@@ -9,9 +9,10 @@ import '../../../../shared/widgets/fare_stepper.dart';
 import '../../application/ride_controller.dart';
 import '../../data/ride_repository.dart';
 import '../../domain/models.dart';
-import '../trip_screen.dart'
-    show showCancelReasonSheet, RouteSummary, EtaFareRow;
 import 'bid_card.dart';
+import 'trip/eta_fare_row.dart';
+import 'trip/route_summary.dart';
+import 'trip/status_sheet.dart' show showCancelReasonSheet;
 
 /// Replaces the plain "searching" status sheet while a bid-mode trip is
 /// still `requested`: the rider's current ask, a live-sorted bid list, and
