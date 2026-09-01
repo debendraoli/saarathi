@@ -1223,6 +1223,16 @@ class _MarkerImages {
   }
 }
 
+/// Call once from `main()` before `runApp()`. `MapLibreMap.styleString` is
+/// only read at native map creation — it isn't hot-swapped on rebuild — so
+/// if the first `MapView` build races ahead of this, that map is stuck on
+/// the `MapLibreStyles.demo` fallback (which needs real internet) for the
+/// rest of its life, never picking up the real Martin style even after the
+/// asset load this kicks off finishes. Confirmed live: without this call
+/// anywhere, every cold start showed a blank blue map on a device with LAN
+/// only, no general internet.
+Future<void> warmMapStyle() => _StyleCache.warm();
+
 /// Builds (and caches, keyed by Martin base URL) the full style JSON string
 /// from the bundled layer-only style asset — see `assets/map_style/style.json`
 /// and its generation note in `backend/deploy/martin/style.json`'s own

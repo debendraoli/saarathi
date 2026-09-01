@@ -10,6 +10,7 @@ import 'src/core/foreground/driver_foreground_service.dart';
 import 'src/core/notifications/notification_service.dart';
 import 'src/core/notifications/push_service.dart';
 import 'src/core/prefs.dart';
+import 'src/features/ride/presentation/widgets/map_view.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +26,11 @@ Future<void> main() async {
   // first frame) genuinely needs this done first; see its own comment.
   await NotificationService.instance.init();
   DriverForegroundService.init();
+  // Bundled-asset read, not a network call — cheap enough to await before
+  // the first frame so the first MapView build never falls back to the
+  // demo style (see warmMapStyle's own doc comment for why that fallback
+  // sticks for the map's whole lifetime once it happens).
+  await warmMapStyle();
 
   runApp(
     ProviderScope(
