@@ -35,7 +35,7 @@ spec:
             - name: build_time_zones
               value: "True"
             - name: build_elevation
-              value: "False"
+              value: "True"
             - name: server_threads
               value: {{ .Values.valhalla.serverThreads | quote }}
           volumeMounts:
