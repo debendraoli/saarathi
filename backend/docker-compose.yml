@@ -525,15 +525,20 @@ services:
     restart: ${RESTART_POLICY:-unless-stopped}
     ports:
       - "8092:3000"
-    # Directory, not a single file path — Martin watches it and hot-reloads
-    # the catalog if tiles-build ever produces a refreshed mbtiles, no
-    # restart needed (see Martin's own mbtiles-hot-reload docs). --font
-    # points at the real Noto Sans Regular TTF (same font OpenMapTiles'
-    # own glyph generation uses, so it matches the existing style's
-    # `text-font: ["Noto Sans Regular"]` everywhere) — Martin generates
-    # glyph range PBFs from it on the fly, unlike tileserver-gl-styles'
-    # pre-rendered-PBF-only bundle, which has no usable raw font source.
-    command: ["/data", "--font", "/fonts"]
+    # The specific .mbtiles file, not the whole directory — Martin still
+    # hot-reloads it in place if tiles-build ever refreshes it (see Martin's
+    # own mbtiles-hot-reload docs), but pointing at the directory made it
+    # auto-scan every file in there for tile sources too, including
+    # tileserver-gl's own (empty) config.json, which it tried to parse as
+    # GeoJSON and failed — a fatal error on every startup, so
+    # restart:unless-stopped just looped it forever (confirmed live: logs
+    # showed "Starting Martin" every ~60s). --font points at the real Noto
+    # Sans Regular TTF (same font OpenMapTiles' own glyph generation uses,
+    # so it matches the existing style's `text-font: ["Noto Sans Regular"]`
+    # everywhere) — Martin generates glyph range PBFs from it on the fly,
+    # unlike tileserver-gl-styles' pre-rendered-PBF-only bundle, which has
+    # no usable raw font source.
+    command: ["/data/nepal.mbtiles", "--font", "/fonts"]
     volumes:
       - ./.data/tiles:/data:ro
       - ./deploy/martin/fonts:/fonts:ro

@@ -28,7 +28,13 @@ spec:
       containers:
         - name: martin
           image: {{ .Values.martin.image }}
-          args: ["/data", "--font", "/fonts"]
+          # The specific .mbtiles file, not the whole /data directory — see
+          # the docker-compose martin service comment this was ported from:
+          # pointing at the directory made Martin auto-scan every file in it
+          # for tile sources, including tileserver-gl's own config.json,
+          # which it failed to parse as GeoJSON — fatal on every startup, so
+          # the pod just crash-looped.
+          args: ["/data/nepal.mbtiles", "--font", "/fonts"]
           ports:
             - containerPort: 3000
           readinessProbe:
