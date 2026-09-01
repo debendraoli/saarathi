@@ -78,7 +78,7 @@ export function TripMap({
         />
         {trail.length > 1 && (
           <Polyline
-            positions={trail.map((p) => [p.lat, p.lng])}
+            positions={trail.map((p) => [p.lat, p.lng] as [number, number])}
             pathOptions={{ color: "#f5a623", weight: 4, opacity: 0.85 }}
           />
         )}
