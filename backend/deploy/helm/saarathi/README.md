@@ -104,6 +104,13 @@ the same PVC the Job just wrote to). Point the app's
 `SAARATHI_TILE_URL` build define at
 `https://tiles.<domain>/styles/basic-preview/{z}/{x}/{y}.png`.
 
+This same PVC is also what `martin` (martin-deployment.yaml) reads for the
+app's vector-tile `MapView` — no separate bootstrap step needed for it, just
+point the app's `SAARATHI_MARTIN_URL` build define at
+`https://api.<domain>/tiles` (Martin has no public port of its own; it's
+reached through the `api.<domain>` IngressRoute like every other service,
+with the `/tiles` prefix stripped by Traefik before forwarding).
+
 Without this, the app's `TileLayer` has no explicit `tileProvider` and
 silently falls back to the public `tile.openstreetmap.org` — not meant for
 app traffic, and the root cause of a persistent map-blur issue found and

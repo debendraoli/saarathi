@@ -266,6 +266,17 @@ tiles:
     hpa: { minReplicas: 1, maxReplicas: 2, targetCPUUtilization: 75 }
   storage: 5Gi
 
+# Vector tiles + glyphs for the app's MapView (see app_config.dart's
+# martinBaseUrl doc) — internal-only Deployment, reached through the
+# api.<domain> IngressRoute (services.yaml's routeMatch is Rust-service-only,
+# so this one's hand-written, same as tileserver-gl/valhalla/pelias-api).
+martin:
+  image: ghcr.io/maplibre/martin:1.14.0
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: 1000m, memory: 512Mi }
+  hpa: { minReplicas: 1, maxReplicas: 3, targetCPUUtilization: 75 }
+
 pelias:
   # Despite the field/resource name, this runs real Elasticsearch, not
   # OpenSearch — verified directly (both 1.x and 2.x) that OpenSearch

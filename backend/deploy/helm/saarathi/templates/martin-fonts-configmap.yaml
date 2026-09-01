@@ -1,0 +1,17 @@
+{{/*
+Martin generates glyph-range PBFs on the fly from a real font file (unlike
+tileserver-gl-styles' pre-rendered-PBF-only bundle) — same Noto Sans Regular
+TTF the docker-compose martin service mounts from
+backend/deploy/martin/fonts/, copied into files/martin/fonts/ since Helm's
+.Files can't read outside the chart directory. Keep both copies in sync if
+the font ever changes.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: martin-fonts
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "saarathi.componentLabels" (dict "component" "martin" "Release" .Release) | nindent 4 }}
+binaryData:
+  NotoSans-Regular.ttf: {{ .Files.Get "files/martin/fonts/NotoSans-Regular.ttf" | b64enc }}

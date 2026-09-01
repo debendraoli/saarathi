@@ -42,11 +42,15 @@ class AppConfig {
           {'urls': turnUrl, 'username': turnUser, 'credential': turnPass},
       ];
 
-  /// Self-hosted Martin vector-tile server base (no trailing slash), e.g.
-  /// http://tiles.saarathi.np:8092 — MapView (see its doc comment) builds the
-  /// full style from this at runtime: tiles at `$martinBaseUrl/nepal/{z}/{x}/{y}`,
-  /// glyphs at `$martinBaseUrl/font/{fontstack}/{range}`. Configure at build:
-  ///   --dart-define=SAARATHI_MARTIN_URL=http://localhost:8092
+  /// Self-hosted Martin vector-tile server base (no trailing slash). MapView
+  /// (see its doc comment) builds the full style from this at runtime: tiles
+  /// at `$martinBaseUrl/nepal/{z}/{x}/{y}`, glyphs at
+  /// `$martinBaseUrl/font/{fontstack}/{range}`. In production this is the
+  /// `api.<domain>` IngressRoute's `/tiles` prefix (martin-deployment.yaml) —
+  /// Martin itself has no public port; Traefik strips the prefix before
+  /// forwarding. Configure at build:
+  ///   --dart-define=SAARATHI_MARTIN_URL=http://localhost:8092   (docker-compose)
+  ///   --dart-define=SAARATHI_MARTIN_URL=https://api.saarathi.example/tiles  (k8s)
   /// Empty falls back to MapLibre's public demo style/tiles — enough to
   /// render *something* before a Martin deployment is configured, same
   /// graceful-degradation spirit as the old raster tile URL had.

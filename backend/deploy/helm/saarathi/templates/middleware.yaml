@@ -21,3 +21,30 @@ spec:
     average: 100
     burst: 200
     period: 1s
+---
+# Panning/zooming fires dozens of tile requests in a burst — the JSON-API
+# `ratelimit` above would throttle normal map use, so tiles get their own,
+# much higher ceiling.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: tiles-ratelimit
+  namespace: {{ .Values.namespace }}
+spec:
+  rateLimit:
+    average: 400
+    burst: 800
+    period: 1s
+---
+# Martin itself serves at root ("/nepal/{z}/{x}/{y}", "/font/..."); the app
+# reaches it at api.<domain>/tiles/... (martin-deployment.yaml's
+# IngressRoute), so the "/tiles" prefix needs to come off before Traefik
+# forwards the request.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: tiles-stripprefix
+  namespace: {{ .Values.namespace }}
+spec:
+  stripPrefix:
+    prefixes: ["/tiles"]
