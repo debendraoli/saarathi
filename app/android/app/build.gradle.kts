@@ -23,7 +23,7 @@ if (hasReleaseSigning) {
 
 android {
     namespace = "com.saarathi.saarathi"
-    compileSdk = 36
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
