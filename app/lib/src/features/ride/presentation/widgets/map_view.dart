@@ -266,15 +266,87 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
   void didUpdateWidget(covariant MapView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (_disposed || !_styleReady) return;
-    _exclusive('pins', () => _syncPins(widget.pins));
-    _exclusive('callouts', () => _syncCallouts(widget.callouts));
-    _exclusive('circles', () => _syncCircles(widget.circles));
+    _syncGuarded('pins', () => _syncPins(widget.pins));
+    _syncGuarded('callouts', () => _syncCallouts(widget.callouts));
+    _syncGuarded('circles', () => _syncCircles(widget.circles));
     if (!listEquals(widget.route, _lastRoute)) {
       final prevRoute = _lastRoute;
       _lastRoute = widget.route;
       _animateRouteReveal(widget.route, prevRoute);
     }
     if (widget.autoFitPins) _maybeFitPins();
+  }
+
+  /// Runs an [_exclusive] sync call with recovery for both known
+  /// maplibre_gl races that can surface here (see the two error checks
+  /// below for what each one is and how it's confirmed to happen):
+  ///
+  /// - "annotation manager ... has not been initialized": [_onStyleLoaded]
+  ///   already retries this for the very first sync call it makes, but a
+  ///   `didUpdateWidget` call (e.g. the driver's very first live position
+  ///   arriving) can just as easily land inside that same brief startup
+  ///   window — and unlike the first call, had nothing retrying *it*, so
+  ///   that update was silently dropped for good (reported live: the
+  ///   driver marker missing right after a cold start, until some later,
+  ///   unrelated update happened to land after the race window closed and
+  ///   finally drew it). Retried the same bounded way here too.
+  /// - "you can only set existing annotations": see
+  ///   [_isStaleAnnotationError]'s own doc.
+  void _syncGuarded(String tag, Future<void> Function() task, {int attempt = 0}) {
+    _exclusive(tag, task).catchError((Object error, StackTrace st) async {
+      if (_disposed) return;
+      if (_isStaleAnnotationError(error)) {
+        _clearAnnotationCaches();
+        await _fullResync(force: true);
+        return;
+      }
+      if (_isNotInitializedError(error) && attempt < 3) {
+        await Future.delayed(Duration(milliseconds: 150 * (attempt + 1)));
+        if (!_disposed) _syncGuarded(tag, task, attempt: attempt + 1);
+        return;
+      }
+      throw error;
+    });
+  }
+
+  static bool _isNotInitializedError(Object error) =>
+      error is Exception && error.toString().contains('has not been initialized');
+
+  /// True for maplibre_gl's `AnnotationManager.set` assertion — thrown when
+  /// this widget's own symbol/line/circle caches (`_pinSymbols` etc.) still
+  /// reference native annotations that no longer exist. Confirmed live: this
+  /// happens when the underlying native map view is torn down and recreated
+  /// by the OS mid-trip (backgrounding + the screen locking, then resuming,
+  /// was enough to trigger it) without this `State` — and its caches —
+  /// being recreated in step. Once triggered it repeats forever on every
+  /// subsequent update (each one hits the same stale reference), so the
+  /// driver's own marker in particular never recovers on its own without
+  /// the recovery in [_syncGuarded] — distinct from the concurrent-call
+  /// race [_exclusive] already guards against, which this doesn't replace.
+  /// A native reset invalidates *every* annotation, not just whichever one
+  /// happened to fail first, so recovery (in [_syncGuarded]) drops every
+  /// local cache and does a full from-scratch resync (the same one
+  /// [_onStyleLoaded] already runs for its own first-load race) rather than
+  /// patching just the one caller that happened to throw.
+  static bool _isStaleAnnotationError(Object error) =>
+      error is AssertionError &&
+      error.toString().contains('you can only set existing annotations');
+
+  void _clearAnnotationCaches() {
+    _pinSymbols.clear();
+    _pinDisplay.clear();
+    for (final anim in _pinMoveAnims.values) {
+      anim.dispose();
+    }
+    _pinMoveAnims.clear();
+    for (final anim in _pinPopAnims.values) {
+      anim.dispose();
+    }
+    _pinPopAnims.clear();
+    _calloutSymbols.clear();
+    _routeLine = null;
+    _lastRoute = null;
+    _circlePool.clear();
   }
 
   @override
@@ -297,15 +369,23 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
 
   Future<void> _onStyleLoaded() async {
     _styleReady = true;
-    // maplibre_gl's controller only fires this callback once its annotation
-    // managers report `isInitialized`, but on a real device the very first
-    // load has still thrown "annotation manager ... has not been
-    // initialized" out of the very first addSymbol call here — confirmed
-    // live: a screen with static pins that never triggers another
-    // didUpdateWidget rebuild was left with a start-to-finish blank map, no
-    // pins/route/callouts ever drawn. Retrying absorbs that one-time race
-    // (plugin-internal, not something this app controls) instead of
-    // silently losing the whole initial draw.
+    await _fullResync(force: true);
+  }
+
+  /// Draws pins/callouts/circles/route from scratch and re-fits the camera
+  /// — everything a freshly-loaded style (or a from-scratch recovery after
+  /// [_recoverFromStaleAnnotations] clears the caches) needs.
+  ///
+  /// maplibre_gl's controller only fires `onStyleLoadedCallback` once its
+  /// annotation managers report `isInitialized`, but on a real device the
+  /// very first load has still thrown "annotation manager ... has not been
+  /// initialized" out of the very first `addSymbol` call here — confirmed
+  /// live: a screen with static pins that never triggers another
+  /// `didUpdateWidget` rebuild was left with a start-to-finish blank map, no
+  /// pins/route/callouts ever drawn. Retrying absorbs that one-time race
+  /// (plugin-internal, not something this app controls) instead of silently
+  /// losing the whole draw.
+  Future<void> _fullResync({bool force = false}) async {
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
         await _exclusive('pins', () => _syncPins(widget.pins));
@@ -321,7 +401,7 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
         await Future.delayed(Duration(milliseconds: 150 * (attempt + 1)));
       }
     }
-    if (widget.autoFitPins) _maybeFitPins(force: true);
+    if (widget.autoFitPins) _maybeFitPins(force: force);
   }
 
   // ── Pins ─────────────────────────────────────────────────────────────────
@@ -886,6 +966,12 @@ class _MapViewState extends State<MapView> with TickerProviderStateMixin {
               onStyleLoadedCallback: _onStyleLoaded,
               onCameraIdle: _onCameraIdle,
               doubleClickZoomEnabled: widget.enableDoubleTapZoom,
+              // The plugin's own native compass widget is positioned in raw
+              // platform pixels, ignoring Flutter's `SafeArea` — it renders
+              // half-clipped under the status bar (reported live) and this
+              // screen already has its own Flutter-positioned recenter
+              // button, so there's nothing lost in dropping it.
+              compassEnabled: false,
               onMapClick: widget.onTap == null
                   ? null
                   : (_, coords) => widget.onTap!(_fromMgl(coords)),
