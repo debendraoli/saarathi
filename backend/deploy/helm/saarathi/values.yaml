@@ -294,8 +294,11 @@ pelias:
   # other file that references `.Values.pelias.opensearch.*`. Pinned to the
   # 8.x line, not the newer 9.x — Pelias's own requirements.md only lists
   # 7.x (recommended) and 8.x as supported; nothing confirms 9.x works.
+  # Docker Hub, not docker.elastic.co — same image content, just much
+  # faster to pull from this network; watch for Docker Hub's anonymous
+  # pull-rate limit if that ever becomes an issue on the cluster.
   opensearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.21
+    image: elasticsearch:8.19.20
     resources:
       requests: { cpu: 500m, memory: 1.5Gi }
       limits: { cpu: 1000m, memory: 2.5Gi }

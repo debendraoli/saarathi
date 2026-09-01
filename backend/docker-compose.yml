@@ -463,7 +463,7 @@ services:
           memory: 512M
 
   pelias-opensearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.21
+    image: elasticsearch:8.19.20
     profiles: ["routing"]
     restart: ${RESTART_POLICY:-unless-stopped}
     environment:
