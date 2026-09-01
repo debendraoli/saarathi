@@ -121,6 +121,9 @@ mod tests {
         let thresholds: Vec<i32> = BADGE_THRESHOLDS.iter().map(|(t, _)| *t).collect();
         let mut sorted = thresholds.clone();
         sorted.sort();
-        assert_eq!(thresholds, sorted, "BADGE_THRESHOLDS must be listed in increasing order");
+        assert_eq!(
+            thresholds, sorted,
+            "BADGE_THRESHOLDS must be listed in increasing order"
+        );
     }
 }

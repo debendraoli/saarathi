@@ -9,12 +9,12 @@ use crate::error::AppResult;
 use crate::state::AppState;
 use axum::extract::{Query, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
 

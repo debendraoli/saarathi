@@ -99,7 +99,12 @@ impl OtpDelivery {
         anyhow::bail!("no OTP delivery channel available (WhatsApp failed/unset, Sparrow unset)")
     }
 
-    async fn send_whatsapp(&self, cfg: &WhatsAppConfig, phone: &str, code: &str) -> anyhow::Result<()> {
+    async fn send_whatsapp(
+        &self,
+        cfg: &WhatsAppConfig,
+        phone: &str,
+        code: &str,
+    ) -> anyhow::Result<()> {
         // Meta wants the number without the leading '+'.
         let to = phone.trim_start_matches('+');
         let body = json!({
@@ -142,7 +147,12 @@ impl OtpDelivery {
         Ok(())
     }
 
-    async fn send_sparrow(&self, cfg: &SparrowConfig, phone: &str, code: &str) -> anyhow::Result<()> {
+    async fn send_sparrow(
+        &self,
+        cfg: &SparrowConfig,
+        phone: &str,
+        code: &str,
+    ) -> anyhow::Result<()> {
         // Sparrow wants a bare 10-digit Nepali mobile number.
         let to = phone.trim_start_matches("+977");
         let text = format!("{code} is your Saarathi verification code. Do not share this code.");

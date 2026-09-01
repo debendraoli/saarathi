@@ -7,12 +7,13 @@ use crate::notify;
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use chrono::{DateTime, Utc};
+use saarathi_core::domain::trip_status;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
@@ -47,7 +48,7 @@ async fn rate(
             .fetch_optional(&st.db)
             .await?;
     let (rider, driver, status) = row.ok_or(AppError::NotFound)?;
-    if status != "completed" {
+    if status != trip_status::COMPLETED {
         return Err(AppError::BadRequest(
             "can only rate a completed trip".into(),
         ));

@@ -9,8 +9,8 @@
 //! credentials, mirroring `saarathi-routing`'s empty-`ROUTING_URL` fallback.
 
 use async_trait::async_trait;
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use uuid::Uuid;
 
 pub struct TopupInit {
@@ -103,7 +103,12 @@ pub struct KhaltiProvider {
 }
 
 impl KhaltiProvider {
-    pub fn new(base_url: String, secret_key: String, return_url: String, website_url: String) -> Self {
+    pub fn new(
+        base_url: String,
+        secret_key: String,
+        return_url: String,
+        website_url: String,
+    ) -> Self {
         Self {
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))

@@ -5,7 +5,7 @@
 
 use crate::error::AppResult;
 use rust_decimal::Decimal;
-use saarathi_core::ledger::{LedgerLink, GENESIS_HASH};
+use saarathi_core::ledger::{GENESIS_HASH, LedgerLink};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 

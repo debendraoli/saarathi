@@ -15,8 +15,8 @@
 //! surge multiplier is clamped to +20%.
 
 use crate::legal::{
-    VehicleClass, ACCIDENT_FUND_RATE, MAX_COMMISSION_RATE, MAX_SURGE_MULTIPLIER, MIN_DISTANCE_KM,
-    NO_SURGE_MULTIPLIER,
+    ACCIDENT_FUND_RATE, MAX_COMMISSION_RATE, MAX_SURGE_MULTIPLIER, MIN_DISTANCE_KM,
+    NO_SURGE_MULTIPLIER, VehicleClass,
 };
 use crate::money::Money;
 use rust_decimal::Decimal;

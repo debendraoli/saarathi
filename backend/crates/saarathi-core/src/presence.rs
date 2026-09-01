@@ -37,10 +37,7 @@ pub async fn mark_online(conn: &mut redis::aio::ConnectionManager, user_id: Uuid
 /// Clear a user's presence mark. Best-effort — call on clean socket close;
 /// an abrupt drop is still covered by the TTL either way.
 pub async fn mark_offline(conn: &mut redis::aio::ConnectionManager, user_id: Uuid) {
-    let res: redis::RedisResult<()> = redis::cmd("DEL")
-        .arg(key(user_id))
-        .query_async(conn)
-        .await;
+    let res: redis::RedisResult<()> = redis::cmd("DEL").arg(key(user_id)).query_async(conn).await;
     if let Err(e) = res {
         tracing::warn!(error = %e, %user_id, "presence: mark_offline failed");
     }

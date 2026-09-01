@@ -10,8 +10,8 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -23,7 +23,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/admin/rides", get(rides))
         .route("/v1/admin/cancellations", get(cancellations))
-        .route("/v1/admin/cancellations/{id}/review", post(review_cancellation))
+        .route(
+            "/v1/admin/cancellations/{id}/review",
+            post(review_cancellation),
+        )
         .route("/v1/admin/leaderboard", get(leaderboard))
         .route("/v1/admin/riders", get(riders))
         .route("/v1/admin/riders/{id}", get(rider_detail))
@@ -81,9 +84,11 @@ async fn rides(
             .await?
         }
         _ => {
-            sqlx::query_as(sqlx::AssertSqlSafe(format!("{base} ORDER BY t.created_at DESC LIMIT 200")))
-                .fetch_all(&st.db)
-                .await?
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "{base} ORDER BY t.created_at DESC LIMIT 200"
+            )))
+            .fetch_all(&st.db)
+            .await?
         }
     };
     Ok(Json(rows))
@@ -137,11 +142,12 @@ async fn review_cancellation(
     StaffUser(claims): StaffUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM trips WHERE id = $1 AND status = 'cancelled')")
-            .bind(id)
-            .fetch_one(&st.db)
-            .await?;
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM trips WHERE id = $1 AND status = 'cancelled')",
+    )
+    .bind(id)
+    .fetch_one(&st.db)
+    .await?;
     if !exists {
         return Err(AppError::NotFound);
     }
@@ -179,32 +185,41 @@ async fn leaderboard(
     let by = q.by.as_deref().unwrap_or("earnings");
 
     let sql: &str = match (role, by) {
-        ("driver", "earnings") =>
+        ("driver", "earnings") => {
             "SELECT le.driver_id AS user_id, u.full_name AS name, u.phone, \
                     SUM(le.driver_payout)::float8 AS value \
              FROM ledger_entries le JOIN users u ON u.id = le.driver_id \
-             GROUP BY le.driver_id, u.full_name, u.phone ORDER BY value DESC LIMIT 20",
-        ("driver", "rating") =>
+             GROUP BY le.driver_id, u.full_name, u.phone ORDER BY value DESC LIMIT 20"
+        }
+        ("driver", "rating") => {
             "SELECT ra.ratee_id AS user_id, u.full_name AS name, u.phone, \
                     AVG(ra.stars)::float8 AS value \
              FROM ratings ra JOIN users u ON u.id = ra.ratee_id \
              WHERE ra.role = 'rider_rates_driver' \
-             GROUP BY ra.ratee_id, u.full_name, u.phone ORDER BY value DESC LIMIT 20",
-        ("driver", "cancellations") =>
+             GROUP BY ra.ratee_id, u.full_name, u.phone ORDER BY value DESC LIMIT 20"
+        }
+        ("driver", "cancellations") => {
             "SELECT t.cancelled_by AS user_id, u.full_name AS name, u.phone, count(*)::float8 AS value \
              FROM trips t JOIN users u ON u.id = t.cancelled_by \
              WHERE t.status = 'cancelled' AND t.cancelled_by_role = 'driver' \
-             GROUP BY t.cancelled_by, u.full_name, u.phone ORDER BY value DESC LIMIT 20",
-        ("rider", "cancellations") =>
+             GROUP BY t.cancelled_by, u.full_name, u.phone ORDER BY value DESC LIMIT 20"
+        }
+        ("rider", "cancellations") => {
             "SELECT t.cancelled_by AS user_id, u.full_name AS name, u.phone, count(*)::float8 AS value \
              FROM trips t JOIN users u ON u.id = t.cancelled_by \
              WHERE t.status = 'cancelled' AND t.cancelled_by_role = 'rider' \
-             GROUP BY t.cancelled_by, u.full_name, u.phone ORDER BY value DESC LIMIT 20",
-        ("rider", "trips") =>
+             GROUP BY t.cancelled_by, u.full_name, u.phone ORDER BY value DESC LIMIT 20"
+        }
+        ("rider", "trips") => {
             "SELECT t.rider_id AS user_id, u.full_name AS name, u.phone, count(*)::float8 AS value \
              FROM trips t JOIN users u ON u.id = t.rider_id \
-             GROUP BY t.rider_id, u.full_name, u.phone ORDER BY value DESC LIMIT 20",
-        _ => return Err(AppError::BadRequest("unsupported role/by combination".into())),
+             GROUP BY t.rider_id, u.full_name, u.phone ORDER BY value DESC LIMIT 20"
+        }
+        _ => {
+            return Err(AppError::BadRequest(
+                "unsupported role/by combination".into(),
+            ));
+        }
     };
 
     let rows: Vec<LeaderRow> = sqlx::query_as(sql).fetch_all(&st.db).await?;
@@ -355,7 +370,8 @@ async fn set_rider_status(
     .fetch_optional(&st.db)
     .await?;
     updated.ok_or(AppError::NotFound)?;
-    audit_record(&st.db, actor, action, id, json!({ "status": status })).await?;
+    saarathi_core::audit::record(&st.db, actor, action, "rider", id, json!({ "status": status }))
+        .await?;
     crate::notify::publish_status_changed(&st.nats, id, status).await;
     Ok(Json(json!({ "ok": true, "status": status })))
 }
@@ -378,29 +394,6 @@ async fn reactivate_rider(
     set_rider_status(&st, claims.sub, "rider.reactivate", id, "active").await
 }
 
-/// Appends to the shared `audit_log` table — this service has no `audit`
-/// module of its own (only `auth` does); duplicating this one small insert
-/// is cheaper than a new cross-service dependency for it.
-async fn audit_record(
-    db: &sqlx::PgPool,
-    actor: Uuid,
-    action: &str,
-    entity_id: Uuid,
-    detail: serde_json::Value,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO audit_log (actor_user_id, action, entity_type, entity_id, detail) \
-         VALUES ($1, $2, 'rider', $3, $4)",
-    )
-    .bind(actor)
-    .bind(action)
-    .bind(entity_id)
-    .bind(detail)
-    .execute(db)
-    .await?;
-    Ok(())
-}
-
 #[derive(Deserialize)]
 struct UpdateRiderInput {
     full_name: Option<String>,
@@ -413,9 +406,10 @@ async fn update_rider(
     Json(body): Json<UpdateRiderInput>,
 ) -> AppResult<Json<serde_json::Value>> {
     if let Some(name) = &body.full_name
-        && name.trim().is_empty() {
-            return Err(AppError::BadRequest("full_name cannot be empty".into()));
-        }
+        && name.trim().is_empty()
+    {
+        return Err(AppError::BadRequest("full_name cannot be empty".into()));
+    }
     let full_name = body.full_name.as_deref().map(str::trim);
 
     let updated: Option<(Uuid,)> = sqlx::query_as(
@@ -428,10 +422,11 @@ async fn update_rider(
     .await?;
     updated.ok_or(AppError::NotFound)?;
 
-    audit_record(
+    saarathi_core::audit::record(
         &st.db,
         claims.sub,
         "rider.update",
+        "rider",
         id,
         json!({ "full_name": full_name }),
     )

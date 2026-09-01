@@ -16,33 +16,26 @@ mod routes;
 mod state;
 mod store;
 
-use axum::{routing::get, Json, Router};
+use axum::Router;
 use config::Config;
-use sqlx::postgres::PgPoolOptions;
+use saarathi_core::bootstrap::{connect_pg, health_router, init_tracing};
 use state::AppState;
 use std::sync::Arc;
-use std::time::Duration;
 use store::LocalDocumentStore;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    init_tracing();
 
     let config = Config::from_env()?;
     store::ensure_dir(&config.places_storage_dir)?;
 
-    let db = PgPoolOptions::new()
-        .max_connections(10)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect(&config.database_url)
+    let db = connect_pg(&config.database_url).await?;
+    sqlx::raw_sql(include_str!("schema.sql"))
+        .execute(&db)
         .await?;
-    sqlx::raw_sql(include_str!("schema.sql")).execute(&db).await?;
 
     // NATS bus for review notifications (non-fatal: reviews work fine if the
     // bus is down, the contributor just doesn't get told).
@@ -64,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = Router::new()
-        .route("/health", get(health))
+        .merge(health_router("saarathi-places"))
         .merge(routes::router())
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
@@ -75,8 +68,4 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("saarathi-places listening on http://{addr}");
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "service": "saarathi-places", "status": "ok" }))
 }

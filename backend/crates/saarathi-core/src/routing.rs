@@ -260,7 +260,10 @@ mod tests {
         let b = pt(28.0, 85.0);
         let expected = 2.0 * std::f64::consts::PI * 6371.0 / 360.0;
         let d = haversine_km(a, b);
-        assert!((d - expected).abs() < 0.5, "got {d}km, expected ~{expected}km");
+        assert!(
+            (d - expected).abs() < 0.5,
+            "got {d}km, expected ~{expected}km"
+        );
     }
 
     #[test]
@@ -331,18 +334,27 @@ mod tests {
 
     #[test]
     fn route_profile_from_wire_defaults_unknown_values_to_motorcycle() {
-        assert_eq!(RouteProfile::from_wire("two_wheeler"), RouteProfile::Motorcycle);
+        assert_eq!(
+            RouteProfile::from_wire("two_wheeler"),
+            RouteProfile::Motorcycle
+        );
         assert_eq!(RouteProfile::from_wire("bogus"), RouteProfile::Motorcycle);
         assert_eq!(RouteProfile::from_wire(""), RouteProfile::Motorcycle);
     }
 
     #[test]
     fn route_profile_wire_round_trips() {
-        assert_eq!(RouteProfile::from_wire(RouteProfile::Auto.as_wire()), RouteProfile::Auto);
+        assert_eq!(
+            RouteProfile::from_wire(RouteProfile::Auto.as_wire()),
+            RouteProfile::Auto
+        );
         assert_eq!(
             RouteProfile::from_wire(RouteProfile::ThreeWheeler.as_wire()),
             RouteProfile::ThreeWheeler
         );
-        assert_eq!(RouteProfile::from_wire(RouteProfile::Motorcycle.as_wire()), RouteProfile::Motorcycle);
+        assert_eq!(
+            RouteProfile::from_wire(RouteProfile::Motorcycle.as_wire()),
+            RouteProfile::Motorcycle
+        );
     }
 }

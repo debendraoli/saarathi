@@ -5,14 +5,14 @@
 use crate::auth::AuthUser;
 use crate::dispatch;
 use crate::error::{AppError, AppResult};
-use crate::models::{Trip, TRIP_COLS};
+use crate::models::{TRIP_COLS, Trip};
 use crate::notify;
 use crate::pricing;
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
@@ -30,10 +30,12 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn load_bid_trip(st: &AppState, id: Uuid) -> AppResult<Trip> {
-    let trip: Option<Trip> = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1")))
-        .bind(id)
-        .fetch_optional(&st.db)
-        .await?;
+    let trip: Option<Trip> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {TRIP_COLS} FROM trips WHERE id = $1"
+    )))
+    .bind(id)
+    .fetch_optional(&st.db)
+    .await?;
     let trip = trip.ok_or(AppError::NotFound)?;
     if trip.pricing_mode != "bid" {
         return Err(AppError::bad(
@@ -88,9 +90,9 @@ pub(crate) async fn do_place_bid(
             "trip is no longer open for bidding",
         ));
     }
-    let ask = trip.ask_fare.ok_or_else(|| {
-        AppError::Other(anyhow::anyhow!("bid-mode trip {id} has no ask_fare"))
-    })?;
+    let ask = trip
+        .ask_fare
+        .ok_or_else(|| AppError::Other(anyhow::anyhow!("bid-mode trip {id} has no ask_fare")))?;
 
     let vclass = pricing::parse_vehicle_class(&trip.vehicle_class)?;
     let ceiling = saarathi_core::pricing::legal_ceiling(vclass, trip.distance_km);

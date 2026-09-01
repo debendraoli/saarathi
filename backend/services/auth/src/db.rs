@@ -1,17 +1,7 @@
-//! Database pool + idempotent schema bootstrap.
+//! Database schema bootstrap (pool creation lives in
+//! `saarathi_core::bootstrap::connect_pg`).
 
-use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
-use std::time::Duration;
-
-pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
-    let pool = PgPoolOptions::new()
-        .max_connections(10)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect(database_url)
-        .await?;
-    Ok(pool)
-}
 
 /// Provision the schema idempotently from a single embedded source of truth.
 /// There are no migration files — a fresh database is brought fully up to date

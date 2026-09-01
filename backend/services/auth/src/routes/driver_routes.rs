@@ -7,8 +7,8 @@ use axum::extract::{Multipart, Path, State};
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use chrono::NaiveDate;
 use saarathi_core::api::ErrorCode;
@@ -129,7 +129,13 @@ async fn register(
     AuthUser(claims): AuthUser,
     Json(body): Json<RegisterInput>,
 ) -> AppResult<Json<Driver>> {
-    if body.license_number.as_deref().unwrap_or("").trim().is_empty() {
+    if body
+        .license_number
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
         return Err(AppError::BadRequest("license_number is required".into()));
     }
     if body.address.as_deref().unwrap_or("").trim().is_empty() {
@@ -138,7 +144,14 @@ async fn register(
     if body.vehicle.plate_number.trim().is_empty() {
         return Err(AppError::BadRequest("plate_number is required".into()));
     }
-    if body.vehicle.model.as_deref().unwrap_or("").trim().is_empty() {
+    if body
+        .vehicle
+        .model
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
         return Err(AppError::BadRequest("vehicle model is required".into()));
     }
     let service_types = validate_service_types(body.service_types)?;
@@ -362,7 +375,7 @@ fn parse_kind(s: &str) -> Result<DocumentKind, AppError> {
             return Err(AppError::bad(
                 ErrorCode::DocumentInvalid,
                 format!("unknown document kind '{other}'"),
-            ))
+            ));
         }
     })
 }

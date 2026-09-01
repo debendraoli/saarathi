@@ -18,7 +18,7 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
-use saarathi_core::authn::{verify_access, HasJwtSecret};
+use saarathi_core::authn::{HasJwtSecret, verify_access};
 use serde::Deserialize;
 
 #[derive(Deserialize)]

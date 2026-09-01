@@ -25,19 +25,12 @@ pub mod tracking;
 use crate::driver_ws;
 use crate::state::AppState;
 use crate::ws;
-use axum::{routing::get, Json, Router};
-use serde_json::json;
+use axum::{Router, routing::get};
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
-
-async fn health() -> Json<serde_json::Value> {
-    Json(
-        json!({ "service": "saarathi-rides", "status": "ok", "version": env!("CARGO_PKG_VERSION") }),
-    )
-}
 
 pub fn router(state: AppState) -> Router {
     Router::<AppState>::new()
-        .route("/health", get(health))
+        .merge(saarathi_core::bootstrap::health_router::<AppState>("saarathi-rides"))
         .route("/v1/ws", get(ws::ws_handler))
         .route("/v1/driver/ws", get(driver_ws::driver_ws_handler))
         .merge(rides::routes())

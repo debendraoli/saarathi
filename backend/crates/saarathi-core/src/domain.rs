@@ -55,6 +55,14 @@ pub mod trip_status {
     pub const CANCELLED: &str = "cancelled";
 }
 
+/// Dispatch job type (`trips.trip_type`) — a driver declares exactly one at
+/// KYC and dispatch must honour it everywhere (candidate matching, supply
+/// counts), not just at match time. See AGENTS.md's job-type segregation rule.
+pub mod trip_type {
+    pub const RIDE: &str = "ride";
+    pub const DELIVERY: &str = "delivery";
+}
+
 /// In-app notification classes (`notifications.class`).
 pub mod notif {
     pub const SAFETY: &str = "safety";

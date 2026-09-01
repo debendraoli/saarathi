@@ -9,7 +9,7 @@ use crate::error::{AppError, AppResult};
 use crate::notify;
 use crate::state::AppState;
 use axum::extract::{Path, State};
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -51,7 +51,7 @@ async fn validate_trip_ref(st: &AppState, uid: Uuid, trip_id: Uuid) -> AppResult
     if rider == uid || driver == Some(uid) {
         return Ok(());
     }
-    if trip_type == "delivery" {
+    if trip_type == saarathi_core::domain::trip_type::DELIVERY {
         let owns: Option<Uuid> = sqlx::query_scalar(
             "SELECT m.id FROM orders o JOIN merchants m ON m.id = o.merchant_id \
              WHERE o.trip_id = $1 AND m.owner_user_id = $2",

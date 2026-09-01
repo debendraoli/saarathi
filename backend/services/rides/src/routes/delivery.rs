@@ -5,19 +5,19 @@
 
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
-use crate::models::{Trip, TRIP_COLS};
+use crate::models::{TRIP_COLS, Trip};
 use crate::routing::{LatLng, RouteProfile};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use axum::{routing::post, Json, Router};
+use axum::{Json, Router, routing::post};
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
-use saarathi_core::domain::roles;
+use saarathi_core::domain::{roles, trip_status, trip_type};
 use saarathi_core::idempotency::{self, Reservation};
 use saarathi_core::money::Money;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
@@ -114,17 +114,12 @@ async fn book(
     headers: HeaderMap,
     Json(b): Json<BookReq>,
 ) -> AppResult<Json<Value>> {
-    let idem_key = headers
-        .get("x-idempotency-key")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            AppError::bad(
-                ErrorCode::Validation,
-                "X-Idempotency-Key header is required",
-            )
-        })?
-        .to_string();
+    let idem_key = saarathi_core::idempotency::key_from_headers(&headers).ok_or_else(|| {
+        AppError::bad(
+            ErrorCode::Validation,
+            "X-Idempotency-Key header is required",
+        )
+    })?;
 
     // Claim the key up front, before any of the booking work below, so a
     // double-tap/retry replays the first parcel instead of creating a second
@@ -227,7 +222,15 @@ async fn book(
         "cod_amount": b.cod_amount,
         "delivery_otp": otp,
     });
-    idempotency::store(&mut tx, &idem_key, claims.sub, "delivery.book", 200, &response).await?;
+    idempotency::store(
+        &mut tx,
+        &idem_key,
+        claims.sub,
+        "delivery.book",
+        200,
+        &response,
+    )
+    .await?;
 
     tx.commit().await?;
 
@@ -296,13 +299,13 @@ async fn deliver(
     .fetch_optional(&mut *tx)
     .await?;
     let m = m.ok_or(AppError::NotFound)?;
-    if m.trip_type != "delivery" {
+    if m.trip_type != trip_type::DELIVERY {
         return Err(AppError::BadRequest("not a delivery".into()));
     }
     if m.driver_id != Some(claims.sub) {
         return Err(AppError::Forbidden);
     }
-    if m.status != "in_progress" {
+    if m.status != trip_status::IN_PROGRESS {
         return Err(AppError::BadRequest(
             "parcel must be picked up (in_progress) before delivery".into(),
         ));
@@ -386,7 +389,7 @@ async fn deliver(
     st.hub.publish(
         "trip",
         id,
-        json!({ "type": "status", "status": "completed" }).to_string(),
+        json!({ "type": "status", "status": trip_status::COMPLETED }).to_string(),
     );
 
     Ok(Json(json!({

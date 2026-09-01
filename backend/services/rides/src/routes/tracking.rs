@@ -7,11 +7,12 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
+use saarathi_core::domain::trip_status;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -73,7 +74,7 @@ async fn maybe_auto_complete(st: &AppState, trip_id: Uuid, driver_id: Uuid, lat:
     let Some((trip_type, status, dest_lat, dest_lng)) = row else {
         return;
     };
-    if trip_type != "ride" || status != "in_progress" {
+    if trip_type != saarathi_core::domain::trip_type::RIDE || status != trip_status::IN_PROGRESS {
         return;
     }
     let dist = saarathi_core::routing::haversine_km(
@@ -86,11 +87,14 @@ async fn maybe_auto_complete(st: &AppState, trip_id: Uuid, driver_id: Uuid, lat:
     if dist > ARRIVAL_RADIUS_KM {
         return;
     }
-    match crate::routes::rides::complete_trip(st, trip_id, driver_id).await { Err(e) => {
-        tracing::warn!(trip = %trip_id, error = %e, "auto-complete on arrival failed");
-    } _ => {
-        tracing::info!(trip = %trip_id, "auto-completed: driver reached destination");
-    }}
+    match crate::routes::rides::complete_trip(st, trip_id, driver_id).await {
+        Err(e) => {
+            tracing::warn!(trip = %trip_id, error = %e, "auto-complete on arrival failed");
+        }
+        _ => {
+            tracing::info!(trip = %trip_id, "auto-completed: driver reached destination");
+        }
+    }
 }
 
 #[derive(Deserialize)]

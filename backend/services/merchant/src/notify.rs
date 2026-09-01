@@ -3,7 +3,7 @@
 //! standalone `saarathi-notify` service persists it and runs the push ladder.
 //! Fire-and-forget: a bus blip never fails an order.
 
-use saarathi_core::events::{NotifyRequest, NOTIFY_SUBJECT};
+use saarathi_core::events::{NOTIFY_SUBJECT, NotifyRequest};
 use uuid::Uuid;
 
 pub async fn send(

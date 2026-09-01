@@ -5,7 +5,7 @@
 //! and push is skipped (the durable inbox still works).
 
 use anyhow::Context;
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -89,9 +89,10 @@ impl FcmSender {
         {
             let guard = self.token.lock().await;
             if let Some((tok, exp)) = guard.as_ref()
-                && *exp - 60 > now {
-                    return Ok(tok.clone());
-                }
+                && *exp - 60 > now
+            {
+                return Ok(tok.clone());
+            }
         }
         let claims = AuthClaims {
             iss: &self.sa.client_email,
@@ -166,7 +167,9 @@ impl FcmSender {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(SendError::Other(anyhow::anyhow!("fcm send {status}: {text}")));
+            return Err(SendError::Other(anyhow::anyhow!(
+                "fcm send {status}: {text}"
+            )));
         }
         Ok(())
     }
@@ -213,7 +216,9 @@ impl FcmSender {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            return Err(SendError::Other(anyhow::anyhow!("fcm send {status}: {text}")));
+            return Err(SendError::Other(anyhow::anyhow!(
+                "fcm send {status}: {text}"
+            )));
         }
         Ok(())
     }

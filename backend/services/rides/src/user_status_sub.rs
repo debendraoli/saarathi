@@ -7,12 +7,14 @@
 use crate::state::AppState;
 use futures_util::StreamExt;
 use saarathi_core::domain::user_status;
-use saarathi_core::events::{UserStatusChanged, USER_STATUS_CHANGED_SUBJECT};
+use saarathi_core::events::{USER_STATUS_CHANGED_SUBJECT, UserStatusChanged};
 use serde_json::json;
 
 pub async fn run(st: AppState) {
     let Some(nats) = &st.nats else {
-        tracing::warn!("user_status_sub: NATS unavailable; account status changes won't force-close sockets");
+        tracing::warn!(
+            "user_status_sub: NATS unavailable; account status changes won't force-close sockets"
+        );
         return;
     };
     let mut sub = match nats.subscribe(USER_STATUS_CHANGED_SUBJECT).await {
@@ -24,7 +26,9 @@ pub async fn run(st: AppState) {
     };
     while let Some(msg) = sub.next().await {
         match serde_json::from_slice::<UserStatusChanged>(&msg.payload) {
-            Ok(evt) if evt.status == user_status::SUSPENDED || evt.status == user_status::BANNED => {
+            Ok(evt)
+                if evt.status == user_status::SUSPENDED || evt.status == user_status::BANNED =>
+            {
                 st.hub.publish(
                     "account",
                     evt.user_id,

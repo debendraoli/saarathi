@@ -27,16 +27,12 @@ use store::LocalDocumentStore;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    saarathi_core::bootstrap::init_tracing();
 
     let config = Config::from_env()?;
     store::ensure_dir(&config.kyc_storage_dir)?;
 
-    let pool = db::connect(&config.database_url).await?;
+    let pool = saarathi_core::bootstrap::connect_pg(&config.database_url).await?;
     db::init_schema(&pool).await?;
 
     if let Some(phone) = &config.seed_dev_admin_phone {

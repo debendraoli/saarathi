@@ -2,7 +2,7 @@
 //! rides (revenue-share, corporate charges) and payments (payout reversals).
 //! Single implementation so the chain stays verifiable across every writer.
 
-use crate::ledger::{chain_hash, GENESIS_HASH};
+use crate::ledger::{GENESIS_HASH, chain_hash};
 use crate::wallet::WalletError;
 use rust_decimal::Decimal;
 use sqlx::{PgPool, Postgres, Transaction};

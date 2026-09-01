@@ -6,7 +6,7 @@ use crate::auth::AdminUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use saarathi_core::legal::MAX_COMMISSION_RATE;
@@ -148,28 +148,27 @@ async fn list(
 ) -> AppResult<Json<Vec<Partner>>> {
     let limit = q.limit.unwrap_or(20).clamp(1, 100);
     let offset = q.offset.unwrap_or(0).max(0);
-    let rows: Vec<Partner> = match q.status {
-        Some(s) => {
-            sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {PARTNER_COLS} FROM partners WHERE status::text = $1 \
+    let rows: Vec<Partner> =
+        match q.status {
+            Some(s) => {
+                sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                    "SELECT {PARTNER_COLS} FROM partners WHERE status::text = $1 \
              ORDER BY created_at DESC LIMIT $2 OFFSET $3"
-        )))
-            .bind(s)
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&st.db)
-            .await?
-        }
-        None => {
-            sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                )))
+                .bind(s)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&st.db)
+                .await?
+            }
+            None => sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "SELECT {PARTNER_COLS} FROM partners ORDER BY created_at DESC LIMIT $1 OFFSET $2"
             )))
             .bind(limit)
             .bind(offset)
             .fetch_all(&st.db)
-            .await?
-        }
-    };
+            .await?,
+        };
     Ok(Json(rows))
 }
 
@@ -287,15 +286,17 @@ async fn update(
         && !matches!(
             s.as_str(),
             "pending" | "active" | "suspended" | "terminated"
-        ) {
-            return Err(AppError::BadRequest("invalid status".into()));
-        }
+        )
+    {
+        return Err(AppError::BadRequest("invalid status".into()));
+    }
     if let Some(t) = &body.partner_type
-        && !matches!(t.as_str(), "fleet" | "corporate" | "agent") {
-            return Err(AppError::BadRequest(
-                "partner_type must be 'fleet', 'corporate', or 'agent'".into(),
-            ));
-        }
+        && !matches!(t.as_str(), "fleet" | "corporate" | "agent")
+    {
+        return Err(AppError::BadRequest(
+            "partner_type must be 'fleet', 'corporate', or 'agent'".into(),
+        ));
+    }
     if body.name.as_deref().is_some_and(|s| s.trim().is_empty()) {
         return Err(AppError::BadRequest("name can't be blank".into()));
     }

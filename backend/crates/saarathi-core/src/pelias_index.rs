@@ -7,7 +7,7 @@
 //! after commit" convention as `notify::send`/badge awards — a Pelias
 //! write hiccup must never fail the staff approval action.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::OnceLock;
 use std::time::Duration;
 use uuid::Uuid;

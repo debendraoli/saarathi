@@ -121,7 +121,11 @@ mod tests {
         // exists so a future divergence (e.g. campaigns opened to dispatcher)
         // is a deliberate, visible diff instead of a silent one.
         for role in ALL_ROLES {
-            assert_eq!(can_manage_campaigns(role), can_manage_drivers(role), "role={role}");
+            assert_eq!(
+                can_manage_campaigns(role),
+                can_manage_drivers(role),
+                "role={role}"
+            );
         }
     }
 

@@ -13,8 +13,8 @@
 //! catches rapid bursts from one IP or phone that the hourly check alone
 //! would let through until the count climbed.
 
-use redis::aio::ConnectionManager;
 use redis::Script;
+use redis::aio::ConnectionManager;
 
 /// 3 requests per rolling 10-minute window.
 const CAPACITY: f64 = 3.0;

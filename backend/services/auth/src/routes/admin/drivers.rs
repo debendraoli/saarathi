@@ -1,64 +1,25 @@
-//! Staff dashboard endpoints: driver verification queue, decisions, document
-//! viewing. All decisions are audit-logged and role-gated (RBAC).
+//! Driver verification queue, KYC approval/rejection, suspend/reactivate,
+//! and on-site (walk-in) onboarding.
 
 use crate::audit;
 use crate::error::{AppError, AppResult};
-use crate::models::{
-    DocumentKind, Driver, DriverDocument, User, UserRole, UserStatus, Vehicle, VehicleWheelerClass,
-};
+use crate::models::{Driver, DriverDocument, User, Vehicle, VehicleWheelerClass};
 use crate::state::{AdminUser, AppState, StaffUser};
-use axum::extract::{Multipart, Path, Query, State};
-use axum::http::header;
-use axum::response::{IntoResponse, Response};
-use axum::{
-    routing::{get, patch, post},
-    Json, Router,
-};
+use axum::extract::{Path, Query, State};
+use axum::Json;
 use chrono::NaiveDate;
 use saarathi_core::api::ErrorCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-pub fn routes() -> Router<AppState> {
-    Router::new()
-        .route("/v1/admin/drivers", get(list_drivers))
-        .route("/v1/admin/drivers/onboard", post(onboard_driver))
-        .route(
-            "/v1/admin/drivers/{id}",
-            get(driver_detail).patch(update_driver),
-        )
-        .route("/v1/admin/drivers/{id}/approve", post(approve_driver))
-        .route("/v1/admin/drivers/{id}/reject", post(reject_driver))
-        .route("/v1/admin/drivers/{id}/suspend", post(suspend_driver))
-        .route("/v1/admin/drivers/{id}/reactivate", post(reactivate_driver))
-        .route(
-            "/v1/admin/drivers/{id}/service-types",
-            post(update_service_types),
-        )
-        .route(
-            "/v1/admin/drivers/{id}/documents",
-            post(upload_driver_document),
-        )
-        .route("/v1/admin/documents/{id}/content", get(document_content))
-        .route("/v1/admin/staff", get(list_staff).post(create_staff))
-        .route("/v1/admin/staff/{id}", patch(update_staff))
-        .route("/v1/admin/staff/{id}/deactivate", post(deactivate_staff))
-        .route("/v1/admin/staff/{id}/reactivate", post(reactivate_staff))
-}
-
-/// Non-rider/non-driver roles — the only ones a staff account may hold.
-fn is_staff_role(role: UserRole) -> bool {
-    !matches!(role, UserRole::Rider | UserRole::Driver)
-}
-
 #[derive(Deserialize)]
-struct ListQuery {
+pub(super) struct ListQuery {
     status: Option<String>,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
-struct DriverListItem {
+pub(super) struct DriverListItem {
     id: Uuid,
     user_id: Uuid,
     kyc_status: crate::models::KycStatus,
@@ -70,7 +31,7 @@ struct DriverListItem {
     reviewed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-async fn list_drivers(
+pub(super) async fn list_drivers(
     State(st): State<AppState>,
     _staff: StaffUser,
     Query(q): Query<ListQuery>,
@@ -103,14 +64,14 @@ async fn list_drivers(
 }
 
 #[derive(Serialize)]
-struct DriverDetail {
+pub(super) struct DriverDetail {
     driver: Driver,
     user: User,
     vehicle: Option<Vehicle>,
     documents: Vec<DriverDocument>,
 }
 
-async fn driver_detail(
+pub(super) async fn driver_detail(
     State(st): State<AppState>,
     _staff: StaffUser,
     Path(id): Path<Uuid>,
@@ -155,7 +116,7 @@ async fn driver_detail(
     }))
 }
 
-async fn approve_driver(
+pub(super) async fn approve_driver(
     State(st): State<AppState>,
     StaffUser(claims): StaffUser,
     Path(id): Path<Uuid>,
@@ -226,11 +187,11 @@ async fn approve_driver(
 }
 
 #[derive(Deserialize)]
-struct RejectInput {
+pub(super) struct RejectInput {
     reason: String,
 }
 
-async fn reject_driver(
+pub(super) async fn reject_driver(
     State(st): State<AppState>,
     StaffUser(claims): StaffUser,
     Path(id): Path<Uuid>,
@@ -299,7 +260,7 @@ async fn reject_driver(
 /// than waiting out the presence TTL. Doesn't touch kyc_status — an approved
 /// driver stays approved, just locked out, so reactivating doesn't require
 /// re-review.
-async fn suspend_driver(
+pub(super) async fn suspend_driver(
     State(st): State<AppState>,
     AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
@@ -348,7 +309,7 @@ async fn suspend_driver(
     Ok(Json(json!({ "ok": true, "status": "suspended" })))
 }
 
-async fn reactivate_driver(
+pub(super) async fn reactivate_driver(
     State(st): State<AppState>,
     AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
@@ -392,7 +353,7 @@ async fn reactivate_driver(
 }
 
 #[derive(Deserialize)]
-struct ServiceTypesInput {
+pub(super) struct ServiceTypesInput {
     service_types: Vec<String>,
 }
 
@@ -400,15 +361,14 @@ struct ServiceTypesInput {
 /// the same field the driver themselves sets at KYC (`POST
 /// /v1/driver/register`) and that the app re-reads before every `goOnline`,
 /// so this takes effect the next time the driver comes online.
-async fn update_service_types(
+pub(super) async fn update_service_types(
     State(st): State<AppState>,
     AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
     Json(body): Json<ServiceTypesInput>,
 ) -> AppResult<Json<Value>> {
-    let service_types = crate::routes::driver_routes::validate_service_types(Some(
-        body.service_types,
-    ))?;
+    let service_types =
+        crate::routes::driver_routes::validate_service_types(Some(body.service_types))?;
 
     let updated = sqlx::query("UPDATE drivers SET service_types = $2 WHERE id = $1")
         .bind(id)
@@ -433,7 +393,7 @@ async fn update_service_types(
 }
 
 #[derive(Deserialize)]
-struct UpdateDriverVehicle {
+pub(super) struct UpdateDriverVehicle {
     make: Option<String>,
     model: Option<String>,
     year: Option<i32>,
@@ -442,7 +402,7 @@ struct UpdateDriverVehicle {
 }
 
 #[derive(Deserialize)]
-struct UpdateDriverInput {
+pub(super) struct UpdateDriverInput {
     full_name: Option<String>,
     license_number: Option<String>,
     date_of_birth: Option<NaiveDate>,
@@ -453,33 +413,40 @@ struct UpdateDriverInput {
 /// Staff correction of a driver's own details and vehicle — typo fixes, not
 /// KYC review (that stays on `approve`/`reject`) and not the service-types
 /// toggle (that has its own endpoint above).
-async fn update_driver(
+pub(super) async fn update_driver(
     State(st): State<AppState>,
     AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateDriverInput>,
 ) -> AppResult<Json<Driver>> {
     if let Some(name) = &body.full_name
-        && name.trim().is_empty() {
-            return Err(AppError::BadRequest("full_name cannot be empty".into()));
-        }
+        && name.trim().is_empty()
+    {
+        return Err(AppError::BadRequest("full_name cannot be empty".into()));
+    }
     if let Some(license) = &body.license_number
-        && license.trim().is_empty() {
-            return Err(AppError::BadRequest("license_number cannot be empty".into()));
-        }
+        && license.trim().is_empty()
+    {
+        return Err(AppError::BadRequest(
+            "license_number cannot be empty".into(),
+        ));
+    }
     if let Some(address) = &body.address
-        && address.trim().is_empty() {
-            return Err(AppError::BadRequest("address cannot be empty".into()));
-        }
+        && address.trim().is_empty()
+    {
+        return Err(AppError::BadRequest("address cannot be empty".into()));
+    }
     if let Some(v) = &body.vehicle {
         if let Some(plate) = &v.plate_number
-            && plate.trim().is_empty() {
-                return Err(AppError::BadRequest("plate_number cannot be empty".into()));
-            }
+            && plate.trim().is_empty()
+        {
+            return Err(AppError::BadRequest("plate_number cannot be empty".into()));
+        }
         if let Some(model) = &v.model
-            && model.trim().is_empty() {
-                return Err(AppError::BadRequest("model cannot be empty".into()));
-            }
+            && model.trim().is_empty()
+        {
+            return Err(AppError::BadRequest("model cannot be empty".into()));
+        }
     }
     let full_name = body.full_name.as_deref().map(str::trim);
 
@@ -552,7 +519,7 @@ async fn update_driver(
 // ── On-site KYC entry (staff onboards a walk-in driver) ────────────────────
 
 #[derive(Deserialize)]
-struct OnboardVehicle {
+pub(super) struct OnboardVehicle {
     class: VehicleWheelerClass,
     make: Option<String>,
     model: Option<String>,
@@ -562,7 +529,7 @@ struct OnboardVehicle {
 }
 
 #[derive(Deserialize)]
-struct OnboardInput {
+pub(super) struct OnboardInput {
     phone: String,
     full_name: Option<String>,
     license_number: Option<String>,
@@ -578,7 +545,7 @@ struct OnboardInput {
 /// Staff captures a driver's KYC on-site (walk-in): creates/promotes the user,
 /// their driver profile, and vehicle in one shot. The driver lands in the
 /// review queue (documents can then be uploaded on their behalf and approved).
-async fn onboard_driver(
+pub(super) async fn onboard_driver(
     State(st): State<AppState>,
     StaffUser(claims): StaffUser,
     Json(body): Json<OnboardInput>,
@@ -593,7 +560,13 @@ async fn onboard_driver(
     if body.full_name.as_deref().unwrap_or("").trim().is_empty() {
         return Err(AppError::BadRequest("full_name is required".into()));
     }
-    if body.license_number.as_deref().unwrap_or("").trim().is_empty() {
+    if body
+        .license_number
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
         return Err(AppError::BadRequest("license_number is required".into()));
     }
     if body.address.as_deref().unwrap_or("").trim().is_empty() {
@@ -604,7 +577,14 @@ async fn onboard_driver(
             "vehicle plate_number is required".into(),
         ));
     }
-    if body.vehicle.model.as_deref().unwrap_or("").trim().is_empty() {
+    if body
+        .vehicle
+        .model
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
         return Err(AppError::BadRequest("vehicle model is required".into()));
     }
     let service_types = crate::routes::driver_routes::validate_service_types(body.service_types)?;
@@ -675,333 +655,4 @@ async fn onboard_driver(
     .await?;
     tx.commit().await?;
     Ok(Json(driver))
-}
-
-/// Staff uploads a KYC document on a walk-in driver's behalf.
-async fn upload_driver_document(
-    State(st): State<AppState>,
-    StaffUser(claims): StaffUser,
-    Path(driver_id): Path<Uuid>,
-    mut multipart: Multipart,
-) -> AppResult<Json<DriverDocument>> {
-    if !claims.can_review_kyc() {
-        return Err(AppError::Forbidden);
-    }
-    // Confirm the driver exists.
-    let exists: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM drivers WHERE id = $1")
-        .bind(driver_id)
-        .fetch_optional(&st.db)
-        .await?;
-    if exists.is_none() {
-        return Err(AppError::NotFound);
-    }
-
-    let mut kind: Option<DocumentKind> = None;
-    let mut content_type: Option<String> = None;
-    let mut bytes: Option<Vec<u8>> = None;
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|e| AppError::BadRequest(e.to_string()))?
-    {
-        match field.name() {
-            Some("kind") => {
-                let text = field
-                    .text()
-                    .await
-                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
-                kind = Some(parse_document_kind(&text)?);
-            }
-            Some("file") => {
-                content_type = field.content_type().map(|s| s.to_string());
-                let data = field
-                    .bytes()
-                    .await
-                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
-                bytes = Some(data.to_vec());
-            }
-            _ => {}
-        }
-    }
-    let kind = kind.ok_or_else(|| AppError::BadRequest("missing 'kind' field".into()))?;
-    let bytes = bytes.ok_or_else(|| AppError::BadRequest("missing 'file' field".into()))?;
-    if bytes.is_empty() {
-        return Err(AppError::BadRequest("empty file".into()));
-    }
-
-    let storage_key = format!("{driver_id}/{}", Uuid::new_v4());
-    st.docs
-        .put(&storage_key, bytes)
-        .await
-        .map_err(AppError::Other)?;
-
-    let doc: DriverDocument = sqlx::query_as(
-        "INSERT INTO driver_documents (driver_id, kind, storage_key, content_type, status) \
-         VALUES ($1, $2, $3, $4, 'submitted') \
-         RETURNING id, driver_id, kind, storage_key, content_type, status, expires_at, rejection_reason, created_at",
-    )
-    .bind(driver_id)
-    .bind(kind)
-    .bind(&storage_key)
-    .bind(content_type)
-    .fetch_one(&st.db)
-    .await?;
-
-    audit::record(
-        &st.db,
-        claims.sub,
-        "driver.document.upload",
-        "driver",
-        driver_id,
-        json!({}),
-    )
-    .await?;
-    Ok(Json(doc))
-}
-
-fn parse_document_kind(s: &str) -> Result<DocumentKind, AppError> {
-    Ok(match s {
-        "citizenship" => DocumentKind::Citizenship,
-        "citizenship_front" => DocumentKind::CitizenshipFront,
-        "citizenship_back" => DocumentKind::CitizenshipBack,
-        "license" => DocumentKind::License,
-        "bluebook" => DocumentKind::Bluebook,
-        "vehicle_fitness" => DocumentKind::VehicleFitness,
-        "insurance" => DocumentKind::Insurance,
-        "tax_clearance" => DocumentKind::TaxClearance,
-        "profile_photo" => DocumentKind::ProfilePhoto,
-        "vehicle_photo" => DocumentKind::VehiclePhoto,
-        other => {
-            return Err(AppError::bad(
-                saarathi_core::api::ErrorCode::DocumentInvalid,
-                format!("unknown document kind '{other}'"),
-            ))
-        }
-    })
-}
-
-async fn document_content(
-    State(st): State<AppState>,
-    StaffUser(claims): StaffUser,
-    Path(id): Path<Uuid>,
-) -> AppResult<Response> {
-    let row: Option<(String, Option<String>)> =
-        sqlx::query_as("SELECT storage_key, content_type FROM driver_documents WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&st.db)
-            .await?;
-    let (storage_key, content_type) = row.ok_or(AppError::NotFound)?;
-
-    let bytes = st
-        .docs
-        .get(&storage_key)
-        .await
-        .map_err(|_| AppError::NotFound)?;
-    audit::record(
-        &st.db,
-        claims.sub,
-        "document.view",
-        "driver_document",
-        id,
-        json!({}),
-    )
-    .await?;
-
-    let ct = content_type.unwrap_or_else(|| "application/octet-stream".into());
-    Ok(([(header::CONTENT_TYPE, ct)], bytes).into_response())
-}
-
-// ── Staff accounts ───────────────────────────────────────────────────────
-//
-// A staff account is just a `users` row with a non-rider/non-driver role —
-// there's no separate staff table. Creating one here only provisions the
-// row; the new staff member still logs in themselves via the normal OTP
-// flow (POST /v1/auth/otp/*) with their own phone, same as everyone else.
-
-async fn list_staff(State(st): State<AppState>, _admin: AdminUser) -> AppResult<Json<Vec<User>>> {
-    let staff: Vec<User> = sqlx::query_as(
-        "SELECT id, phone, full_name, role, status, created_at, updated_at FROM users \
-         WHERE role NOT IN ('rider', 'driver') ORDER BY created_at DESC",
-    )
-    .fetch_all(&st.db)
-    .await?;
-    Ok(Json(staff))
-}
-
-#[derive(Deserialize)]
-struct CreateStaffRequest {
-    phone: String,
-    full_name: String,
-    role: UserRole,
-}
-
-async fn create_staff(
-    State(st): State<AppState>,
-    AdminUser(claims): AdminUser,
-    Json(body): Json<CreateStaffRequest>,
-) -> AppResult<Json<User>> {
-    if !crate::otp::valid_phone(&body.phone) {
-        return Err(AppError::bad(
-            ErrorCode::PhoneInvalid,
-            "phone must be E.164, e.g. +9779800000000",
-        ));
-    }
-    if !is_staff_role(body.role) {
-        return Err(AppError::bad(
-            ErrorCode::Validation,
-            "role must be a staff role, not rider/driver",
-        ));
-    }
-    if body.full_name.trim().is_empty() {
-        return Err(AppError::bad(
-            ErrorCode::Validation,
-            "full_name is required",
-        ));
-    }
-
-    let existing: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE phone = $1)")
-        .bind(&body.phone)
-        .fetch_one(&st.db)
-        .await?;
-    if existing {
-        return Err(AppError::conflict(
-            ErrorCode::Conflict,
-            "a user with this phone already exists",
-        ));
-    }
-
-    let staff: User = sqlx::query_as(
-        "INSERT INTO users (phone, full_name, role, status) VALUES ($1, $2, $3, 'active') \
-         RETURNING id, phone, full_name, role, status, created_at, updated_at",
-    )
-    .bind(&body.phone)
-    .bind(body.full_name.trim())
-    .bind(body.role)
-    .fetch_one(&st.db)
-    .await?;
-
-    audit::record(
-        &st.db,
-        claims.sub,
-        "staff.create",
-        "user",
-        staff.id,
-        json!({ "role": body.role }),
-    )
-    .await?;
-    Ok(Json(staff))
-}
-
-#[derive(Deserialize)]
-struct UpdateStaffRequest {
-    role: Option<UserRole>,
-    full_name: Option<String>,
-}
-
-async fn update_staff(
-    State(st): State<AppState>,
-    AdminUser(claims): AdminUser,
-    Path(id): Path<Uuid>,
-    Json(body): Json<UpdateStaffRequest>,
-) -> AppResult<Json<User>> {
-    if let Some(role) = body.role {
-        if !is_staff_role(role) {
-            return Err(AppError::bad(
-                ErrorCode::Validation,
-                "role must be a staff role, not rider/driver",
-            ));
-        }
-        // A staff member can't change their own role — avoids self-lockout
-        // (e.g. accidentally demoting the only admin who could undo it).
-        if id == claims.sub {
-            return Err(AppError::Forbidden);
-        }
-    }
-    if let Some(name) = &body.full_name
-        && name.trim().is_empty() {
-            return Err(AppError::bad(
-                ErrorCode::Validation,
-                "full_name cannot be empty",
-            ));
-        }
-
-    let current: Option<(UserRole,)> = sqlx::query_as("SELECT role FROM users WHERE id = $1")
-        .bind(id)
-        .fetch_optional(&st.db)
-        .await?;
-    let (current_role,) = current.ok_or(AppError::NotFound)?;
-    if !is_staff_role(current_role) {
-        return Err(AppError::NotFound); // not a staff account — don't let this endpoint touch riders/drivers
-    }
-
-    let staff: User = sqlx::query_as(
-        "UPDATE users SET role = COALESCE($2, role), full_name = COALESCE($3, full_name) \
-         WHERE id = $1 \
-         RETURNING id, phone, full_name, role, status, created_at, updated_at",
-    )
-    .bind(id)
-    .bind(body.role)
-    .bind(body.full_name.as_deref().map(str::trim))
-    .fetch_one(&st.db)
-    .await?;
-
-    audit::record(
-        &st.db,
-        claims.sub,
-        "staff.update",
-        "user",
-        id,
-        json!({ "role": body.role }),
-    )
-    .await?;
-    Ok(Json(staff))
-}
-
-async fn set_staff_status(
-    st: &AppState,
-    claims: &saarathi_core::authn::Claims,
-    id: Uuid,
-    status: UserStatus,
-    action: &str,
-) -> AppResult<Json<User>> {
-    if id == claims.sub {
-        return Err(AppError::Forbidden);
-    }
-    let current: Option<(UserRole,)> = sqlx::query_as("SELECT role FROM users WHERE id = $1")
-        .bind(id)
-        .fetch_optional(&st.db)
-        .await?;
-    let (current_role,) = current.ok_or(AppError::NotFound)?;
-    if !is_staff_role(current_role) {
-        return Err(AppError::NotFound);
-    }
-
-    let staff: User = sqlx::query_as(
-        "UPDATE users SET status = $2 WHERE id = $1 \
-         RETURNING id, phone, full_name, role, status, created_at, updated_at",
-    )
-    .bind(id)
-    .bind(status)
-    .fetch_one(&st.db)
-    .await?;
-
-    audit::record(&st.db, claims.sub, action, "user", id, json!({})).await?;
-    crate::notify::publish_status_changed(&st.nats, id, status.wire()).await;
-    Ok(Json(staff))
-}
-
-async fn deactivate_staff(
-    State(st): State<AppState>,
-    AdminUser(claims): AdminUser,
-    Path(id): Path<Uuid>,
-) -> AppResult<Json<User>> {
-    set_staff_status(&st, &claims, id, UserStatus::Suspended, "staff.deactivate").await
-}
-
-async fn reactivate_staff(
-    State(st): State<AppState>,
-    AdminUser(claims): AdminUser,
-    Path(id): Path<Uuid>,
-) -> AppResult<Json<User>> {
-    set_staff_status(&st, &claims, id, UserStatus::Active, "staff.reactivate").await
 }

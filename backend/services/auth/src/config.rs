@@ -63,8 +63,7 @@ impl Config {
             ) {
                 (Some(phone_number_id), Some(access_token), Some(template_name)) => {
                     Some(crate::otp_delivery::WhatsAppConfig {
-                        api_version: opt("WHATSAPP_API_VERSION")
-                            .unwrap_or_else(|| "v21.0".into()),
+                        api_version: opt("WHATSAPP_API_VERSION").unwrap_or_else(|| "v21.0".into()),
                         phone_number_id,
                         access_token,
                         template_name,
@@ -75,7 +74,9 @@ impl Config {
                 _ => None,
             },
             sparrow: match (opt("SPARROW_SMS_TOKEN"), opt("SPARROW_SMS_FROM")) {
-                (Some(token), Some(from)) => Some(crate::otp_delivery::SparrowConfig { token, from }),
+                (Some(token), Some(from)) => {
+                    Some(crate::otp_delivery::SparrowConfig { token, from })
+                }
                 _ => None,
             },
             nats_url: opt("NATS_URL").unwrap_or_else(|| "nats://localhost:4222".into()),

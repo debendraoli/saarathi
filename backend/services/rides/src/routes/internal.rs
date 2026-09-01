@@ -8,16 +8,17 @@
 //! unlike routing's stateless computation, this one creates real trips.
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Trip, TRIP_COLS};
+use crate::models::{TRIP_COLS, Trip};
 use crate::routing::{LatLng, RouteProfile};
 use crate::state::AppState;
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use rust_decimal::Decimal;
+use saarathi_core::domain::trip_type;
 use saarathi_core::money::Money;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -29,20 +30,11 @@ pub fn routes() -> Router<AppState> {
 }
 
 fn check_internal_secret(st: &AppState, headers: &HeaderMap) -> AppResult<()> {
-    let expected = &st.config.internal_service_secret;
-    if expected.is_empty() {
-        // Unconfigured in this environment (e.g. local dev without the
-        // merchant service running) — don't hard-fail every boot.
-        tracing::warn!("INTERNAL_SERVICE_SECRET unset; /v1/internal/* is unauthenticated");
-        return Ok(());
+    if saarathi_core::api::check_internal_secret(&st.config.internal_service_secret, headers) {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
     }
-    let got = headers
-        .get("x-internal-secret")
-        .and_then(|v| v.to_str().ok());
-    if got != Some(expected.as_str()) {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -132,7 +124,7 @@ struct NearbyDriversQuery {
 }
 
 fn default_job_type() -> String {
-    "delivery".to_string()
+    trip_type::DELIVERY.to_string()
 }
 
 #[derive(Serialize)]

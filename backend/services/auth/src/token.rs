@@ -4,9 +4,9 @@
 
 use crate::models::UserRole;
 use chrono::Utc;
-use jsonwebtoken::{encode, EncodingKey, Header};
-use rand::rand_core::UnwrapErr;
+use jsonwebtoken::{EncodingKey, Header, encode};
 use rand::Rng;
+use rand::rand_core::UnwrapErr;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;

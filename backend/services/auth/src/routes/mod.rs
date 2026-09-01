@@ -1,12 +1,12 @@
 //! Router assembly.
 
-pub mod admin_routes;
+pub mod admin;
 pub mod auth_routes;
 pub mod driver_routes;
 pub mod rider_routes;
 
 use crate::state::AppState;
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use serde_json::json;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 
@@ -22,7 +22,7 @@ pub fn router(state: AppState) -> Router {
         .merge(auth_routes::routes())
         .merge(rider_routes::routes())
         .merge(driver_routes::routes())
-        .merge(admin_routes::routes())
+        .merge(admin::routes())
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

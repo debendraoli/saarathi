@@ -5,7 +5,7 @@
 //! fails an approval.
 
 use saarathi_core::events::{
-    NotifyRequest, UserStatusChanged, NOTIFY_SUBJECT, USER_STATUS_CHANGED_SUBJECT,
+    NOTIFY_SUBJECT, NotifyRequest, USER_STATUS_CHANGED_SUBJECT, UserStatusChanged,
 };
 use uuid::Uuid;
 
@@ -45,7 +45,11 @@ pub async fn send(
 /// needs to react to (e.g. "you were signed out because this account
 /// logged in elsewhere"), not content the user should see in their
 /// notification list.
-pub async fn send_silent(nats: &Option<async_nats::Client>, user_id: Uuid, data: serde_json::Value) {
+pub async fn send_silent(
+    nats: &Option<async_nats::Client>,
+    user_id: Uuid,
+    data: serde_json::Value,
+) {
     let Some(client) = nats else {
         tracing::debug!(%user_id, "silent notification skipped (no NATS)");
         return;
@@ -74,7 +78,11 @@ pub async fn send_silent(nats: &Option<async_nats::Client>, user_id: Uuid, data:
 /// a suspended/banned user's live WebSockets, and `notify` reads current
 /// `users.status` itself before pushing, so this isn't about content, only
 /// about telling other services this account's status just changed.
-pub async fn publish_status_changed(nats: &Option<async_nats::Client>, user_id: Uuid, status: &str) {
+pub async fn publish_status_changed(
+    nats: &Option<async_nats::Client>,
+    user_id: Uuid,
+    status: &str,
+) {
     let Some(client) = nats else {
         tracing::debug!(%user_id, status, "status-changed event skipped (no NATS)");
         return;
@@ -85,7 +93,10 @@ pub async fn publish_status_changed(nats: &Option<async_nats::Client>, user_id: 
     };
     match serde_json::to_vec(&evt) {
         Ok(bytes) => {
-            if let Err(e) = client.publish(USER_STATUS_CHANGED_SUBJECT, bytes.into()).await {
+            if let Err(e) = client
+                .publish(USER_STATUS_CHANGED_SUBJECT, bytes.into())
+                .await
+            {
                 tracing::warn!(error = %e, "failed to publish status-changed event");
             }
         }

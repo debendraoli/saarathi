@@ -8,12 +8,12 @@ use crate::notify;
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {

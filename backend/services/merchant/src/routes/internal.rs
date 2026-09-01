@@ -14,8 +14,8 @@ use crate::routes::marketplace::spawn_courier;
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use axum::{routing::post, Json, Router};
-use serde_json::{json, Value};
+use axum::{Json, Router, routing::post};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
@@ -26,18 +26,11 @@ pub fn routes() -> Router<AppState> {
 }
 
 fn check_internal_secret(st: &AppState, headers: &HeaderMap) -> AppResult<()> {
-    let expected = &st.config.internal_service_secret;
-    if expected.is_empty() {
-        tracing::warn!("INTERNAL_SERVICE_SECRET unset; /v1/internal/* is unauthenticated");
-        return Ok(());
+    if saarathi_core::api::check_internal_secret(&st.config.internal_service_secret, headers) {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
     }
-    let got = headers
-        .get("x-internal-secret")
-        .and_then(|v| v.to_str().ok());
-    if got != Some(expected.as_str()) {
-        return Err(AppError::Forbidden);
-    }
-    Ok(())
 }
 
 /// Re-attempts courier dispatch for an order whose previous delivery trip

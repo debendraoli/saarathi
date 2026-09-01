@@ -314,4 +314,3 @@ pub async fn driver_credit_balance(pool: &PgPool, user_id: Uuid) -> Result<Decim
     .await?;
     Ok(bal.map(|b| b.0).unwrap_or(Decimal::ZERO))
 }
-

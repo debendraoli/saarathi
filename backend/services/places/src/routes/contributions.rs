@@ -7,13 +7,13 @@ use crate::points::{self, MIN_REDEEM_POINTS, POINTS_TO_NPR_RATE};
 use crate::state::AppState;
 use axum::extract::{Multipart, Query, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use rust_decimal::Decimal;
-use saarathi_core::routing::{haversine_km, LatLng};
+use saarathi_core::routing::{LatLng, haversine_km};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 /// Beyond this, the claimed pin and where the photo was actually taken are
@@ -169,7 +169,8 @@ async fn text(field: axum::extract::multipart::Field<'_>) -> AppResult<String> {
 }
 
 fn parse_f64(s: &str) -> AppResult<f64> {
-    s.parse().map_err(|_| AppError::BadRequest(format!("invalid number: {s}")))
+    s.parse()
+        .map_err(|_| AppError::BadRequest(format!("invalid number: {s}")))
 }
 
 #[cfg(test)]
@@ -291,13 +292,11 @@ async fn redeem(
     .bind(npr_amount)
     .fetch_one(&mut *tx)
     .await?;
-    sqlx::query(
-        "INSERT INTO points_ledger (user_id, points, kind) VALUES ($1, $2, 'redeemed')",
-    )
-    .bind(claims.sub)
-    .bind(body.points)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("INSERT INTO points_ledger (user_id, points, kind) VALUES ($1, $2, 'redeemed')")
+        .bind(claims.sub)
+        .bind(body.points)
+        .execute(&mut *tx)
+        .await?;
     let new_balance = saarathi_core::wallet::credit_rider(
         &mut tx,
         claims.sub,
@@ -342,7 +341,10 @@ struct NearbyPlace {
 /// prefilter (cheap, no PostGIS dependency in this service) then an exact
 /// haversine filter/sort in Rust. Fine at this scale; revisit if the places
 /// table grows large enough for that filter to matter.
-async fn nearby(State(st): State<AppState>, Query(q): Query<NearbyQuery>) -> AppResult<Json<Value>> {
+async fn nearby(
+    State(st): State<AppState>,
+    Query(q): Query<NearbyQuery>,
+) -> AppResult<Json<Value>> {
     // ~1 degree latitude ≈ 111km; pad the box generously, exact filter below.
     let deg = (q.radius_m / 111_000.0).max(0.01);
     let navigable: Vec<&str> = ALLOWED_CATEGORIES
@@ -362,14 +364,38 @@ async fn nearby(State(st): State<AppState>, Query(q): Query<NearbyQuery>) -> App
     .fetch_all(&st.db)
     .await?;
 
-    let origin = LatLng { lat: q.lat, lng: q.lng };
+    let origin = LatLng {
+        lat: q.lat,
+        lng: q.lng,
+    };
     let mut items: Vec<_> = rows
         .into_iter()
-        .filter(|p| haversine_km(origin, LatLng { lat: p.lat, lng: p.lng }) * 1000.0 <= q.radius_m)
+        .filter(|p| {
+            haversine_km(
+                origin,
+                LatLng {
+                    lat: p.lat,
+                    lng: p.lng,
+                },
+            ) * 1000.0
+                <= q.radius_m
+        })
         .collect();
     items.sort_by(|a, b| {
-        let da = haversine_km(origin, LatLng { lat: a.lat, lng: a.lng });
-        let db = haversine_km(origin, LatLng { lat: b.lat, lng: b.lng });
+        let da = haversine_km(
+            origin,
+            LatLng {
+                lat: a.lat,
+                lng: a.lng,
+            },
+        );
+        let db = haversine_km(
+            origin,
+            LatLng {
+                lat: b.lat,
+                lng: b.lng,
+            },
+        );
         da.total_cmp(&db)
     });
     Ok(Json(json!({ "items": items })))

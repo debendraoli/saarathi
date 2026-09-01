@@ -19,6 +19,7 @@ hex = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 axum = { workspace = true }
 jsonwebtoken = { workspace = true }
 anyhow = { workspace = true }

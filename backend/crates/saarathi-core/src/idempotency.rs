@@ -15,6 +15,18 @@ use serde_json::Value;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
+/// Pulls the idempotency key out of the request headers (`X-Idempotency-Key`),
+/// treating a missing or empty header as absent. Callers turn `None` into
+/// their own 400 `AppError` — the message text has varied slightly per
+/// service, so that mapping is left to the call site.
+pub fn key_from_headers(req_headers: &axum::http::HeaderMap) -> Option<String> {
+    req_headers
+        .get(crate::api::headers::X_IDEMPOTENCY_KEY)
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum IdempotencyError {
     #[error("a request with this idempotency key is already in flight or previously failed")]

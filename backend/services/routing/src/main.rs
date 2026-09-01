@@ -6,11 +6,11 @@
 //! flaky rural connectivity. No POIs, no turn-by-turn, no nearby search.
 
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::post;
 use axum::{Json, Router};
 use rust_decimal::prelude::*;
 use saarathi_core::routing::{
-    haversine_path, LatLng, ManeuverKind, RouteProfile, RouteRequest, RouteResult, RouteStep,
+    LatLng, ManeuverKind, RouteProfile, RouteRequest, RouteResult, RouteStep, haversine_path,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -39,23 +39,12 @@ struct Inner {
     http: reqwest::Client,
 }
 
-fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key)
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| default.into())
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    saarathi_core::bootstrap::init_tracing();
 
-    let engine = match env_or("ROUTING_ENGINE", "valhalla")
+    let engine = match saarathi_core::bootstrap::env_or("ROUTING_ENGINE", "valhalla")
         .to_ascii_lowercase()
         .as_str()
     {
@@ -63,10 +52,14 @@ async fn main() -> anyhow::Result<()> {
         _ => Engine::Valhalla,
     };
     let inner = Inner {
-        url: env_or("ROUTING_URL", "").trim_end_matches('/').to_string(),
+        url: saarathi_core::bootstrap::env_or("ROUTING_URL", "")
+            .trim_end_matches('/')
+            .to_string(),
         engine,
-        road_factor: env_or("ROUTING_ROAD_FACTOR", "1.3").parse().unwrap_or(1.3),
-        avg_speed_kmh: env_or("ROUTING_AVG_SPEED_KMH", "22")
+        road_factor: saarathi_core::bootstrap::env_or("ROUTING_ROAD_FACTOR", "1.3")
+            .parse()
+            .unwrap_or(1.3),
+        avg_speed_kmh: saarathi_core::bootstrap::env_or("ROUTING_AVG_SPEED_KMH", "22")
             .parse()
             .unwrap_or(22.0),
         http: reqwest::Client::builder()
@@ -74,10 +67,13 @@ async fn main() -> anyhow::Result<()> {
             .build()
             .expect("http client"),
     };
-    let port: u16 = env_or("ROUTING_PORT", "8084").parse()?;
+    let port: u16 = saarathi_core::bootstrap::env_or("ROUTING_PORT", "8084").parse()?;
 
     // Optional Redis cache: real engine results only, keyed by profile+points.
-    let cache = match redis::Client::open(env_or("REDIS_URL", "redis://localhost:6379")) {
+    let cache = match redis::Client::open(saarathi_core::bootstrap::env_or(
+        "REDIS_URL",
+        "redis://localhost:6379",
+    )) {
         Ok(client) => match redis::aio::ConnectionManager::new(client).await {
             Ok(cm) => Some(cm),
             Err(e) => {
@@ -90,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
-    let cache_ttl_secs: u64 = env_or("ROUTE_CACHE_TTL_SECS", "3600")
+    let cache_ttl_secs: u64 = saarathi_core::bootstrap::env_or("ROUTE_CACHE_TTL_SECS", "3600")
         .parse()
         .unwrap_or(3600);
 
@@ -101,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = Router::new()
-        .route("/health", get(health))
+        .merge(saarathi_core::bootstrap::health_router("saarathi-routing"))
         .route("/v1/route", post(route))
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
@@ -112,10 +108,6 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("saarathi-routing listening on http://{addr}");
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "service": "saarathi-routing", "status": "ok" }))
 }
 
 async fn route(
@@ -158,15 +150,16 @@ async fn route(
         match engine_result {
             Ok(r) => {
                 if let Some(mut cm) = st.cache.clone()
-                    && let Ok(json) = serde_json::to_string(&r) {
-                        let _ = redis::cmd("SET")
-                            .arg(&key)
-                            .arg(json)
-                            .arg("EX")
-                            .arg(st.cache_ttl_secs)
-                            .query_async::<()>(&mut cm)
-                            .await;
-                    }
+                    && let Ok(json) = serde_json::to_string(&r)
+                {
+                    let _ = redis::cmd("SET")
+                        .arg(&key)
+                        .arg(json)
+                        .arg("EX")
+                        .arg(st.cache_ttl_secs)
+                        .query_async::<()>(&mut cm)
+                        .await;
+                }
                 return Ok(Json(r));
             }
             Err(e) => {
@@ -197,14 +190,44 @@ mod cache_key_tests {
 
     #[test]
     fn identical_points_and_profile_produce_the_same_key() {
-        let a = [LatLng { lat: 27.7172, lng: 85.3240 }, LatLng { lat: 27.7, lng: 85.3 }];
-        let b = [LatLng { lat: 27.7172, lng: 85.3240 }, LatLng { lat: 27.7, lng: 85.3 }];
-        assert_eq!(cache_key(&a, RouteProfile::Motorcycle), cache_key(&b, RouteProfile::Motorcycle));
+        let a = [
+            LatLng {
+                lat: 27.7172,
+                lng: 85.3240,
+            },
+            LatLng {
+                lat: 27.7,
+                lng: 85.3,
+            },
+        ];
+        let b = [
+            LatLng {
+                lat: 27.7172,
+                lng: 85.3240,
+            },
+            LatLng {
+                lat: 27.7,
+                lng: 85.3,
+            },
+        ];
+        assert_eq!(
+            cache_key(&a, RouteProfile::Motorcycle),
+            cache_key(&b, RouteProfile::Motorcycle)
+        );
     }
 
     #[test]
     fn different_profiles_produce_different_keys() {
-        let pts = [LatLng { lat: 27.7172, lng: 85.3240 }, LatLng { lat: 27.7, lng: 85.3 }];
+        let pts = [
+            LatLng {
+                lat: 27.7172,
+                lng: 85.3240,
+            },
+            LatLng {
+                lat: 27.7,
+                lng: 85.3,
+            },
+        ];
         assert_ne!(
             cache_key(&pts, RouteProfile::Motorcycle),
             cache_key(&pts, RouteProfile::Auto)
@@ -215,18 +238,48 @@ mod cache_key_tests {
     fn coordinates_within_a_meter_collapse_to_the_same_key() {
         // Rounded to 5dp (~1.1m at the equator) so near-identical requests
         // (GPS jitter) still hit the same cache entry.
-        let a = [LatLng { lat: 27.71720, lng: 85.32400 }];
-        let b = [LatLng { lat: 27.717201, lng: 85.324001 }];
-        assert_eq!(cache_key(&a, RouteProfile::Motorcycle), cache_key(&b, RouteProfile::Motorcycle));
+        let a = [LatLng {
+            lat: 27.71720,
+            lng: 85.32400,
+        }];
+        let b = [LatLng {
+            lat: 27.717201,
+            lng: 85.324001,
+        }];
+        assert_eq!(
+            cache_key(&a, RouteProfile::Motorcycle),
+            cache_key(&b, RouteProfile::Motorcycle)
+        );
     }
 
     #[test]
     fn point_order_changes_the_key() {
         // Origin/dest reversed is a materially different route, not a
         // cache-equivalent request.
-        let a = [LatLng { lat: 27.7172, lng: 85.3240 }, LatLng { lat: 27.7, lng: 85.3 }];
-        let b = [LatLng { lat: 27.7, lng: 85.3 }, LatLng { lat: 27.7172, lng: 85.3240 }];
-        assert_ne!(cache_key(&a, RouteProfile::Motorcycle), cache_key(&b, RouteProfile::Motorcycle));
+        let a = [
+            LatLng {
+                lat: 27.7172,
+                lng: 85.3240,
+            },
+            LatLng {
+                lat: 27.7,
+                lng: 85.3,
+            },
+        ];
+        let b = [
+            LatLng {
+                lat: 27.7,
+                lng: 85.3,
+            },
+            LatLng {
+                lat: 27.7172,
+                lng: 85.3240,
+            },
+        ];
+        assert_ne!(
+            cache_key(&a, RouteProfile::Motorcycle),
+            cache_key(&b, RouteProfile::Motorcycle)
+        );
     }
 }
 

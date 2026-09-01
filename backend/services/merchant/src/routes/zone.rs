@@ -14,10 +14,10 @@ use crate::error::{AppError, AppResult};
 use crate::routes::marketplace::owns_or_staff;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use saarathi_core::geo_h3;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 /// Backstop only (see module docs) — the cache is always rewritten on edit.

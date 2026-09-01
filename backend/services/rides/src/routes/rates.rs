@@ -9,8 +9,8 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -21,7 +21,10 @@ use uuid::Uuid;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/admin/rates", get(current))
-        .route("/v1/admin/rates/proposals", get(list_proposals).post(propose))
+        .route(
+            "/v1/admin/rates/proposals",
+            get(list_proposals).post(propose),
+        )
         .route("/v1/admin/rates/proposals/{id}/approve", post(approve))
         .route("/v1/admin/rates/proposals/{id}/reject", post(reject))
 }
@@ -39,7 +42,10 @@ struct CurrentRate {
     is_override: bool,
 }
 
-async fn current(State(st): State<AppState>, _staff: StaffUser) -> AppResult<Json<Vec<CurrentRate>>> {
+async fn current(
+    State(st): State<AppState>,
+    _staff: StaffUser,
+) -> AppResult<Json<Vec<CurrentRate>>> {
     let rows: Vec<(String, Decimal)> =
         sqlx::query_as("SELECT vehicle_class, per_km_rate FROM fare_rates")
             .fetch_all(&st.db)

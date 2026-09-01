@@ -6,7 +6,7 @@ use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, State};
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -17,11 +17,11 @@ use uuid::Uuid;
 // lives in the rides service's own database.
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .route("/v1/trusted-contacts", get(list_contacts).post(add_contact))
         .route(
-            "/v1/trusted-contacts",
-            get(list_contacts).post(add_contact),
+            "/v1/trusted-contacts/{id}",
+            axum::routing::delete(remove_contact),
         )
-        .route("/v1/trusted-contacts/{id}", axum::routing::delete(remove_contact))
         .route("/v1/ride-index", get(ride_index))
 }
 

@@ -16,29 +16,17 @@ mod state;
 mod trip_payments;
 mod wallet;
 
-use axum::{routing::get, Json, Router};
+use axum::Router;
 use rust_decimal::Decimal;
-use sqlx::postgres::PgPoolOptions;
+use saarathi_core::bootstrap::{connect_pg, env_or, health_router, init_tracing};
 use state::AppState;
 use std::sync::Arc;
-use std::time::Duration;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
-
-fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key)
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| default.into())
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    init_tracing();
 
     let database_url = std::env::var("DATABASE_URL")?;
     let jwt_secret = std::env::var("JWT_SECRET")?;
@@ -46,11 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let tds_rate: Decimal = env_or("PAYOUT_TDS_RATE", "0.015").parse()?;
     let nats_url = env_or("NATS_URL", "nats://localhost:4222");
 
-    let db = PgPoolOptions::new()
-        .max_connections(10)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect(&database_url)
-        .await?;
+    let db = connect_pg(&database_url).await?;
 
     // NATS bus for top-up/payout notifications (non-fatal: money moves fine
     // if the bus is down, the user just doesn't get told).
@@ -71,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = Router::new()
-        .route("/health", get(health))
+        .merge(health_router("saarathi-payments"))
         .merge(routes::routes())
         .merge(payout_accounts::routes())
         .merge(disputes::routes())
@@ -85,8 +69,4 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("saarathi-payments listening on http://{addr}");
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "service": "saarathi-payments", "status": "ok" }))
 }

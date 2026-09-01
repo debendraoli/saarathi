@@ -5,10 +5,10 @@ use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::State;
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use rust_decimal::Decimal;
 use saarathi_core::domain::roles;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn routes() -> Router<AppState> {
     Router::new().route("/v1/driver/analytics", get(analytics))

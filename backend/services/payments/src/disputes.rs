@@ -10,13 +10,13 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use chrono::{DateTime, Utc};
 use saarathi_core::api::ErrorCode;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
@@ -109,7 +109,10 @@ async fn update_status(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateStatus>,
 ) -> AppResult<Json<Value>> {
-    if !matches!(body.status.as_str(), "investigating" | "resolved" | "dismissed") {
+    if !matches!(
+        body.status.as_str(),
+        "investigating" | "resolved" | "dismissed"
+    ) {
         return Err(AppError::bad(
             ErrorCode::Validation,
             "status must be 'investigating', 'resolved', or 'dismissed'",

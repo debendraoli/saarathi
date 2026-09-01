@@ -5,11 +5,11 @@ use crate::models::{SavedLocation, User};
 use crate::state::{AppState, AuthUser};
 use axum::extract::{Path, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
@@ -238,17 +238,20 @@ async fn update_preferences(
     Json(body): Json<UpdatePreferences>,
 ) -> AppResult<Json<Preferences>> {
     if let Some(m) = &body.default_payment_method
-        && m != "cash" && m != "wallet" {
-            return Err(crate::error::AppError::BadRequest(
-                "payment method must be 'cash' or 'wallet'".into(),
-            ));
-        }
+        && m != "cash"
+        && m != "wallet"
+    {
+        return Err(crate::error::AppError::BadRequest(
+            "payment method must be 'cash' or 'wallet'".into(),
+        ));
+    }
     if let Some(t) = &body.theme
-        && !matches!(t.as_str(), "system" | "light" | "dark") {
-            return Err(crate::error::AppError::BadRequest(
-                "theme must be system|light|dark".into(),
-            ));
-        }
+        && !matches!(t.as_str(), "system" | "light" | "dark")
+    {
+        return Err(crate::error::AppError::BadRequest(
+            "theme must be system|light|dark".into(),
+        ));
+    }
     let prefs: Preferences = sqlx::query_as(
         "INSERT INTO user_preferences (user_id, default_payment_method, theme, updated_at) \
          VALUES ($1, COALESCE($2, 'cash'), COALESCE($3, 'system'), now()) \

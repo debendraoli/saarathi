@@ -48,11 +48,7 @@ impl Money {
     }
 
     pub fn max(self, other: Money) -> Money {
-        if self.0 >= other.0 {
-            self
-        } else {
-            other
-        }
+        if self.0 >= other.0 { self } else { other }
     }
 }
 

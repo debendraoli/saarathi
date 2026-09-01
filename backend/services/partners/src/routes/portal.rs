@@ -11,8 +11,8 @@ use crate::rbac::{
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -316,18 +316,25 @@ async fn add_driver(
     if body.full_name.as_deref().unwrap_or("").trim().is_empty() {
         return Err(AppError::BadRequest("full_name is required".into()));
     }
-    if body.license_number.as_deref().unwrap_or("").trim().is_empty() {
+    if body
+        .license_number
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
         return Err(AppError::BadRequest("license_number is required".into()));
     }
     if body.address.as_deref().unwrap_or("").trim().is_empty() {
         return Err(AppError::BadRequest("address is required".into()));
     }
     if let Some(c) = &body.vehicle_class
-        && !matches!(c.as_str(), "two_wheeler" | "three_wheeler" | "four_wheeler") {
-            return Err(AppError::BadRequest(
-                "vehicle_class must be 'two_wheeler', 'three_wheeler' or 'four_wheeler'".into(),
-            ));
-        }
+        && !matches!(c.as_str(), "two_wheeler" | "three_wheeler" | "four_wheeler")
+    {
+        return Err(AppError::BadRequest(
+            "vehicle_class must be 'two_wheeler', 'three_wheeler' or 'four_wheeler'".into(),
+        ));
+    }
     let plate = body.plate_number.as_deref().unwrap_or("").trim();
     if plate.is_empty() {
         return Err(AppError::BadRequest("plate_number is required".into()));
@@ -393,12 +400,13 @@ async fn add_driver(
     .execute(&mut *tx)
     .await;
     if let Err(sqlx::Error::Database(db)) = &linked
-        && db.is_unique_violation() {
-            return Err(AppError::conflict(
-                ErrorCode::DriverAlreadyInFleet,
-                "this driver is already active in a fleet",
-            ));
-        }
+        && db.is_unique_violation()
+    {
+        return Err(AppError::conflict(
+            ErrorCode::DriverAlreadyInFleet,
+            "this driver is already active in a fleet",
+        ));
+    }
     linked?;
 
     audit::partner(&mut tx, claims.sub, pid, "partner.driver.add", user_id).await?;
@@ -520,12 +528,13 @@ async fn add_rider(
     .execute(&mut *tx)
     .await;
     if let Err(sqlx::Error::Database(db)) = &linked
-        && db.is_unique_violation() {
-            return Err(AppError::conflict(
-                ErrorCode::Conflict,
-                "this rider is already on a corporate tab",
-            ));
-        }
+        && db.is_unique_violation()
+    {
+        return Err(AppError::conflict(
+            ErrorCode::Conflict,
+            "this rider is already on a corporate tab",
+        ));
+    }
     linked?;
     audit::partner(&mut tx, claims.sub, pid, "partner.rider.add", user_id).await?;
     tx.commit().await?;

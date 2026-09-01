@@ -13,12 +13,12 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use axum::{routing::post, Json, Router};
+use axum::{Json, Router, routing::post};
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
 use saarathi_core::idempotency::{self, Reservation};
 use saarathi_core::payments::VerifyOutcome;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
@@ -49,17 +49,12 @@ async fn load_trip(st: &AppState, trip_id: Uuid) -> AppResult<TripForPayment> {
 }
 
 fn idempotency_key(headers: &HeaderMap) -> AppResult<String> {
-    headers
-        .get("x-idempotency-key")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            AppError::bad(
-                ErrorCode::Validation,
-                "X-Idempotency-Key header is required",
-            )
-        })
+    saarathi_core::idempotency::key_from_headers(headers).ok_or_else(|| {
+        AppError::bad(
+            ErrorCode::Validation,
+            "X-Idempotency-Key header is required",
+        )
+    })
 }
 
 async fn initiate(
@@ -202,5 +197,7 @@ async fn confirm(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({ "confirmed": true, "driver_wallet_balance": balance })))
+    Ok(Json(
+        json!({ "confirmed": true, "driver_wallet_balance": balance }),
+    ))
 }

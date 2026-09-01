@@ -9,17 +9,17 @@ use crate::wallet;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
-use chrono::{Datelike, DateTime, Duration, FixedOffset, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, FixedOffset, TimeZone, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use saarathi_core::api::ErrorCode;
 use saarathi_core::domain::roles;
 use saarathi_core::idempotency::{self, Reservation};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
@@ -40,17 +40,12 @@ const NPT_OFFSET_SECS: i32 = 5 * 3600 + 45 * 60;
 /// network retry can't double-process. PSP-initiated webhooks are exempt —
 /// they're idempotent by their own reference/status check instead.
 fn idempotency_key(headers: &HeaderMap) -> AppResult<String> {
-    headers
-        .get("x-idempotency-key")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            AppError::bad(
-                ErrorCode::Validation,
-                "X-Idempotency-Key header is required",
-            )
-        })
+    saarathi_core::idempotency::key_from_headers(headers).ok_or_else(|| {
+        AppError::bad(
+            ErrorCode::Validation,
+            "X-Idempotency-Key header is required",
+        )
+    })
 }
 
 /// Start (Sunday 00:00 NPT, as a UTC instant) of the Nepal calendar week
@@ -58,10 +53,7 @@ fn idempotency_key(headers: &HeaderMap) -> AppResult<String> {
 fn npt_week_start(now: DateTime<Utc>) -> DateTime<Utc> {
     let tz = FixedOffset::east_opt(NPT_OFFSET_SECS).expect("valid offset");
     let local = tz.from_utc_datetime(&now.naive_utc());
-    let midnight = local
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .expect("valid time");
+    let midnight = local.date_naive().and_hms_opt(0, 0, 0).expect("valid time");
     let days_since_sunday = local.weekday().num_days_from_sunday() as i64;
     let week_start_local = tz
         .from_local_datetime(&(midnight - Duration::days(days_since_sunday)))
@@ -80,15 +72,19 @@ struct CreditTxn {
 }
 
 async fn balance(State(st): State<AppState>, AuthUser(claims): AuthUser) -> AppResult<Json<Value>> {
-    let bal = wallet::rider_balance(&st.db, claims.sub).await?;
-    let txns: Vec<CreditTxn> = sqlx::query_as(
-        "SELECT txn_type, amount, balance_after, reference, created_at \
-         FROM credit_transactions WHERE user_id = $1 AND kind = 'rider' \
-         ORDER BY created_at DESC LIMIT 50",
-    )
-    .bind(claims.sub)
-    .fetch_all(&st.db)
-    .await?;
+    // Independent reads — run concurrently instead of one after the other.
+    let (bal, txns) = tokio::join!(
+        wallet::rider_balance(&st.db, claims.sub),
+        sqlx::query_as::<_, CreditTxn>(
+            "SELECT txn_type, amount, balance_after, reference, created_at \
+             FROM credit_transactions WHERE user_id = $1 AND kind = 'rider' \
+             ORDER BY created_at DESC LIMIT 50",
+        )
+        .bind(claims.sub)
+        .fetch_all(&st.db),
+    );
+    let bal = bal?;
+    let txns = txns?;
     Ok(Json(
         json!({ "balance": bal, "currency": "NPR", "transactions": txns }),
     ))
@@ -294,12 +290,11 @@ async fn request_payout(
             Some(owned.ok_or(AppError::NotFound)?.0)
         }
         None => {
-            let default: Option<(Uuid,)> = sqlx::query_as(
-                "SELECT id FROM payout_accounts WHERE user_id = $1 AND is_default",
-            )
-            .bind(claims.sub)
-            .fetch_optional(&mut *tx)
-            .await?;
+            let default: Option<(Uuid,)> =
+                sqlx::query_as("SELECT id FROM payout_accounts WHERE user_id = $1 AND is_default")
+                    .bind(claims.sub)
+                    .fetch_optional(&mut *tx)
+                    .await?;
             default.map(|d| d.0)
         }
     };
@@ -556,7 +551,9 @@ async fn admin_topup(
         if body.amount < min_amount || body.amount > max_amount {
             return Err(AppError::bad(
                 ErrorCode::AmountInvalid,
-                format!("amount must be between NPR {min_amount} and NPR {max_amount} for this plan"),
+                format!(
+                    "amount must be between NPR {min_amount} and NPR {max_amount} for this plan"
+                ),
             ));
         }
         bonus_percent = plan_bonus;
@@ -567,33 +564,66 @@ async fn admin_topup(
 
     let reference = format!("staff:{}", claims.sub);
     let balance = if body.kind == "driver" {
-        wallet::credit_driver(&mut tx, body.user_id, total, "admin_topup", Some(&reference)).await?
+        wallet::credit_driver(
+            &mut tx,
+            body.user_id,
+            total,
+            "admin_topup",
+            Some(&reference),
+        )
+        .await?
     } else {
-        wallet::credit_rider(&mut tx, body.user_id, total, "admin_topup", Some(&reference), None)
-            .await?
+        wallet::credit_rider(
+            &mut tx,
+            body.user_id,
+            total,
+            "admin_topup",
+            Some(&reference),
+            None,
+        )
+        .await?
     };
 
     let response = json!({ "ok": true, "balance": balance, "credited": total, "bonus": bonus });
-    idempotency::store(&mut tx, &key, claims.sub, "admin.credits.topup", 200, &response).await?;
+    idempotency::store(
+        &mut tx,
+        &key,
+        claims.sub,
+        "admin.credits.topup",
+        200,
+        &response,
+    )
+    .await?;
     tx.commit().await?;
 
     let notif_body = if bonus > Decimal::ZERO {
         format!(
             "NPR {} was added to your account by Saarathi support (NPR {} + {} bonus from the {} plan).",
-            total, body.amount, bonus, plan_name.unwrap_or_default()
+            total,
+            body.amount,
+            bonus,
+            plan_name.unwrap_or_default()
         )
     } else {
         format!("NPR {total} was added to your account by Saarathi support.")
     };
-    crate::notify::send(
-        &st.nats,
-        body.user_id,
-        saarathi_core::domain::notif::TRANSACTIONAL,
-        "Credits added",
-        &notif_body,
-        Some("saarathi://wallet/topup".to_string()),
-    )
-    .await;
+    // Fire-and-forget: a NATS publish after the top-up transaction already
+    // committed, no return value the response depends on — safe to background.
+    {
+        let nats = st.nats.clone();
+        let user_id = body.user_id;
+        tokio::spawn(async move {
+            crate::notify::send(
+                &nats,
+                user_id,
+                saarathi_core::domain::notif::TRANSACTIONAL,
+                "Credits added",
+                &notif_body,
+                Some("saarathi://wallet/topup".to_string()),
+            )
+            .await;
+        });
+    }
 
     Ok(Json(response))
 }

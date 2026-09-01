@@ -19,9 +19,10 @@
 //! and its cell's SET together.
 
 use crate::state::AppState;
-use saarathi_core::geo_h3::{cell_for, rings_for_radius};
 use h3o::CellIndex;
-use saarathi_core::routing::{haversine_km, LatLng as CoreLatLng, RouteProfile};
+use saarathi_core::domain::{trip_status, trip_type};
+use saarathi_core::geo_h3::{cell_for, rings_for_radius};
+use saarathi_core::routing::{LatLng as CoreLatLng, RouteProfile, haversine_km};
 use uuid::Uuid;
 
 fn h3_key(cell: CellIndex) -> String {
@@ -197,7 +198,11 @@ async fn candidates_in_disk(
                 if !opted_in {
                     continue;
                 }
-                out.push(Candidate { driver_id, lat, lng });
+                out.push(Candidate {
+                    driver_id,
+                    lat,
+                    lng,
+                });
             }
             // Meta vanished between the SMEMBERS read and this fetch (raced
             // an offline/cleanup) — the SET membership is already stale too.
@@ -221,7 +226,13 @@ async fn nearby(
         .await?
         .into_iter()
         .filter_map(|c| {
-            let d = haversine_km(origin, CoreLatLng { lat: c.lat, lng: c.lng });
+            let d = haversine_km(
+                origin,
+                CoreLatLng {
+                    lat: c.lat,
+                    lng: c.lng,
+                },
+            );
             (d <= radius_km).then_some((d, c.driver_id))
         })
         .collect();
@@ -255,7 +266,13 @@ async fn nearby_by_eta(
         .await?
         .into_iter()
         .filter_map(|c| {
-            let d = haversine_km(origin, CoreLatLng { lat: c.lat, lng: c.lng });
+            let d = haversine_km(
+                origin,
+                CoreLatLng {
+                    lat: c.lat,
+                    lng: c.lng,
+                },
+            );
             (d <= radius_km).then_some((d, c))
         })
         .collect();
@@ -265,16 +282,24 @@ async fn nearby_by_eta(
         return Ok(Vec::new());
     }
 
-    let mut with_eta: Vec<(i32, Uuid)> = futures_util::future::join_all(scored.into_iter().map(
-        |(_haversine_km, c)| async move {
+    let mut with_eta: Vec<(i32, Uuid)> =
+        futures_util::future::join_all(scored.into_iter().map(|(_haversine_km, c)| async move {
             let route = st
                 .router
-                .route_path(&[CoreLatLng { lat: c.lat, lng: c.lng }, origin], profile)
+                .route_path(
+                    &[
+                        CoreLatLng {
+                            lat: c.lat,
+                            lng: c.lng,
+                        },
+                        origin,
+                    ],
+                    profile,
+                )
                 .await;
             (route.duration_secs, c.driver_id)
-        },
-    ))
-    .await;
+        }))
+        .await;
     with_eta.sort_by_key(|(secs, _)| *secs);
     with_eta.truncate(10);
     Ok(with_eta.into_iter().map(|(_, id)| id).collect())
@@ -310,12 +335,18 @@ pub async fn nearby_positions(
     let origin = CoreLatLng { lat, lng };
     // Rider-facing search animation is always about ride drivers, never
     // delivery couriers.
-    let candidates = candidates_in_disk(st, lat, lng, radius_km, "ride").await?;
+    let candidates = candidates_in_disk(st, lat, lng, radius_km, trip_type::RIDE).await?;
     let mut rng = rand::rng();
     let mut out: Vec<(f64, f64)> = candidates
         .into_iter()
         .filter_map(|c| {
-            let d = haversine_km(origin, CoreLatLng { lat: c.lat, lng: c.lng });
+            let d = haversine_km(
+                origin,
+                CoreLatLng {
+                    lat: c.lat,
+                    lng: c.lng,
+                },
+            );
             if d > radius_km {
                 return None;
             }
@@ -390,7 +421,7 @@ pub async fn dispatch_trip(
     else {
         return Ok(None);
     };
-    if status != "requested" || driver.is_some() {
+    if status != trip_status::REQUESTED || driver.is_some() {
         return Ok(None);
     }
     let bid_mode = pricing_mode == "bid";
@@ -449,18 +480,19 @@ pub async fn dispatch_trip(
     let mut preferred_target: Option<Uuid> = None;
     if !bid_mode
         && let Some(preferred) = preferred_driver_id
-            && !already.contains(&preferred) {
-                let tried_before: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM trip_offers WHERE trip_id = $1 AND driver_id = $2)",
-                )
-                .bind(trip_id)
-                .bind(preferred)
-                .fetch_one(&st.db)
-                .await?;
-                if !tried_before && eligible(st, preferred, &job_type).await? {
-                    preferred_target = Some(preferred);
-                }
-            }
+        && !already.contains(&preferred)
+    {
+        let tried_before: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM trip_offers WHERE trip_id = $1 AND driver_id = $2)",
+        )
+        .bind(trip_id)
+        .bind(preferred)
+        .fetch_one(&st.db)
+        .await?;
+        if !tried_before && eligible(st, preferred, &job_type).await? {
+            preferred_target = Some(preferred);
+        }
+    }
 
     let broadcast: bool;
     let targets: Vec<Uuid>;
@@ -481,10 +513,7 @@ pub async fn dispatch_trip(
         let mut candidates: Vec<Uuid> = Vec::new();
         while radius <= max_radius {
             for did in nearby_by_eta(st, lng, lat, radius, profile, &job_type).await? {
-                if already.contains(&did)
-                    || declined.contains(&did)
-                    || candidates.contains(&did)
-                {
+                if already.contains(&did) || declined.contains(&did) || candidates.contains(&did) {
                     continue;
                 }
                 if !eligible(st, did, &job_type).await? {
@@ -530,7 +559,7 @@ pub async fn dispatch_trip(
     };
     let offer_title = if preferred_target.is_some() {
         "A rider requested you personally"
-    } else if job_type == "delivery" {
+    } else if job_type == trip_type::DELIVERY {
         "New delivery request nearby"
     } else {
         "New ride request nearby"
@@ -761,13 +790,22 @@ mod tests {
 
         // And the exact-distance filter (what `nearby()` applies after the
         // disk walk) correctly excludes anything the hex disk over-covers.
-        let o = CoreLatLng { lat: origin.0, lng: origin.1 };
+        let o = CoreLatLng {
+            lat: origin.0,
+            lng: origin.1,
+        };
         for (label, (plat, plng), expect_within_radius) in [
             ("near", near, true),
             ("mid", mid, true),
             ("far", far, false),
         ] {
-            let d = haversine_km(o, CoreLatLng { lat: plat, lng: plng });
+            let d = haversine_km(
+                o,
+                CoreLatLng {
+                    lat: plat,
+                    lng: plng,
+                },
+            );
             assert_eq!(
                 d <= radius_km,
                 expect_within_radius,

@@ -11,8 +11,8 @@ use crate::state::AppState;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use saarathi_core::api::ErrorCode;
-use saarathi_core::legal::VehicleClass;
-use saarathi_core::pricing::{quote_fare, PricingConfig};
+use saarathi_core::legal::{ACCIDENT_FUND_RATE, VehicleClass};
+use saarathi_core::pricing::{PricingConfig, quote_fare};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -81,7 +81,7 @@ pub fn split_agreed_fare(
     commission_rate: Decimal,
 ) -> (Decimal, Decimal, Decimal, Decimal) {
     let commission = (agreed * commission_rate).round_dp(2);
-    let fund = (agreed * dec!(0.01)).round_dp(2);
+    let fund = (agreed * ACCIDENT_FUND_RATE).round_dp(2);
     let payout = agreed - commission - fund;
     let final_fare = (agreed - discount_amount).max(Decimal::ZERO);
     (commission, fund, payout, final_fare)
@@ -105,15 +105,13 @@ async fn effective_per_km_rate(st: &AppState, vclass: VehicleClass) -> Decimal {
         VehicleClass::ThreeWheeler => st.config.three_wheeler_per_km,
         VehicleClass::FourWheeler => st.config.four_wheeler_per_km,
     };
-    sqlx::query_scalar::<_, Decimal>(
-        "SELECT per_km_rate FROM fare_rates WHERE vehicle_class = $1",
-    )
-    .bind(class_str(vclass))
-    .fetch_optional(&st.db)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or(env_default)
+    sqlx::query_scalar::<_, Decimal>("SELECT per_km_rate FROM fare_rates WHERE vehicle_class = $1")
+        .bind(class_str(vclass))
+        .fetch_optional(&st.db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(env_default)
 }
 
 pub async fn estimate(
@@ -247,18 +245,20 @@ async fn apply_rider_discount(
     };
 
     if let Some(vc) = vclass_filter
-        && vc != class_str(vclass) {
-            return Err("code not valid for this vehicle type".into());
-        }
+        && vc != class_str(vclass)
+    {
+        return Err("code not valid for this vehicle type".into());
+    }
     if gross < min_fare {
         return Err(format!(
             "minimum fare NPR {min_fare} required for this code"
         ));
     }
     if let Some(limit) = usage_limit
-        && used_count >= limit {
-            return Err("code fully redeemed".into());
-        }
+        && used_count >= limit
+    {
+        return Err("code fully redeemed".into());
+    }
     // Dynamic rules (new customer, min rides, time window, per-user limit…).
     if !rules.0.is_empty() {
         let ctx = crate::rules::load_context(&st.db, user_id, "rider", id, gross, None).await;
@@ -272,9 +272,10 @@ async fn apply_rider_discount(
         _ => value,
     };
     if let Some(cap) = max_discount
-        && discount > cap {
-            discount = cap;
-        }
+        && discount > cap
+    {
+        discount = cap;
+    }
     if discount > gross {
         discount = gross;
     }
@@ -320,16 +321,18 @@ async fn auto_pick_rider_discount(
     let mut best: Option<(String, Decimal)> = None;
     for row in rows {
         if let Some(vc) = &row.vehicle_class
-            && vc != class_str(vclass) {
-                continue;
-            }
+            && vc != class_str(vclass)
+        {
+            continue;
+        }
         if gross < row.min_fare {
             continue;
         }
         if let Some(limit) = row.usage_limit
-            && row.used_count >= limit {
-                continue;
-            }
+            && row.used_count >= limit
+        {
+            continue;
+        }
         if !row.rules.0.is_empty() {
             let ctx =
                 crate::rules::load_context(&st.db, user_id, "rider", row.id, gross, None).await;
@@ -342,16 +345,20 @@ async fn auto_pick_rider_discount(
             _ => row.value,
         };
         if let Some(cap) = row.max_discount
-            && discount > cap {
-                discount = cap;
-            }
+            && discount > cap
+        {
+            discount = cap;
+        }
         if discount > gross {
             discount = gross;
         }
         if discount <= Decimal::ZERO {
             continue;
         }
-        if best.as_ref().is_none_or(|(_, best_amt)| discount > *best_amt) {
+        if best
+            .as_ref()
+            .is_none_or(|(_, best_amt)| discount > *best_amt)
+        {
             best = Some((row.code, discount));
         }
     }

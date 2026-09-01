@@ -13,7 +13,7 @@ use crate::auth::AuthUser;
 use crate::error::AppResult;
 use crate::state::AppState;
 use axum::extract::{Query, State};
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use saarathi_core::geo_h3::cell_for;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -178,10 +178,11 @@ async fn reverse(
             .arg(key)
             .query_async::<Option<String>>(&mut r)
             .await
-            && let Some(raw) = cached {
-                let place: Option<GeoPlace> = serde_json::from_str(&raw).unwrap_or(None);
-                return Ok(Json(place));
-            }
+            && let Some(raw) = cached
+        {
+            let place: Option<GeoPlace> = serde_json::from_str(&raw).unwrap_or(None);
+            return Ok(Json(place));
+        }
     }
 
     let params: Vec<(&str, String)> = vec![
@@ -202,18 +203,19 @@ async fn reverse(
         .and_then(|places| places.first().cloned());
 
     if fetch_result.is_ok()
-        && let Some(key) = &key {
-            let mut r = st.redis.clone();
-            if let Ok(raw) = serde_json::to_string(&place) {
-                let _: Result<(), _> = redis::cmd("SET")
-                    .arg(key)
-                    .arg(raw)
-                    .arg("EX")
-                    .arg(REVERSE_CACHE_TTL_SECS)
-                    .query_async::<()>(&mut r)
-                    .await;
-            }
+        && let Some(key) = &key
+    {
+        let mut r = st.redis.clone();
+        if let Ok(raw) = serde_json::to_string(&place) {
+            let _: Result<(), _> = redis::cmd("SET")
+                .arg(key)
+                .arg(raw)
+                .arg("EX")
+                .arg(REVERSE_CACHE_TTL_SECS)
+                .query_async::<()>(&mut r)
+                .await;
         }
+    }
     Ok(Json(place))
 }
 
@@ -241,9 +243,10 @@ fn feature_to_place(f: &Value) -> Option<GeoPlace> {
     // countrycode ("NP") — the data is already Nepal-scoped at import time so
     // this is defense-in-depth, not the primary filter.
     if let Some(cc) = get("country_a")
-        && !cc.eq_ignore_ascii_case("NPL") {
-            return None;
-        }
+        && !cc.eq_ignore_ascii_case("NPL")
+    {
+        return None;
+    }
 
     let name = get("name");
     let street = get("street");

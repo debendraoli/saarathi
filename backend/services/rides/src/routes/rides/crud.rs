@@ -1,23 +1,21 @@
-//! Ride lifecycle + fare estimate endpoints.
+//! Core ride lifecycle: create, fetch, status transitions, participants.
 
+use super::shared::RideRequest;
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
-use crate::models::{Trip, TRIP_COLS};
-use crate::pricing::{self, Estimate};
-use crate::routing::{LatLng, RouteProfile, RouteStep};
+use crate::models::{TRIP_COLS, Trip};
+use crate::pricing;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
-use axum::{
-    routing::{get, post},
-    Json, Router,
-};
+use axum::Json;
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
+use saarathi_core::domain::{trip_status, trip_type};
 use saarathi_core::idempotency::{self, Reservation};
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow)]
@@ -32,52 +30,6 @@ struct TripMoney {
     driver_payout: Decimal,
     final_fare: Decimal,
     payment_method: String,
-}
-
-pub fn routes() -> Router<AppState> {
-    Router::new()
-        .route("/v1/rides/estimate", post(estimate))
-        .route("/v1/rides/route", post(route_geometry))
-        .route("/v1/rides", post(create).get(list_mine))
-        .route("/v1/rides/mine/stats", get(my_stats))
-        .route("/v1/rides/driver/today", get(driver_today))
-        .route("/v1/rides/driver/earnings", get(driver_earnings))
-        .route("/v1/rides/{id}", get(get_trip))
-        .route("/v1/rides/{id}/participants", get(get_participants))
-        .route("/v1/rides/{id}/status", post(update_status))
-}
-
-#[derive(Deserialize)]
-struct RideRequest {
-    origin: LatLng,
-    dest: LatLng,
-    vehicle_class: String,
-    /// Optional intermediate waypoints (multi-stop rides).
-    #[serde(default)]
-    stops: Vec<LatLng>,
-    #[serde(default)]
-    code: Option<String>,
-    /// 'cash' (default) or 'wallet' (pay from prepaid credits).
-    #[serde(default)]
-    payment_method: Option<String>,
-    /// Bounded fare bargaining: a rider's proposed fare (clamped to the legal
-    /// band). In `pricing_mode: "bid"` this instead seeds the auction's
-    /// initial ask (also clamped) rather than an immediately-agreed price.
-    #[serde(default)]
-    offered_fare: Option<Decimal>,
-    /// 'instant' (default: today's single algorithmic-fare dispatch) or
-    /// 'bid' (open the trip to the fare auction — see `routes::bidding`).
-    #[serde(default)]
-    pricing_mode: Option<String>,
-    /// Starting dispatch search radius (km), overriding the service default.
-    /// Set on a "search wider" re-request after a no-driver cancellation.
-    #[serde(default)]
-    radius_km: Option<f64>,
-    /// Request a specific driver by phone (someone this rider has ridden
-    /// with before) — `dispatch_trip` tries them first, then falls back to
-    /// normal matching. See `resolve_preferred_driver`.
-    #[serde(default)]
-    preferred_driver_phone: Option<String>,
 }
 
 /// Resolves a "request this driver" phone number to a driver id — only if
@@ -99,12 +51,11 @@ async fn resolve_preferred_driver(
     if phone.is_empty() {
         return Ok(None);
     }
-    let driver_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM users WHERE phone = $1 AND role = 'driver'",
-    )
-    .bind(phone)
-    .fetch_optional(pool)
-    .await?;
+    let driver_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM users WHERE phone = $1 AND role = 'driver'")
+            .bind(phone)
+            .fetch_optional(pool)
+            .await?;
     let Some(driver_id) = driver_id else {
         return Ok(None);
     };
@@ -119,80 +70,10 @@ async fn resolve_preferred_driver(
     Ok(rode_together.then_some(driver_id))
 }
 
-async fn estimate(
-    State(st): State<AppState>,
-    AuthUser(claims): AuthUser,
-    Json(body): Json<RideRequest>,
-) -> AppResult<Json<Estimate>> {
-    let (est, _route) = pricing::estimate(
-        &st,
-        claims.sub,
-        body.origin,
-        body.dest,
-        &body.stops,
-        &body.vehicle_class,
-        body.code.as_deref(),
-    )
-    .await?;
-    Ok(Json(est))
-}
-
-#[derive(Deserialize)]
-struct RouteReq {
-    origin: LatLng,
-    dest: LatLng,
-    #[serde(default)]
-    stops: Vec<LatLng>,
-    #[serde(default)]
-    vehicle_class: Option<String>,
-}
-
-#[derive(Serialize)]
-struct RouteResp {
-    distance_km: Decimal,
-    duration_secs: i32,
-    /// Ordered road-shape points for drawing the route polyline on the map.
-    geometry: Vec<LatLng>,
-    /// Turn-by-turn maneuvers, in order — empty when the routing engine
-    /// couldn't supply them (offline fallback).
-    steps: Vec<RouteStep>,
-    /// Optimized visiting order for `stops` (pickup/destination always stay
-    /// fixed first/last) — index `k` is the original `stops` position that
-    /// should be visited `k`-th. Empty means "use the order sent": either
-    /// there were fewer than 2 stops, or the routing engine that answered
-    /// doesn't support reordering (offline/OSRM fallback).
-    stop_order: Vec<usize>,
-}
-
-/// Road-following route geometry for the map (pickup → stops → destination).
-/// Falls back to a straight line when the routing engine is unreachable.
-async fn route_geometry(
-    State(st): State<AppState>,
-    AuthUser(_claims): AuthUser,
-    Json(body): Json<RouteReq>,
-) -> AppResult<Json<RouteResp>> {
-    let profile = match body.vehicle_class.as_deref() {
-        Some(v) => RouteProfile::from_wire(v),
-        None => RouteProfile::Motorcycle,
-    };
-    let mut path = Vec::with_capacity(body.stops.len() + 2);
-    path.push(body.origin);
-    path.extend_from_slice(&body.stops);
-    path.push(body.dest);
-    let route = st.router.route_path(&path, profile).await;
-    Ok(Json(RouteResp {
-        distance_km: route.distance_km,
-        duration_secs: route.duration_secs,
-        geometry: route.geometry,
-        steps: route.steps,
-        stop_order: route.stop_order,
-    }))
-}
-
 const MAX_RIDER_CANCELS_PER_WINDOW: i64 = 3;
 const RIDER_CANCEL_WINDOW_HOURS: i32 = 24;
 
-async fn create(
+pub(super) async fn create(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
     headers: HeaderMap,
@@ -205,17 +86,12 @@ async fn create(
         ));
     }
 
-    let idem_key = headers
-        .get("x-idempotency-key")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            AppError::bad(
-                ErrorCode::Validation,
-                "X-Idempotency-Key header is required",
-            )
-        })?
-        .to_string();
+    let idem_key = saarathi_core::idempotency::key_from_headers(&headers).ok_or_else(|| {
+        AppError::bad(
+            ErrorCode::Validation,
+            "X-Idempotency-Key header is required",
+        )
+    })?;
 
     // Claim the key up front, before any of the booking work below, so a
     // double-tap/retry replays the first trip instead of creating a second.
@@ -298,37 +174,33 @@ async fn create(
 
     // Bargaining is a dashboard-toggleable feature; when off, ignore any
     // proposed fare and charge the algorithmic price.
-    let offered_fare = if bargaining_on { body.offered_fare } else { None };
+    let offered_fare = if bargaining_on {
+        body.offered_fare
+    } else {
+        None
+    };
 
     // Bid mode: the rider's fare is decided later, when a bid is accepted
     // (`routes::bidding::accept_bid` reuses this exact clamp-and-split
     // math). The money columns here are just placeholders until then; only
     // `ask_fare` — the rider's starting price — is actually meaningful.
-    let ask_fare = (pricing_mode == "bid")
-        .then(|| offered_fare.unwrap_or(est.gross_fare).max(est.fare_floor).min(est.fare_ceiling));
+    let ask_fare = (pricing_mode == "bid").then(|| {
+        offered_fare
+            .unwrap_or(est.gross_fare)
+            .max(est.fare_floor)
+            .min(est.fare_ceiling)
+    });
 
     // Bargaining (instant mode only): clamp the rider's proposed fare to
     // [floor, legal ceiling] and recompute the split on the agreed amount.
-    let (gross_fare, commission, accident_fund, driver_payout, final_fare, agreed) =
-        if pricing_mode == "instant" {
-            if let Some(offered) = offered_fare {
-                let agreed = offered.max(est.fare_floor).min(est.fare_ceiling);
-                let (commission, fund, payout, final_fare) = pricing::split_agreed_fare(
-                    agreed,
-                    est.discount_amount,
-                    st.config.commission_rate,
-                );
-                (agreed, commission, fund, payout, final_fare, Some(agreed))
-            } else {
-                (
-                    est.gross_fare,
-                    est.commission,
-                    est.accident_fund,
-                    est.driver_payout,
-                    est.final_fare,
-                    None,
-                )
-            }
+    let (gross_fare, commission, accident_fund, driver_payout, final_fare, agreed) = if pricing_mode
+        == "instant"
+    {
+        if let Some(offered) = offered_fare {
+            let agreed = offered.max(est.fare_floor).min(est.fare_ceiling);
+            let (commission, fund, payout, final_fare) =
+                pricing::split_agreed_fare(agreed, est.discount_amount, st.config.commission_rate);
+            (agreed, commission, fund, payout, final_fare, Some(agreed))
         } else {
             (
                 est.gross_fare,
@@ -338,7 +210,17 @@ async fn create(
                 est.final_fare,
                 None,
             )
-        };
+        }
+    } else {
+        (
+            est.gross_fare,
+            est.commission,
+            est.accident_fund,
+            est.driver_payout,
+            est.final_fare,
+            None,
+        )
+    };
 
     // Resolved before opening the transaction — read-only, and a bad/unknown
     // number should never fail the booking, just silently skip the
@@ -372,20 +254,20 @@ async fn create(
         .bind(code)
         .fetch_optional(&mut *tx)
         .await?
-        {
-            sqlx::query("UPDATE campaigns SET used_count = used_count + 1 WHERE id = $1")
-                .bind(cid)
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query(
-                "INSERT INTO campaign_redemptions (campaign_id, user_id, amount) VALUES ($1, $2, $3)",
-            )
+    {
+        sqlx::query("UPDATE campaigns SET used_count = used_count + 1 WHERE id = $1")
             .bind(cid)
-            .bind(claims.sub)
-            .bind(est.discount_amount)
             .execute(&mut *tx)
             .await?;
-        }
+        sqlx::query(
+            "INSERT INTO campaign_redemptions (campaign_id, user_id, amount) VALUES ($1, $2, $3)",
+        )
+        .bind(cid)
+        .bind(claims.sub)
+        .bind(est.discount_amount)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO trips (rider_id, vehicle_class, origin_lat, origin_lng, dest_lat, dest_lng, \
@@ -419,7 +301,15 @@ async fn create(
     .await?;
 
     let trip_json = serde_json::to_value(&trip).map_err(anyhow::Error::from)?;
-    idempotency::store(&mut tx, &idem_key, claims.sub, "rides.create", 200, &trip_json).await?;
+    idempotency::store(
+        &mut tx,
+        &idem_key,
+        claims.sub,
+        "rides.create",
+        200,
+        &trip_json,
+    )
+    .await?;
 
     tx.commit().await?;
 
@@ -466,7 +356,7 @@ async fn create(
 }
 
 #[derive(Deserialize)]
-struct StatusRequest {
+pub(super) struct StatusRequest {
     status: String,
     /// Required when cancelling: why the rider/driver cancelled.
     #[serde(default)]
@@ -485,7 +375,12 @@ pub(crate) async fn do_update_status(
     status: String,
     reason: Option<String>,
 ) -> AppResult<Trip> {
-    const ALLOWED: [&str; 4] = ["arriving", "in_progress", "completed", "cancelled"];
+    const ALLOWED: [&str; 4] = [
+        trip_status::ARRIVING,
+        trip_status::IN_PROGRESS,
+        trip_status::COMPLETED,
+        trip_status::CANCELLED,
+    ];
     if !ALLOWED.contains(&status.as_str()) {
         return Err(AppError::bad(
             ErrorCode::InvalidStatus,
@@ -498,13 +393,12 @@ pub(crate) async fn do_update_status(
     // Validated here with a plain (non-locking) read since the money-
     // critical part re-validates under its own row lock inside that
     // function; no need to hold this connection's lock across the call.
-    if status == "completed" {
-        let row: Option<(Uuid, Option<Uuid>, String)> = sqlx::query_as(
-            "SELECT rider_id, driver_id, trip_type::text FROM trips WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(&st.db)
-        .await?;
+    if status == trip_status::COMPLETED {
+        let row: Option<(Uuid, Option<Uuid>, String)> =
+            sqlx::query_as("SELECT rider_id, driver_id, trip_type::text FROM trips WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&st.db)
+                .await?;
         let (rider_id, driver_id, trip_type) = row.ok_or(AppError::NotFound)?;
         if rider_id != claims.sub && driver_id != Some(claims.sub) {
             return Err(AppError::Forbidden);
@@ -518,7 +412,7 @@ pub(crate) async fn do_update_status(
         // is the record of what's owed — that one completes normally, or it
         // would have no completion path whatsoever (the POD endpoint 404s
         // without a `parcel_details` row to check against).
-        if trip_type == "delivery" {
+        if trip_type == saarathi_core::domain::trip_type::DELIVERY {
             let has_parcel: Option<Uuid> =
                 sqlx::query_scalar("SELECT trip_id FROM parcel_details WHERE trip_id = $1")
                     .bind(id)
@@ -555,7 +449,10 @@ pub(crate) async fn do_update_status(
     // below, which only ever applies pre-pickup). Plain rides are
     // deliberately untouched by this — a driver may still need to cancel
     // mid-ride for a genuine safety/emergency reason.
-    if status == "cancelled" && m.trip_type == "delivery" && m.status == "in_progress" {
+    if status == trip_status::CANCELLED
+        && m.trip_type == trip_type::DELIVERY
+        && m.status == trip_status::IN_PROGRESS
+    {
         return Err(AppError::bad(
             ErrorCode::InvalidStatus,
             "a delivery already picked up can only be completed, not cancelled",
@@ -563,7 +460,7 @@ pub(crate) async fn do_update_status(
     }
 
     let ts_col = match status.as_str() {
-        "cancelled" => ", cancelled_at = now()",
+        trip_status::CANCELLED => ", cancelled_at = now()",
         _ => "",
     };
     // Who cancelled, for the complaints view.
@@ -596,7 +493,7 @@ pub(crate) async fn do_update_status(
     // late-arriving trip status can't clobber one, e.g., cancelled by staff
     // support in the meantime. (`completed` isn't handled here — it never
     // reaches this function anymore, see the early-return above.)
-    if m.trip_type == "delivery" && status == "in_progress" {
+    if m.trip_type == trip_type::DELIVERY && status == trip_status::IN_PROGRESS {
         sqlx::query(
             "UPDATE orders SET status = 'picked_up', updated_at = now() \
              WHERE trip_id = $1 AND status NOT IN ('delivered', 'cancelled', 'rejected')",
@@ -614,7 +511,7 @@ pub(crate) async fn do_update_status(
     // pointing at a dead trip (`spawn_courier` refuses to run again while
     // `trip_id IS NOT NULL`).
     let mut redispatch_order: Option<(Uuid, Uuid)> = None;
-    if m.trip_type == "delivery" && status == "cancelled" {
+    if m.trip_type == trip_type::DELIVERY && status == trip_status::CANCELLED {
         redispatch_order = sqlx::query_as(
             "UPDATE orders SET trip_id = NULL, status = 'ready', updated_at = now() \
              WHERE trip_id = $1 AND status NOT IN ('delivered', 'cancelled', 'rejected') \
@@ -672,7 +569,7 @@ pub(crate) async fn do_update_status(
         id,
         json!({ "type": "status", "status": status }).to_string(),
     );
-    if status == "cancelled" && m.status != "cancelled" {
+    if status == trip_status::CANCELLED && m.status != trip_status::CANCELLED {
         crate::routes::metrics::track(
             &st.db,
             "ride_cancelled",
@@ -689,7 +586,7 @@ pub(crate) async fn do_update_status(
     Ok(trip)
 }
 
-async fn update_status(
+pub(super) async fn update_status(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
@@ -720,12 +617,14 @@ pub(crate) async fn complete_trip(st: &AppState, id: Uuid, actor: Uuid) -> AppRe
     .fetch_optional(&mut *tx)
     .await?;
     let m = row.ok_or(AppError::NotFound)?;
-    if m.status == "completed" {
+    if m.status == trip_status::COMPLETED {
         drop(tx);
-        let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1")))
-            .bind(id)
-            .fetch_one(&st.db)
-            .await?;
+        let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {TRIP_COLS} FROM trips WHERE id = $1"
+        )))
+        .bind(id)
+        .fetch_one(&st.db)
+        .await?;
         return Ok(trip);
     }
 
@@ -755,7 +654,7 @@ pub(crate) async fn complete_trip(st: &AppState, id: Uuid, actor: Uuid) -> AppRe
     )
     .await?;
 
-    if m.trip_type == "delivery" {
+    if m.trip_type == trip_type::DELIVERY {
         sqlx::query(
             "UPDATE orders SET status = 'delivered', updated_at = now() \
              WHERE trip_id = $1 AND status NOT IN ('delivered', 'cancelled', 'rejected')",
@@ -770,18 +669,27 @@ pub(crate) async fn complete_trip(st: &AppState, id: Uuid, actor: Uuid) -> AppRe
     st.hub.publish(
         "trip",
         id,
-        json!({ "type": "status", "status": "completed" }).to_string(),
+        json!({ "type": "status", "status": trip_status::COMPLETED }).to_string(),
     );
-    crate::routes::metrics::track(
-        &st.db,
-        "ride_completed",
-        m.driver_id,
-        Some("driver"),
-        Some(id),
-        json!({ "gross": m.gross_fare, "payment_method": m.payment_method }),
-    )
-    .await;
-    notify_status_change(st, &m, id, actor, "completed").await;
+    // Both are fire-and-forget (a metrics event and a push notification) and
+    // run strictly after the settlement transaction above already committed
+    // — nothing money-related is deferred, so it's safe to background them
+    // instead of adding their latency to the caller's response.
+    {
+        let st = st.clone();
+        tokio::spawn(async move {
+            crate::routes::metrics::track(
+                &st.db,
+                "ride_completed",
+                m.driver_id,
+                Some("driver"),
+                Some(id),
+                json!({ "gross": m.gross_fare, "payment_method": m.payment_method }),
+            )
+            .await;
+            notify_status_change(&st, &m, id, actor, trip_status::COMPLETED).await;
+        });
+    }
 
     Ok(trip)
 }
@@ -800,7 +708,7 @@ async fn notify_status_change(
     let Some(driver_id) = m.driver_id else { return };
     let link = Some(format!("saarathi://trip/{trip_id}"));
     match status {
-        "arriving" => {
+        trip_status::ARRIVING => {
             // Enrich with the driver's actual vehicle so the rider can spot
             // them on the street, not just a generic "driver is close" ping.
             let vehicle: Option<(String, String, String)> = sqlx::query_as(
@@ -815,7 +723,11 @@ async fn notify_status_change(
             .flatten();
             let body = match vehicle {
                 Some((_, model, plate)) if !plate.is_empty() => {
-                    let model = if model.is_empty() { "vehicle".to_string() } else { model };
+                    let model = if model.is_empty() {
+                        "vehicle".to_string()
+                    } else {
+                        model
+                    };
                     format!("Your driver is arriving on {model} ({plate}).")
                 }
                 _ => "Your driver is arriving at your pickup point.".to_string(),
@@ -830,7 +742,7 @@ async fn notify_status_change(
             )
             .await;
         }
-        "in_progress" => {
+        trip_status::IN_PROGRESS => {
             crate::notify::send(
                 &st.nats,
                 m.rider_id,
@@ -841,7 +753,7 @@ async fn notify_status_change(
             )
             .await;
         }
-        "completed" => {
+        trip_status::COMPLETED => {
             crate::notify::send(
                 &st.nats,
                 m.rider_id,
@@ -852,9 +764,13 @@ async fn notify_status_change(
             )
             .await;
         }
-        "cancelled" => {
+        trip_status::CANCELLED => {
             // Whoever didn't cancel gets told; a driver-less trip only has a rider.
-            let recipient = if actor == m.rider_id { Some(driver_id) } else { Some(m.rider_id) };
+            let recipient = if actor == m.rider_id {
+                Some(driver_id)
+            } else {
+                Some(m.rider_id)
+            };
             if let Some(recipient) = recipient {
                 crate::notify::send(
                     &st.nats,
@@ -871,16 +787,18 @@ async fn notify_status_change(
     }
 }
 
-async fn get_trip(
+pub(super) async fn get_trip(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Value>> {
-    let mut trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1")))
-        .bind(id)
-        .fetch_optional(&st.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    let mut trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {TRIP_COLS} FROM trips WHERE id = $1"
+    )))
+    .bind(id)
+    .fetch_optional(&st.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
     if trip.pricing_mode == "bid"
         && let Ok(vclass) = pricing::parse_vehicle_class(&trip.vehicle_class)
     {
@@ -892,14 +810,15 @@ async fn get_trip(
     let authorized = trip.rider_id == claims.sub
         || trip.driver_id == Some(claims.sub)
         || claims.is_staff()
-        || (trip.trip_type == "delivery" && owns_delivery_merchant(&st, id, claims.sub).await?);
+        || (trip.trip_type == trip_type::DELIVERY
+            && owns_delivery_merchant(&st, id, claims.sub).await?);
     if !authorized {
         return Err(AppError::Forbidden);
     }
     // Only relevant once completed (rating happens post-trip) — skip the
     // extra query on the hot path this endpoint is on while a trip is
     // still active (polled every few seconds by the tracking screen).
-    let rated = if trip.status == "completed" {
+    let rated = if trip.status == trip_status::COMPLETED {
         sqlx::query_scalar::<_, Option<Uuid>>(
             "SELECT trip_id FROM ratings WHERE trip_id = $1 AND rater_id = $2",
         )
@@ -965,7 +884,7 @@ struct MerchantParticipant {
 }
 
 #[derive(Serialize)]
-struct Participants {
+pub(super) struct Participants {
     rider: Person,
     driver: Option<DriverParticipant>,
     /// Set only for a `trip_type = 'delivery'` trip — the merchant the
@@ -984,20 +903,23 @@ struct Participants {
 /// Authz mirrors `get_trip` exactly (rider, driver, staff, or — for a
 /// delivery trip — the fulfilling merchant) — this is the same trip, just a
 /// different projection of it.
-async fn get_participants(
+pub(super) async fn get_participants(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<Participants>> {
-    let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {TRIP_COLS} FROM trips WHERE id = $1")))
-        .bind(id)
-        .fetch_optional(&st.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
+    let trip: Trip = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {TRIP_COLS} FROM trips WHERE id = $1"
+    )))
+    .bind(id)
+    .fetch_optional(&st.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
     let authorized = trip.rider_id == claims.sub
         || trip.driver_id == Some(claims.sub)
         || claims.is_staff()
-        || (trip.trip_type == "delivery" && owns_delivery_merchant(&st, id, claims.sub).await?);
+        || (trip.trip_type == trip_type::DELIVERY
+            && owns_delivery_merchant(&st, id, claims.sub).await?);
     if !authorized {
         return Err(AppError::Forbidden);
     }
@@ -1006,7 +928,7 @@ async fn get_participants(
     // for a still-pending or already-finished trip.
     let phone_visible = matches!(
         trip.status.as_str(),
-        "accepted" | "arriving" | "in_progress"
+        trip_status::ACCEPTED | trip_status::ARRIVING | trip_status::IN_PROGRESS
     );
 
     let rider_row: Option<(Option<String>, Option<String>)> =
@@ -1045,15 +967,21 @@ async fn get_participants(
         .await?;
 
         // `(class, make, model, plate_number, color)`, in `SELECT` order below.
-        type VehicleRow = (String, Option<String>, Option<String>, String, Option<String>);
+        type VehicleRow = (
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            Option<String>,
+        );
         let vehicle: Option<VehicleRow> = sqlx::query_as(
-                "SELECT v.class::text, v.make, v.model, v.plate_number, v.color \
+            "SELECT v.class::text, v.make, v.model, v.plate_number, v.color \
                  FROM vehicles v JOIN drivers d ON d.id = v.driver_id \
                  WHERE d.user_id = $1",
-            )
-            .bind(driver_user_id)
-            .fetch_optional(&st.db)
-            .await?;
+        )
+        .bind(driver_user_id)
+        .fetch_optional(&st.db)
+        .await?;
 
         let partner_name: Option<String> = sqlx::query_scalar(
             "SELECT p.name FROM partner_drivers pd JOIN partners p ON p.id = pd.partner_id \
@@ -1094,7 +1022,7 @@ async fn get_participants(
     // Postgres instance) — same established convention as the rating-status
     // lookups above and `merchant::my_orders`'s own reverse read against
     // this service's `ratings` table.
-    let merchant: Option<MerchantParticipant> = if trip.trip_type == "delivery" {
+    let merchant: Option<MerchantParticipant> = if trip.trip_type == trip_type::DELIVERY {
         sqlx::query_as(
             "SELECT m.name, m.address, m.phone FROM orders o \
              JOIN merchants m ON m.id = o.merchant_id WHERE o.trip_id = $1",
@@ -1106,7 +1034,11 @@ async fn get_participants(
         None
     };
 
-    Ok(Json(Participants { rider, driver, merchant }))
+    Ok(Json(Participants {
+        rider,
+        driver,
+        merchant,
+    }))
 }
 
 /// Offset pagination for a list endpoint — `limit` capped well below what a
@@ -1116,7 +1048,7 @@ async fn get_participants(
 /// each service already has its own small copy of this class of helper
 /// rather than a new cross-service dependency for a few lines.
 #[derive(Deserialize)]
-struct PageQuery {
+pub(super) struct PageQuery {
     #[serde(default)]
     limit: Option<i64>,
     #[serde(default)]
@@ -1132,7 +1064,7 @@ impl PageQuery {
     }
 }
 
-async fn list_mine(
+pub(super) async fn list_mine(
     State(st): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(page): Query<PageQuery>,
@@ -1169,199 +1101,4 @@ async fn list_mine(
         })
         .collect();
     Ok(Json(out))
-}
-
-/// Self-service mirror of the staff-only `rider_detail` aggregate
-/// (`insights.rs`) — same shape, gated to the caller's own id instead of a
-/// staff-picked `Path(id)`, and without the account-metadata/recent-trips
-/// fields that only make sense in a staff detail view (the Activity tab
-/// already covers "my recent trips").
-async fn my_stats(
-    State(st): State<AppState>,
-    AuthUser(claims): AuthUser,
-) -> AppResult<Json<Value>> {
-    let (total_rides, completed_rides, cancelled_rides, total_spend, total_distance_km): (
-        i64,
-        i64,
-        i64,
-        Decimal,
-        Decimal,
-    ) = sqlx::query_as(
-        "SELECT count(*), \
-                count(*) FILTER (WHERE status = 'completed'), \
-                count(*) FILTER (WHERE status = 'cancelled'), \
-                COALESCE(SUM(final_fare) FILTER (WHERE status = 'completed'), 0), \
-                COALESCE(SUM(distance_km) FILTER (WHERE status = 'completed'), 0) \
-         FROM trips WHERE rider_id = $1",
-    )
-    .bind(claims.sub)
-    .fetch_one(&st.db)
-    .await?;
-
-    // The rating the rider has *received* from drivers, not given.
-    let (avg_rating, rating_count): (Option<f64>, i64) = sqlx::query_as(
-        "SELECT AVG(stars)::float8, count(*) FROM ratings \
-         WHERE ratee_id = $1 AND role = 'driver_rates_rider'",
-    )
-    .bind(claims.sub)
-    .fetch_one(&st.db)
-    .await?;
-
-    Ok(Json(json!({
-        "total_rides": total_rides,
-        "completed_rides": completed_rides,
-        "cancelled_rides": cancelled_rides,
-        "total_spend": total_spend,
-        "total_distance_km": total_distance_km,
-        "avg_rating": avg_rating,
-        "rating_count": rating_count,
-    })))
-}
-
-#[derive(sqlx::FromRow)]
-struct DriverGoalCampaign {
-    id: Uuid,
-    title: String,
-    kind: String,
-    value: Decimal,
-    rules: sqlx::types::Json<Vec<crate::rules::CampaignRule>>,
-}
-
-/// A driver's progress today toward any live "complete N rides today"
-/// campaign — the app-facing counterpart to the automatic bonus payout in
-/// `bonus.rs`. Purely informational; the bonus itself is still granted at
-/// trip-completion time, not by this endpoint.
-async fn driver_today(
-    State(st): State<AppState>,
-    AuthUser(claims): AuthUser,
-) -> AppResult<Json<Value>> {
-    let rides_today = crate::rules::rides_today(&st.db, claims.sub, "driver").await;
-
-    let candidates: Vec<DriverGoalCampaign> = sqlx::query_as(
-        "SELECT id, title, kind::text, value, rules FROM campaigns \
-         WHERE audience = 'driver' AND active = true \
-           AND (starts_at IS NULL OR starts_at <= now()) \
-           AND (ends_at IS NULL OR ends_at >= now())",
-    )
-    .fetch_all(&st.db)
-    .await?;
-
-    let goals: Vec<Value> = candidates
-        .into_iter()
-        .filter_map(|c| {
-            let target = c.rules.0.iter().find_map(|r| match r {
-                crate::rules::CampaignRule::RidesToday { count } => Some(*count),
-                _ => None,
-            })?;
-            Some(json!({
-                "campaign_id": c.id,
-                "title": c.title,
-                "target": target,
-                "reward_kind": c.kind,
-                "reward_value": c.value,
-                "achieved": rides_today >= target,
-            }))
-        })
-        .collect();
-
-    Ok(Json(json!({
-        "rides_today": rides_today,
-        "goals": goals,
-    })))
-}
-
-#[derive(Deserialize)]
-struct EarningsQuery {
-    #[serde(default)]
-    period: Option<String>,
-}
-
-#[derive(Serialize, sqlx::FromRow)]
-struct EarningsBucket {
-    #[sqlx(rename = "bucket")]
-    start: chrono::NaiveDate,
-    total: Decimal,
-    trips: i64,
-}
-
-/// A driver's own earnings (`ledger_entries.driver_payout`), bucketed by
-/// Nepal-local day/week/month and gap-filled (a bucket with no trips still
-/// appears with `total: 0`, not missing) — same `generate_series` LEFT JOIN
-/// shape `metrics.rs`'s admin timeseries endpoint uses, but bucketed on NPT
-/// local date (`rules.rs::rides_today`'s pattern) rather than raw UTC,
-/// since this is a driver-facing "today/this week" figure. The client
-/// derives the trend indicator from the last two buckets itself — no
-/// separate current-vs-previous computation needed here.
-async fn driver_earnings(
-    State(st): State<AppState>,
-    AuthUser(claims): AuthUser,
-    Query(q): Query<EarningsQuery>,
-) -> AppResult<Json<Value>> {
-    let period = q.period.as_deref().unwrap_or("day");
-    let sql = match period {
-        "week" => {
-            "SELECT d::date AS bucket, \
-                    COALESCE(SUM(le.driver_payout) FILTER ( \
-                        WHERE date_trunc('week', le.created_at AT TIME ZONE 'Asia/Kathmandu')::date = d::date \
-                    ), 0) AS total, \
-                    COUNT(le.seq) FILTER ( \
-                        WHERE date_trunc('week', le.created_at AT TIME ZONE 'Asia/Kathmandu')::date = d::date \
-                    ) AS trips \
-             FROM generate_series( \
-                    date_trunc('week', (now() AT TIME ZONE 'Asia/Kathmandu'))::date - interval '7 weeks', \
-                    date_trunc('week', (now() AT TIME ZONE 'Asia/Kathmandu'))::date, \
-                    interval '1 week') d \
-             LEFT JOIN ledger_entries le \
-               ON le.driver_id = $1 \
-              AND date_trunc('week', le.created_at AT TIME ZONE 'Asia/Kathmandu')::date \
-                    >= date_trunc('week', (now() AT TIME ZONE 'Asia/Kathmandu'))::date - interval '7 weeks' \
-             GROUP BY d ORDER BY d"
-        }
-        "month" => {
-            "SELECT d::date AS bucket, \
-                    COALESCE(SUM(le.driver_payout) FILTER ( \
-                        WHERE date_trunc('month', le.created_at AT TIME ZONE 'Asia/Kathmandu')::date = d::date \
-                    ), 0) AS total, \
-                    COUNT(le.seq) FILTER ( \
-                        WHERE date_trunc('month', le.created_at AT TIME ZONE 'Asia/Kathmandu')::date = d::date \
-                    ) AS trips \
-             FROM generate_series( \
-                    date_trunc('month', (now() AT TIME ZONE 'Asia/Kathmandu'))::date - interval '5 months', \
-                    date_trunc('month', (now() AT TIME ZONE 'Asia/Kathmandu'))::date, \
-                    interval '1 month') d \
-             LEFT JOIN ledger_entries le \
-               ON le.driver_id = $1 \
-              AND date_trunc('month', le.created_at AT TIME ZONE 'Asia/Kathmandu')::date \
-                    >= date_trunc('month', (now() AT TIME ZONE 'Asia/Kathmandu'))::date - interval '5 months' \
-             GROUP BY d ORDER BY d"
-        }
-        _ => {
-            "SELECT d::date AS bucket, \
-                    COALESCE(SUM(le.driver_payout) FILTER ( \
-                        WHERE (le.created_at AT TIME ZONE 'Asia/Kathmandu')::date = d::date \
-                    ), 0) AS total, \
-                    COUNT(le.seq) FILTER ( \
-                        WHERE (le.created_at AT TIME ZONE 'Asia/Kathmandu')::date = d::date \
-                    ) AS trips \
-             FROM generate_series( \
-                    (now() AT TIME ZONE 'Asia/Kathmandu')::date - interval '6 days', \
-                    (now() AT TIME ZONE 'Asia/Kathmandu')::date, \
-                    interval '1 day') d \
-             LEFT JOIN ledger_entries le \
-               ON le.driver_id = $1 \
-              AND (le.created_at AT TIME ZONE 'Asia/Kathmandu')::date \
-                    >= (now() AT TIME ZONE 'Asia/Kathmandu')::date - interval '6 days' \
-             GROUP BY d ORDER BY d"
-        }
-    };
-
-    let buckets: Vec<EarningsBucket> = sqlx::query_as(sql)
-        .bind(claims.sub)
-        .fetch_all(&st.db)
-        .await?;
-
-    Ok(Json(json!({
-        "period": period,
-        "buckets": buckets,
-    })))
 }

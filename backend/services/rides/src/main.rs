@@ -13,11 +13,7 @@ use saarathi_rides::{bootstrap, dispatch, routes, user_status_sub};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    saarathi_core::bootstrap::init_tracing();
 
     let config = Config::from_env()?;
     let port = config.port;

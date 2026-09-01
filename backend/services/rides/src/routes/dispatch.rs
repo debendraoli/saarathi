@@ -3,19 +3,19 @@
 use crate::auth::{AuthUser, StaffUser};
 use crate::dispatch;
 use crate::error::{AppError, AppResult};
-use crate::models::{Trip, TRIP_COLS};
+use crate::models::{TRIP_COLS, Trip};
 use crate::pricing;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use chrono::{DateTime, Utc};
 use saarathi_core::api::ErrorCode;
-use saarathi_core::domain::roles;
+use saarathi_core::domain::{roles, trip_status, trip_type};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
@@ -61,7 +61,7 @@ pub(crate) async fn do_go_online(
         return Err(AppError::Forbidden);
     }
     let job_types = if body.job_types.is_empty() {
-        vec!["ride".to_string()]
+        vec![trip_type::RIDE.to_string()]
     } else {
         body.job_types
     };
@@ -108,7 +108,7 @@ pub(crate) async fn do_heartbeat(
         return Err(AppError::Forbidden);
     }
     let job_types = if body.job_types.is_empty() {
-        vec!["ride".to_string()]
+        vec![trip_type::RIDE.to_string()]
     } else {
         body.job_types
     };
@@ -382,7 +382,8 @@ async fn accept_offer(
     st.hub.publish(
         "trip",
         id,
-        json!({ "type": "status", "status": "accepted", "driver_id": claims.sub }).to_string(),
+        json!({ "type": "status", "status": trip_status::ACCEPTED, "driver_id": claims.sub })
+            .to_string(),
     );
     crate::notify::send(
         &st.nats,
@@ -448,7 +449,7 @@ async fn ops_assign(
     st.hub.publish(
         "trip",
         id,
-        json!({ "type": "status", "status": "accepted", "driver_id": body.driver_id, "by": "ops" })
+        json!({ "type": "status", "status": trip_status::ACCEPTED, "driver_id": body.driver_id, "by": "ops" })
             .to_string(),
     );
     Ok(Json(trip))

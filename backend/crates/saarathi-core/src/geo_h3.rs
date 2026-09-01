@@ -88,7 +88,10 @@ mod tests {
         assert!(!cells.is_empty());
 
         let interior = cell_for(28.035, 82.485).unwrap();
-        assert!(cells.contains(&interior), "interior point should be covered");
+        assert!(
+            cells.contains(&interior),
+            "interior point should be covered"
+        );
 
         let far_away = cell_for(28.5, 83.0).unwrap(); // ~50km away
         assert!(

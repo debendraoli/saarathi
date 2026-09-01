@@ -14,14 +14,12 @@ use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use saarathi_core::authn::{AuthUser, HasJwtSecret};
 use saarathi_core::domain::notif;
-use saarathi_core::events::{NotifyRequest, NOTIFY_SUBJECT};
+use saarathi_core::events::{NOTIFY_SUBJECT, NotifyRequest};
 use saarathi_core::hub::Hub;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use sqlx::postgres::PgPoolOptions;
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use std::sync::Arc;
-use std::time::Duration;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use uuid::Uuid;
 
@@ -42,33 +40,18 @@ impl HasJwtSecret for AppState {
     }
 }
 
-fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key)
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| default.into())
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    saarathi_core::bootstrap::init_tracing();
 
     let database_url = std::env::var("DATABASE_URL")?;
     let jwt_secret = std::env::var("JWT_SECRET")?;
-    let nats_url = env_or("NATS_URL", "nats://localhost:4222");
-    let redis_url = env_or("REDIS_URL", "redis://localhost:6379");
-    let port: u16 = env_or("NOTIFY_PORT", "8083").parse()?;
+    let nats_url = saarathi_core::bootstrap::env_or("NATS_URL", "nats://localhost:4222");
+    let redis_url = saarathi_core::bootstrap::env_or("REDIS_URL", "redis://localhost:6379");
+    let port: u16 = saarathi_core::bootstrap::env_or("NOTIFY_PORT", "8083").parse()?;
 
-    let pool = PgPoolOptions::new()
-        .max_connections(10)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect(&database_url)
-        .await?;
+    let pool = saarathi_core::bootstrap::connect_pg(&database_url).await?;
     sqlx::raw_sql(include_str!("schema.sql"))
         .execute(&pool)
         .await?;
@@ -126,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
         hub,
     };
     let app = Router::new()
-        .route("/health", get(health))
+        .merge(saarathi_core::bootstrap::health_router("saarathi-notify"))
         .route("/v1/notifications", get(inbox))
         .route("/v1/notifications/{id}/read", post(mark_read))
         .route("/v1/notifications/read-all", post(read_all))
@@ -161,8 +144,15 @@ async fn consume(
     while let Some(msg) = sub.next().await {
         match serde_json::from_slice::<NotifyRequest>(&msg.payload) {
             Ok(req) => {
-                if let Err(e) =
-                    deliver(&pool, &req, fcm.as_deref(), sms.as_deref(), redis.clone(), &hub).await
+                if let Err(e) = deliver(
+                    &pool,
+                    &req,
+                    fcm.as_deref(),
+                    sms.as_deref(),
+                    redis.clone(),
+                    &hub,
+                )
+                .await
                 {
                     tracing::warn!(error = %e, "notify: delivery failed");
                 }
@@ -238,7 +228,9 @@ async fn deliver(
         return Ok(());
     }
 
-    let online = if req.silent { false } else {
+    let online = if req.silent {
+        false
+    } else {
         match redis.as_mut() {
             Some(conn) => saarathi_core::presence::is_online(conn, req.user_id).await,
             None => false,
@@ -260,19 +252,26 @@ async fn deliver(
                 .fetch_all(pool)
                 .await
                 .unwrap_or_default();
-        for (token,) in tokens {
-            // Silent = a device-to-device signal (e.g. forced sign-out), not
-            // user-facing content — send it as a bare data message so it
-            // never surfaces a tray notification.
-            let result = if req.silent {
-                sender
-                    .send_data(&token, req.data.as_ref().unwrap_or(&Value::Null))
-                    .await
-            } else {
-                sender
-                    .send(&token, &req.title, &req.body, req.link.as_deref())
-                    .await
-            };
+        // One round trip to FCM per device, run concurrently rather than
+        // awaited one at a time — matters for multi-device users.
+        let results =
+            futures_util::future::join_all(tokens.into_iter().map(|(token,)| async move {
+                // Silent = a device-to-device signal (e.g. forced sign-out), not
+                // user-facing content — send it as a bare data message so it
+                // never surfaces a tray notification.
+                let result = if req.silent {
+                    sender
+                        .send_data(&token, req.data.as_ref().unwrap_or(&Value::Null))
+                        .await
+                } else {
+                    sender
+                        .send(&token, &req.title, &req.body, req.link.as_deref())
+                        .await
+                };
+                (token, result)
+            }))
+            .await;
+        for (token, result) in results {
             match result {
                 Ok(()) => any_push_sent = true,
                 Err(fcm::SendError::StaleToken) => {
@@ -297,23 +296,26 @@ async fn deliver(
     // facing content to send, and a device-to-device signal that can't
     // reach the device isn't something to text about.
     if should_escalate_to_sms(req.silent, &req.class, any_push_sent || online)
-        && let Some(sender) = sms {
-            let phone: Option<String> =
-                sqlx::query_scalar("SELECT phone FROM users WHERE id = $1")
-                    .bind(req.user_id)
-                    .fetch_optional(pool)
-                    .await
-                    .ok()
-                    .flatten();
-            if let Some(phone) = phone {
-                match sender.send(&phone, &req.title, &req.body).await { Err(e) => {
+        && let Some(sender) = sms
+    {
+        let phone: Option<String> = sqlx::query_scalar("SELECT phone FROM users WHERE id = $1")
+            .bind(req.user_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+        if let Some(phone) = phone {
+            match sender.send(&phone, &req.title, &req.body).await {
+                Err(e) => {
                     tracing::warn!(error = %e, "notify: SMS fallback failed");
-                } _ => {
+                }
+                _ => {
                     tracing::info!(user_id = %req.user_id, class = %req.class,
                         "notify: critical notification escalated to SMS (push unreachable)");
-                }}
+                }
             }
         }
+    }
     Ok(())
 }
 
@@ -360,10 +362,6 @@ mod sms_escalation_tests {
     }
 }
 
-async fn health() -> Json<Value> {
-    Json(json!({ "service": "saarathi-notify", "status": "ok" }))
-}
-
 #[derive(Serialize, sqlx::FromRow)]
 struct Notification {
     id: Uuid,
@@ -406,12 +404,13 @@ async fn inbox(
     // current page would undercount once there's more than one page of
     // notifications, silently shrinking the bell badge as older unread
     // notifications scroll out of the first page's window.
-    let unread: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM notifications WHERE user_id = $1 AND read_at IS NULL")
-            .bind(claims.sub)
-            .fetch_one(&st.db)
-            .await
-            .map_err(internal)?;
+    let unread: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM notifications WHERE user_id = $1 AND read_at IS NULL",
+    )
+    .bind(claims.sub)
+    .fetch_one(&st.db)
+    .await
+    .map_err(internal)?;
     Ok(Json(json!({ "unread": unread, "items": items })))
 }
 

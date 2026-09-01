@@ -10,38 +10,22 @@ mod error;
 mod routes;
 mod state;
 
-use axum::{routing::get, Json, Router};
-use sqlx::postgres::PgPoolOptions;
+use axum::Router;
+use saarathi_core::bootstrap::{connect_pg, env_or, health_router, init_tracing};
 use state::AppState;
 use std::sync::Arc;
-use std::time::Duration;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
-
-fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key)
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| default.into())
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    init_tracing();
 
     let database_url = std::env::var("DATABASE_URL")?;
     let jwt_secret = std::env::var("JWT_SECRET")?;
     let port: u16 = env_or("CAMPAIGNS_PORT", "8086").parse()?;
 
-    let db = PgPoolOptions::new()
-        .max_connections(10)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect(&database_url)
-        .await?;
+    let db = connect_pg(&database_url).await?;
 
     let state = AppState {
         db,
@@ -49,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = Router::new()
-        .route("/health", get(health))
+        .merge(health_router("saarathi-campaigns"))
         .merge(routes::routes())
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
@@ -60,8 +44,4 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("saarathi-campaigns listening on http://{addr}");
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "service": "saarathi-campaigns", "status": "ok" }))
 }

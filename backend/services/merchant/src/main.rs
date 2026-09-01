@@ -14,11 +14,11 @@ mod routes;
 mod state;
 mod store;
 
-use axum::{routing::get, Json, Router};
+use axum::Router;
 use config::Config;
 use rust_decimal::prelude::*;
+use saarathi_core::bootstrap::{connect_pg, health_router, init_tracing};
 use saarathi_core::routing::RoutingClient;
-use sqlx::postgres::PgPoolOptions;
 use state::AppState;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,21 +28,15 @@ use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    init_tracing();
 
     let config = Config::from_env()?;
     store::ensure_dir(&config.merchant_storage_dir)?;
 
-    let db = PgPoolOptions::new()
-        .max_connections(10)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect(&config.database_url)
+    let db = connect_pg(&config.database_url).await?;
+    sqlx::raw_sql(include_str!("schema.sql"))
+        .execute(&db)
         .await?;
-    sqlx::raw_sql(include_str!("schema.sql")).execute(&db).await?;
 
     let redis_client = redis::Client::open(config.redis_url.clone())?;
     let redis = redis::aio::ConnectionManager::new(redis_client).await?;
@@ -78,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = Router::new()
-        .route("/health", get(health))
+        .merge(health_router::<AppState>("saarathi-merchant"))
         .merge(routes::router())
         .layer(CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http())
@@ -89,8 +83,4 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("saarathi-merchant listening on http://{addr}");
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "service": "saarathi-merchant", "status": "ok" }))
 }

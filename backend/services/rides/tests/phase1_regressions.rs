@@ -18,11 +18,11 @@
 //! reliably hits "deadlock detected" here), so these must run serially.
 
 use chrono::Utc;
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use rust_decimal_macros::dec;
 use saarathi_rides::{bootstrap, config::Config, routes, state::AppState};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::Row;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -62,9 +62,7 @@ async fn spawn_app() -> (SocketAddr, AppState) {
     config.port = 0;
     let state = bootstrap(config).await.expect("bootstrap AppState");
     let app = routes::router(state.clone());
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -125,14 +123,21 @@ async fn idempotency_key_replays_same_trip_not_a_duplicate() {
         .json()
         .await
         .unwrap();
-    assert_eq!(replay["id"].as_str().unwrap(), trip_id, "replay must return the same trip, not a new one");
+    assert_eq!(
+        replay["id"].as_str().unwrap(),
+        trip_id,
+        "replay must return the same trip, not a new one"
+    );
 
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM trips WHERE id = $1")
         .bind(Uuid::parse_str(&trip_id).unwrap())
         .fetch_one(&state.db)
         .await
         .unwrap();
-    assert_eq!(count, 1, "exactly one trip row must exist for this booking attempt");
+    assert_eq!(
+        count, 1,
+        "exactly one trip row must exist for this booking attempt"
+    );
 
     sqlx::query("DELETE FROM trips WHERE id = $1")
         .bind(Uuid::parse_str(&trip_id).unwrap())
@@ -156,13 +161,11 @@ async fn concurrent_accept_offer_enforces_one_active_trip_per_driver() {
     let driver = Uuid::new_v4();
     let jwt = token(&state.config.jwt_secret, driver, "driver");
 
-    sqlx::query(
-        "INSERT INTO credit_accounts (user_id, kind, balance) VALUES ($1, 'driver', 100)",
-    )
-    .bind(driver)
-    .execute(&state.db)
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO credit_accounts (user_id, kind, balance) VALUES ($1, 'driver', 100)")
+        .bind(driver)
+        .execute(&state.db)
+        .await
+        .unwrap();
 
     let mut trip_ids = Vec::new();
     for _ in 0..2 {
@@ -202,9 +205,15 @@ async fn concurrent_accept_offer_enforces_one_active_trip_per_driver() {
     );
     let statuses = [r1.unwrap().status(), r2.unwrap().status()];
     let successes = statuses.iter().filter(|s| s.is_success()).count();
-    assert_eq!(successes, 1, "exactly one of the two concurrent accepts must win: {statuses:?}");
+    assert_eq!(
+        successes, 1,
+        "exactly one of the two concurrent accepts must win: {statuses:?}"
+    );
     let conflicts = statuses.iter().filter(|s| s.as_u16() == 409).count();
-    assert_eq!(conflicts, 1, "the loser must see a 409 conflict, not a 5xx: {statuses:?}");
+    assert_eq!(
+        conflicts, 1,
+        "the loser must see a 409 conflict, not a 5xx: {statuses:?}"
+    );
 
     let active: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM trips WHERE driver_id = $1 AND status IN ('accepted','arriving','in_progress')",
@@ -251,9 +260,14 @@ async fn concurrent_partner_ledger_debit_rejects_overdraft() {
 
     let debit = |pool: sqlx::PgPool| async move {
         let mut tx = pool.begin().await.unwrap();
-        let res =
-            saarathi_core::partner_ledger::append(&mut tx, partner_id, None, "ride_charge", -dec!(80))
-                .await;
+        let res = saarathi_core::partner_ledger::append(
+            &mut tx,
+            partner_id,
+            None,
+            "ride_charge",
+            -dec!(80),
+        )
+        .await;
         if res.is_ok() {
             tx.commit().await.unwrap();
         }
@@ -261,7 +275,10 @@ async fn concurrent_partner_ledger_debit_rejects_overdraft() {
     };
     let (r1, r2) = tokio::join!(debit(pool.clone()), debit(pool.clone()));
     let successes = [r1.is_ok(), r2.is_ok()].iter().filter(|x| **x).count();
-    assert_eq!(successes, 1, "only one of the two 80-unit debits against a 100-unit balance may succeed");
+    assert_eq!(
+        successes, 1,
+        "only one of the two 80-unit debits against a 100-unit balance may succeed"
+    );
 
     let balance: rust_decimal::Decimal =
         sqlx::query_scalar("SELECT balance FROM partner_wallets WHERE partner_id = $1")
@@ -269,7 +286,10 @@ async fn concurrent_partner_ledger_debit_rejects_overdraft() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert!(balance >= rust_decimal::Decimal::ZERO, "balance must never go negative, got {balance}");
+    assert!(
+        balance >= rust_decimal::Decimal::ZERO,
+        "balance must never go negative, got {balance}"
+    );
 
     sqlx::query("DELETE FROM partner_wallets WHERE partner_id = $1")
         .bind(partner_id)

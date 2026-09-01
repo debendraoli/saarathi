@@ -6,11 +6,11 @@
 use crate::auth::AuthUser;
 use crate::state::AppState;
 use axum::extract::State;
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use base64::Engine;
 use chrono::Utc;
 use hmac::{Hmac, KeyInit, Mac};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha1::Sha1;
 
 type HmacSha1 = Hmac<Sha1>;

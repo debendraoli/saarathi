@@ -10,13 +10,13 @@
 //! `state.config.jwt_secret`, `Arc<String>` vs `String`).
 
 use crate::api::ErrorCode;
+use axum::Json;
 use axum::extract::FromRequestParts;
+use axum::http::StatusCode;
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
@@ -69,9 +69,11 @@ pub enum AuthError {
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
-            AuthError::Unauthorized => {
-                (StatusCode::UNAUTHORIZED, ErrorCode::Unauthorized, "unauthorized")
-            }
+            AuthError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                ErrorCode::Unauthorized,
+                "unauthorized",
+            ),
             AuthError::Forbidden => (StatusCode::FORBIDDEN, ErrorCode::Forbidden, "forbidden"),
         };
         (
@@ -160,7 +162,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonwebtoken::{encode, EncodingKey, Header};
+    use jsonwebtoken::{EncodingKey, Header, encode};
 
     fn token_for(secret: &str, role: &str) -> String {
         let now = chrono::Utc::now().timestamp();
@@ -170,7 +172,12 @@ mod tests {
             iat: now,
             exp: now + 900,
         };
-        encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes())).unwrap()
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
     }
 
     #[test]

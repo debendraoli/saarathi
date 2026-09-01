@@ -11,7 +11,7 @@ use crate::auth::AuthUser;
 use crate::error::AppResult;
 use crate::state::AppState;
 use axum::extract::{Query, State};
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

@@ -8,15 +8,15 @@ use crate::points;
 use crate::state::AppState;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use saarathi_core::api::ErrorCode;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 pub fn routes() -> Router<AppState> {
@@ -78,12 +78,13 @@ async fn detail(
     StaffUser(_claims): StaffUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<AdminContribution>> {
-    let row: AdminContribution =
-        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {ADMIN_COLS} FROM place_contributions WHERE id = $1")))
-            .bind(id)
-            .fetch_optional(&st.db)
-            .await?
-            .ok_or(AppError::NotFound)?;
+    let row: AdminContribution = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {ADMIN_COLS} FROM place_contributions WHERE id = $1"
+    )))
+    .bind(id)
+    .fetch_optional(&st.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
     Ok(Json(row))
 }
 
@@ -100,7 +101,10 @@ async fn photo(
     let key = key.ok_or(AppError::NotFound)?;
     let bytes = st.docs.get(&key).await.map_err(AppError::Other)?;
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, "application/octet-stream".parse().unwrap());
+    headers.insert(
+        header::CONTENT_TYPE,
+        "application/octet-stream".parse().unwrap(),
+    );
     Ok((StatusCode::OK, headers, Bytes::from(bytes)))
 }
 
@@ -136,13 +140,11 @@ async fn approve(
     };
 
     let award = points::points_for(&category);
-    sqlx::query(
-        "UPDATE place_contributions SET points_awarded = $2 WHERE id = $1",
-    )
-    .bind(id)
-    .bind(award)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("UPDATE place_contributions SET points_awarded = $2 WHERE id = $1")
+        .bind(id)
+        .bind(award)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query(
         "INSERT INTO points_ledger (user_id, contribution_id, points, kind) \
          VALUES ($1, $2, $3, 'earned')",
@@ -165,8 +167,15 @@ async fn approve(
     // alerts) become findable via search/reverse-geocode immediately —
     // same best-effort convention as the badge check above.
     if points::is_navigable(&category) {
-        saarathi_core::pelias_index::index_place(&st.config.pelias_es_url, id, &category, &name, lat, lng)
-            .await;
+        saarathi_core::pelias_index::index_place(
+            &st.config.pelias_es_url,
+            id,
+            &category,
+            &name,
+            lat,
+            lng,
+        )
+        .await;
     }
 
     crate::notify::send(
@@ -190,7 +199,9 @@ async fn approve(
         .await;
     }
 
-    Ok(Json(json!({ "ok": true, "status": "approved", "points_awarded": award })))
+    Ok(Json(
+        json!({ "ok": true, "status": "approved", "points_awarded": award }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -205,7 +216,9 @@ async fn reject(
     Json(body): Json<RejectInput>,
 ) -> AppResult<Json<Value>> {
     if body.reason.trim().is_empty() {
-        return Err(AppError::BadRequest("a rejection reason is required".into()));
+        return Err(AppError::BadRequest(
+            "a rejection reason is required".into(),
+        ));
     }
     let row: Option<(Uuid,)> = sqlx::query_as(
         "UPDATE place_contributions SET status = 'rejected', reviewed_by = $2, reviewed_at = now(), \

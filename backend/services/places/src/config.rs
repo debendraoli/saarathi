@@ -26,7 +26,8 @@ impl Config {
                 .parse()
                 .context("PLACES_PORT")?,
             jwt_secret: req("JWT_SECRET")?,
-            places_storage_dir: opt("PLACES_STORAGE_DIR").unwrap_or_else(|| "./.data/places".into()),
+            places_storage_dir: opt("PLACES_STORAGE_DIR")
+                .unwrap_or_else(|| "./.data/places".into()),
             nats_url: opt("NATS_URL").unwrap_or_else(|| "nats://localhost:4222".into()),
             pelias_es_url: opt("PELIAS_ES_URL")
                 .unwrap_or_else(|| "http://pelias-opensearch:9200".into()),

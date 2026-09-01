@@ -1,9 +1,9 @@
 //! One-time password generation, hashing, and verification.
 
-use argon2::password_hash::{rand_core::OsRng, PasswordHash, SaltString};
+use argon2::password_hash::{PasswordHash, SaltString, rand_core::OsRng};
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
-use rand::rand_core::UnwrapErr;
 use rand::RngExt;
+use rand::rand_core::UnwrapErr;
 
 /// A fresh 6-digit numeric code (zero-padded).
 pub fn generate_code() -> String {

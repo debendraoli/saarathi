@@ -8,8 +8,8 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::{
-    routing::{get, post},
     Json, Router,
+    routing::{get, post},
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -73,7 +73,12 @@ struct NewCampaign {
 
 /// Field-level validation for a new campaign, checked before it ever reaches
 /// the DB. Pulled out of the handler so it's testable without an `AppState`.
-fn validate_new_campaign(audience: &str, kind: &str, code: &str, value: Decimal) -> Result<(), String> {
+fn validate_new_campaign(
+    audience: &str,
+    kind: &str,
+    code: &str,
+    value: Decimal,
+) -> Result<(), String> {
     if !matches!(audience, roles::RIDER | roles::DRIVER) {
         return Err("audience must be 'rider' or 'driver'".into());
     }

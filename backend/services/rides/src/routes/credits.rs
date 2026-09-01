@@ -14,13 +14,13 @@ use crate::payments;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::http::HeaderMap;
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use rust_decimal::Decimal;
 use saarathi_core::api::ErrorCode;
 use saarathi_core::domain::roles;
 use saarathi_core::idempotency::{self, Reservation};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -47,17 +47,12 @@ async fn topup(
     if claims.role != roles::DRIVER {
         return Err(AppError::Forbidden);
     }
-    let key = headers
-        .get("x-idempotency-key")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            AppError::bad(
-                ErrorCode::Validation,
-                "X-Idempotency-Key header is required",
-            )
-        })?
-        .to_string();
+    let key = saarathi_core::idempotency::key_from_headers(&headers).ok_or_else(|| {
+        AppError::bad(
+            ErrorCode::Validation,
+            "X-Idempotency-Key header is required",
+        )
+    })?;
     if body.amount <= Decimal::ZERO {
         return Err(AppError::bad(
             ErrorCode::AmountInvalid,
@@ -96,7 +91,15 @@ async fn topup(
         "amount": body.amount,
         "checkout_url": init.checkout_url,
     });
-    idempotency::store(&mut tx, &key, claims.sub, "driver.credits.topup", 200, &response).await?;
+    idempotency::store(
+        &mut tx,
+        &key,
+        claims.sub,
+        "driver.credits.topup",
+        200,
+        &response,
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(response))
 }
